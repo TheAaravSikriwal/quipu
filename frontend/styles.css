@@ -1,0 +1,770 @@
+/* QUIPU
+ *
+ * WHAT THIS IS   A research instrument for forming a view on one company,
+ *                well enough to take an options position on it.
+ * WHO FOR        One person, no position yet, ten to thirty minutes per
+ *                ticker, who will act on what they read.
+ *
+ * THE RULE FOR EVERY MARK ON THE SCREEN
+ *
+ * Monochrome. Colour was carrying no information here — it was decoration,
+ * and decoration in an instrument reads as noise. Everything below has one
+ * job, stated beside it. If a rule, weight or space cannot name its job, it
+ * is deleted.
+ *
+ * WHAT CARRIES MEANING NOW
+ *
+ *   line weight    evidence class. The more solid and heavy the rule above a
+ *                  panel, the more you can lean on what is inside it:
+ *                  FILED solid heavy, PRICED solid light, DERIVED dashed
+ *                  (computed, not observed), CLAIMED dotted (hearsay).
+ *
+ *   typeface       one face per job, three in total.
+ *                  Bodoni Moda — news headlines and the masthead, nothing
+ *                    else. A Didone is what a newspaper title is set in; it
+ *                    says "reportage" before you have read a word.
+ *                  IBM Plex Mono — every number, everywhere. Tabular figures
+ *                    align down a column; that is the whole point of them.
+ *                  Inter — labels, prose, interface. Legible at 10px and
+ *                    otherwise gets out of the way.
+ *
+ *   direction      filled triangle up, hollow triangle down — the old
+ *                  newspaper stock-table convention. Same ink, same weight,
+ *                  so it survives colour blindness and monochrome print.
+ *                  Colour never encodes direction, because there is none.
+ *
+ *   the 1px gap    the grid itself. Panels sit flush in one ruled table
+ *                  rather than floating as cards, because they are one
+ *                  document about one company, not 25 widgets.
+ *
+ * WHAT IS GONE, AND WHY
+ *   Rounded corners, drop shadows, glows, gradients, hover lift, four accent
+ *   hues. None of them told the reader anything.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600;6..96,700;6..96,900&family=GFS+Didot&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  --black:  #0A0A0B;   /* app ground, and the rules between panels */
+  --panel:  #121214;   /* the default panel */
+  --sunk:   #0D0D0F;   /* recessed — the least trustworthy class */
+  --raised: #17171A;   /* raised — the class you can lean on */
+
+  --text:   #F2F2F0;   /* 16.8:1 on panel */
+  --text2:  #A3A3A0;   /* 7.4:1 — secondary */
+  --faint:  #6E6E6C;   /* 3.6:1 — labels only, never data */
+  --rule:   #262629;
+  --rule2:  #3A3A3E;
+  --up:     #F2F2F0;   /* used inline where a claim is corroborated */
+
+  --mast:   "Bodoni Moda", Georgia, serif;
+  /* GFS Didot, from the Greek Font Society -- a Greek Didone that also cuts
+     Latin. Used for the name alone, nowhere else. */
+  --greek:  "GFS Didot", "Bodoni Moda", Georgia, serif;
+  --mono:   "IBM Plex Mono", Consolas, monospace;
+  --ui:     Inter, "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--black);
+  color: var(--text);
+  font: 13px/1.5 var(--ui);
+  height: 100vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ================= chrome ================= */
+
+.tabstrip {
+  display: flex; align-items: stretch; gap: 1px;
+  background: var(--rule); border-bottom: 1px solid var(--rule);
+  flex: 0 0 auto; -webkit-app-region: drag;
+}
+.tab {
+  border-radius: 13px 13px 0 0;
+  -webkit-app-region: no-drag;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; background: var(--black); color: var(--text2);
+  cursor: pointer; max-width: 300px; min-width: 150px;
+  font-size: 12.5px; user-select: none;
+}
+.tab.active { background: var(--panel); color: var(--text); }
+.tab:hover:not(.active) { color: var(--text); }
+.tab .sym { font-weight: 600; margin-right: auto; }
+.tab .px { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.tab .chg { font-family: var(--mono); font-size: 11.5px; }
+.tab .x { font-size: 15px; line-height: 1; color: var(--faint); }
+.tab .x:hover { color: var(--text); }
+.newtab {
+  -webkit-app-region: no-drag; background: var(--black); border: none;
+  color: var(--rule2); font-size: 18px; cursor: pointer; padding: 0 16px;
+  transition: color .12s ease;
+}
+.newtab:hover { color: var(--text); }
+
+.viewport { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; background: var(--black); }
+
+/* ================= launcher =================
+ * Three things on the page: the name, the field, and six tickers. Nothing
+ * here is outlined -- the field is a shape in the ground rather than a box
+ * drawn on it, which is the same reason the panels below have no borders
+ * either. */
+
+.launcher {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 34px;
+}
+/* Set in GFS Didot, a Greek Didone. Wide tracking because display type at
+   this size closes up, and the letterforms are the only ornament here. */
+.launcher h1 {
+  font-family: var(--greek); font-weight: 400;
+  font-size: clamp(52px, 8vw, 104px); letter-spacing: .3em;
+  text-indent: .3em;                    /* recover the trailing track */
+  color: var(--text); line-height: 1;
+}
+.searchwrap { position: relative; width: min(600px, 80vw); }
+.searchbox {
+  display: flex; border: none;
+  background: var(--panel); border-radius: 999px; overflow: hidden;
+  transition: background .15s ease;
+}
+.searchbox:focus-within { background: var(--raised); }
+.searchbox input {
+  flex: 1; background: none; color: var(--text); border: none;
+  padding: 17px 28px; font-family: var(--ui); font-size: 16px; outline: none;
+}
+.searchbox input::placeholder { color: var(--faint); }
+.searchbox button {
+  background: none; border: none; color: var(--text2);
+  font-family: var(--ui); font-weight: 600; font-size: 11px;
+  letter-spacing: .18em; padding: 0 30px; cursor: pointer; text-transform: uppercase;
+  transition: color .12s ease;
+}
+.searchbox button:hover { color: var(--text); }
+
+.suggest {
+  position: absolute; top: calc(100% + 7px); left: 0; right: 0; z-index: 30;
+  background: var(--raised); border: none;
+  border-radius: 20px; overflow: hidden;
+  max-height: 300px; overflow-y: auto;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .55);
+}
+.suggest div {
+  padding: 9px 16px; cursor: pointer; display: flex; align-items: baseline; gap: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.suggest div:hover, .suggest div.on { background: var(--raised); }
+.suggest .s { font-family: var(--mono); font-weight: 600; font-size: 13px; min-width: 70px; }
+.suggest .n { flex: 1; font-size: 13px; color: var(--text2); }
+.suggest .e { font-size: 10.5px; color: var(--faint); text-transform: uppercase; }
+
+.quick { display: flex; gap: 9px; flex-wrap: wrap; justify-content: center; }
+.quick span {
+  padding: 7px 18px; border: none; border-radius: 999px;
+  font-family: var(--mono); font-size: 12px; color: var(--faint);
+  cursor: pointer; transition: background .12s ease, color .12s ease;
+}
+.quick span:hover { background: var(--panel); color: var(--text); }
+
+/* ================= the grid =================
+ * 1px gaps over a rule-coloured ground: the gap IS the rule. Panels sit
+ * flush in one ruled table instead of floating as separate cards. */
+
+.grid {
+  --tile-min: 232px;
+  --grid-gap: 0px;
+  --vline: #43434A;   /* columns: the structure you read across */
+  --hline: #1D1D20;   /* rows: quieter, because there are far more of them */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
+  grid-auto-rows: 128px;
+  grid-auto-flow: row dense;
+  gap: var(--grid-gap);
+  background: var(--black);
+  position: relative;
+  /* A gutter for the region rail. It floats with no ground of its own, so
+     the page has to leave it room rather than let it sit over the panels.
+     packGrid() reads this padding when it works out the column count. */
+  padding-right: 112px;
+}
+/* ---- spans ---- */
+.w2 { grid-column: span 2; } .w3 { grid-column: span 3; } .w4 { grid-column: span 4; }
+.h2 { grid-row: span 2; } .h3 { grid-row: span 3; } .h4 { grid-row: span 4; } .h5 { grid-row: span 5; }
+
+/* ---- the panel ----
+   No border and no card. Panels sit flush in one ruled table, so the only
+   separators are the two rules each panel draws inside its own right and
+   bottom edge. The vertical rule is the brighter of the two: columns are the
+   structure you read across, rows are merely how many there happen to be. */
+
+.tile {
+  background: var(--panel);
+  box-shadow: inset -1px 0 0 var(--vline), inset 0 -1px 0 var(--hline);
+  padding: 11px 13px 12px;
+  display: flex; flex-direction: column; overflow: hidden;
+  cursor: zoom-in; position: relative; min-width: 0;
+}
+.tile:hover { background: var(--raised); }
+
+/* Evidence class as line weight on the panel's top rule. Heavier and more
+   solid means you can lean on it harder: FILED is a regulator's own words,
+   CLAIMED is an interested party talking. */
+.tile::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0;
+  border-top: 1px solid var(--rule2);
+}
+.e-filed::before   { border-top: 2px solid var(--text); }
+.e-priced::before  { border-top: 1px solid var(--text2); }
+.e-derived::before { border-top: 1px dashed var(--text2); }
+.e-claimed::before { border-top: 1px dotted var(--faint); }
+.e-filed   { background: var(--raised); }
+.e-claimed { background: var(--sunk); }
+
+.tile > h3 {
+  display: flex; align-items: baseline; gap: 9px;
+  font-family: var(--ui); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--text);
+  margin-bottom: 7px; flex: 0 0 auto;
+}
+.tile > h3 > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The class word and the badge are labels ABOUT the panel, not content in
+   it, so they sit at label weight and never compete with the numbers. */
+.tile > h3 .cls {
+  margin-left: auto; font-size: 8px; letter-spacing: .14em;
+  color: var(--faint); cursor: help; flex: 0 0 auto;
+}
+.tile > h3 .badge {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0;
+  color: var(--text2); text-transform: none; flex: 0 0 auto;
+}
+.tile > .body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.tile > .body::-webkit-scrollbar { width: 6px; }
+.tile > .body::-webkit-scrollbar-thumb { background: var(--rule); }
+
+/* A chart needs a definite height to size against, and .body is a block --
+   so a body that holds a chart becomes a flex column. Without this the SVG
+   falls back to its own viewBox aspect ratio, that height is measured on the
+   next draw, and the chart ratchets taller until it overflows the tile. */
+.tile > .body:has(> .qchart-host) { display: flex; flex-direction: column; }
+
+/* Where the panel's numbers came from. Stated on every panel, quietly. */
+.source {
+  font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 7px;
+}
+
+/* Typographic register. A panel carrying one number sets it large; a panel
+   carrying a table sets everything small so the columns stay alignable. */
+.t-hero .figure { font-size: 40px; }
+.t-mid .figure { font-size: 30px; }
+.t-small .kv, .t-small .row { font-size: 11.5px; }
+.m-heavy .body { font-variant-numeric: tabular-nums; }
+.m-side .claim { border-left-width: 2px; }
+
+/* ---- content primitives ---- */
+
+.kv {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 3.5px 0; border-bottom: 1px solid var(--hline); font-size: 12px;
+}
+.kv > span:first-child { color: var(--text2); }
+.kv > span:last-child { font-family: var(--mono); color: var(--text); text-align: right; }
+
+.row {
+  display: grid; align-items: baseline; gap: 8px;
+  padding: 3px 0; border-bottom: 1px solid var(--hline);
+  font-family: var(--mono); font-size: 11.5px; color: var(--text2);
+}
+.row.head {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+  border-bottom: 1px solid var(--rule);
+}
+.row > span:first-child { color: var(--text); }
+
+.figure {
+  font-family: var(--mono); font-size: 34px; font-weight: 500;
+  line-height: 1.05; color: var(--text); letter-spacing: -.01em;
+}
+.unitline {
+  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--faint); margin: 3px 0 9px;
+}
+.prose { font-size: 12px; line-height: 1.6; color: var(--text2); }
+.prose b { color: var(--text); font-weight: 600; }
+.dim { color: var(--faint); }
+.warn { color: var(--text); }
+
+/* Direction, the old newspaper stock-table way: filled triangle up, hollow
+   down. Same ink and same weight, so it survives monochrome and colour
+   blindness alike. Colour never encodes direction, because there is none. */
+.up::before { content: "\25B2"; font-size: .72em; margin-right: .35em; }
+.down::before { content: "\25BD"; font-size: .72em; margin-right: .35em; }
+.up, .down { color: var(--text); }
+
+/* ---- the quote panel ---- */
+.coname { font-family: var(--mast); font-weight: 700; font-size: 21px; line-height: 1.1; }
+.exch { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); margin: 2px 0 8px; }
+.price { font-family: var(--mono); font-size: 34px; font-weight: 500; line-height: 1.05; }
+.pricechg { font-family: var(--mono); font-size: 13px; margin: 1px 0 9px; }
+.pricechg .unit { color: var(--text2); margin-left: 7px; }
+
+/* ---- tables ---- */
+.chain { grid-template-columns: 52px 46px 40px 48px 52px 46px; cursor: pointer; }
+.chain:hover { background: var(--raised); }
+.chain.on { background: var(--text); }
+.chain.on, .chain.on > span { color: var(--black); }
+.fin { grid-template-columns: 44px 1fr 54px 48px 48px; }
+.scen { grid-template-columns: 60px 66px 1fr 64px; }
+
+.filing {
+  display: grid; grid-template-columns: 56px 1fr 48px; gap: 10px;
+  padding: 4px 0; font-size: 11.5px; align-items: baseline;
+  border-bottom: 1px solid var(--hline);
+}
+.filing .form {
+  font-family: var(--mono); font-size: 10.5px; color: var(--text2);
+  border: 1px solid var(--rule2); text-align: center; padding: 1px 0;
+}
+.filing .form.hot { background: var(--text); color: var(--black); border-color: var(--text); }
+.filing .means { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- the greeks, in plain english ---- */
+.gk-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 10px; }
+.gk-pick label { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.gk-pick select, .gk-pick input {
+  background: var(--sunk); border: none; border-radius: 999px;
+  color: var(--text); font-family: var(--mono); font-size: 11px;
+  padding: 4px 10px; outline: none;
+}
+.gk-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--rule); margin-bottom: 4px;
+}
+.gk-head .pos { font-weight: 700; font-size: 16px; }
+.gk-head .pos::before { content: none; }
+.gk-head .cost { font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
+.gk { padding: 9px 0; display: grid; grid-template-columns: 92px 1fr; gap: 14px; border-bottom: 1px solid var(--hline); }
+.gk .name { display: block; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+.gk .val { display: block; font-family: var(--mono); font-size: 17px; color: var(--text); }
+.gk .say { font-size: 12px; line-height: 1.55; color: var(--text2); }
+.gk .say b, .verdict b { color: var(--text); font-weight: 600; }
+.verdict {
+  margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--rule);
+  font-size: 12.5px; line-height: 1.6; color: var(--text2);
+}
+
+/* ---- implied against realised ---- */
+.volbar { margin-bottom: 9px; }
+.volbar .track { height: 9px; background: var(--sunk); position: relative; }
+.volbar .fill { position: absolute; inset: 0 auto 0 0; background: var(--text); }
+.volbar .lab { display: flex; justify-content: space-between; font-size: 10px; color: var(--text2); margin-top: 3px; }
+.volbar .lab span:last-child { font-family: var(--mono); color: var(--text); }
+
+/* ---- news ----
+   Headlines are the one thing on this page meant to be read across the room:
+   big, bold, and set in the face a newspaper puts its own title in. */
+.article { padding: 9px 0; border-bottom: 1px solid var(--hline); }
+.article .hl {
+  font-family: var(--mast); font-weight: 700; font-size: 17px; line-height: 1.2;
+  color: var(--text); text-decoration: none; display: block;
+}
+.article .hl:hover { text-decoration: underline; text-underline-offset: 3px; }
+.article .meta { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin: 4px 0; }
+.article .meta .dot { margin: 0 6px; }
+.article .stand { font-size: 12px; line-height: 1.55; color: var(--text2); }
+.nofull { color: var(--faint); font-style: italic; }
+.cols2 .body { column-count: 2; column-gap: 18px; column-rule: 1px solid var(--rule); }
+
+.claim {
+  border-left: 1px solid var(--rule2); padding: 7px 0 7px 11px; margin-bottom: 7px;
+  font-size: 12px; line-height: 1.5; color: var(--text2);
+}
+.claim .src { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-right: 8px; }
+.claim .sc { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid var(--rule2); font-family: var(--mono); font-size: 10px;
+  color: var(--text2);
+}
+
+/* ---- charts ---- */
+.qchart-host { position: relative; flex: 1 1 auto; min-height: 90px; }
+svg.qchart { width: 100%; height: 100%; display: block; }
+.qchart text.qc-axis { font-family: var(--mono); font-size: 8.5px; fill: var(--faint); }
+/* the price the crosshair pins to the axis */
+.qchart text.qc-tag { font-family: var(--mono); font-size: 9px; font-weight: 600; fill: var(--black); }
+
+.qchart-readout {
+  position: absolute; top: 0;
+  background: var(--text); color: var(--black);
+  font-family: var(--mono); font-size: 10px; line-height: 1.4;
+  padding: 3px 7px; pointer-events: none; white-space: nowrap; z-index: 3;
+}
+.qchart-readout b { font-size: 11.5px; display: block; }
+.qchart-readout span { display: block; opacity: .7; }
+.qchart-hint { font-size: 8.5px; letter-spacing: .06em; color: var(--faint); text-align: right; padding-top: 3px; opacity: 0; }
+.tile:hover .qchart-hint, .zoom .qchart-hint { opacity: 1; }
+
+/* Chart controls. The segments share one recessed ground instead of a drawn
+   frame, so the group reads as one control without a line around it. */
+.cbar { display: flex; align-items: center; gap: 10px; padding-bottom: 7px; }
+.cbar .grow { flex: 1; }
+.cseg { display: flex; background: var(--sunk); border-radius: 999px; padding: 1px; }
+.cseg button {
+  background: none; border: none; border-radius: 999px;
+  color: var(--faint); cursor: pointer;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em;
+  text-transform: uppercase; padding: 3px 10px;
+  transition: color .12s ease, background .12s ease;
+}
+.cseg button:hover { color: var(--text); }
+.cseg button.on { background: var(--text); color: var(--black); }
+
+/* the visible window, in numbers, directly under the axis it describes */
+.cstats {
+  display: flex; flex-wrap: wrap; gap: 0 14px; padding-top: 5px;
+  border-top: 1px solid var(--hline);
+  font-family: var(--mono); font-size: 9.5px; color: var(--text2);
+}
+.cstats .k { color: var(--text); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+/* ================= the numbered options story =================
+   Numbers do the ordering, so the steps need no rules between them; the
+   figure sits between heading and prose because it is the answer, and the
+   prose is only there to say what the answer means. */
+
+.story-steps { display: flex; flex-direction: column; }
+.sstep { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 9px 0; border-top: 1px solid var(--hline); }
+.sstep:first-child { border-top: none; padding-top: 2px; }
+.sn {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  color: var(--black); background: var(--text);
+  width: 19px; height: 19px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+}
+.sbody h5 {
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--text2);
+  margin: 3px 0 0;
+}
+.sfig { font-family: var(--mono); font-size: 19px; line-height: 1.15; color: var(--text); margin: 2px 0 3px; }
+.sbody p { font-family: var(--ui); font-size: 11.5px; line-height: 1.55; color: var(--text2); margin: 0; }
+.sbody p b { color: var(--text); font-weight: 600; }
+.story-steps.full .sstep { padding: 14px 0; grid-template-columns: 26px 1fr; gap: 14px; }
+.story-steps.full .sn { width: 23px; height: 23px; font-size: 12px; }
+.story-steps.full .sfig { font-size: 26px; }
+.story-steps.full .sbody p { font-size: 13px; line-height: 1.68; }
+
+/* the touch-versus-finish ladder */
+.lad, .lad-head { display: grid; grid-template-columns: 70px 80px 1fr 1fr; gap: 10px; font-family: var(--mono); font-size: 11.5px; padding: 3px 0; }
+.lad-head {
+  font-family: var(--ui); font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--faint); border-bottom: 1px solid var(--rule); padding-bottom: 5px; margin-top: 6px;
+}
+.lad { border-bottom: 1px solid var(--hline); color: var(--text2); }
+.lad span:nth-child(3) { color: var(--text); }
+
+/* ================= glossary =================
+   A dotted underline is this page's mark for "claimed, not proven", so a
+   defined term gets dashes instead -- present enough to find, quiet enough
+   that a paragraph with six of them still reads as prose. */
+
+.term {
+  border-bottom: 1px dashed var(--rule2);
+  cursor: help;
+  transition: border-color .12s ease, color .12s ease;
+}
+.term:hover { border-bottom-color: var(--text); color: var(--text); }
+
+.termtip {
+  position: fixed; left: 0; top: 0; z-index: 60;
+  width: 320px; max-width: calc(100vw - 20px);
+  background: var(--panel); border: 1px solid var(--text);
+  padding: 12px 14px 13px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .65);
+  /* Deliberately no animation and no transition on this element. A running
+     animation or transition overrides the element's own inline style for
+     every property it touches -- and the tip is positioned by an inline
+     transform. Under a throttled compositor the keyframe never advances, so
+     it froze at its start value and pinned the tip to the corner of the
+     screen. Appearing instantly is no worse, and cannot fail that way. */
+}
+.termtip h6 {
+  font-family: var(--ui); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--text);
+  margin: 0 0 7px; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
+}
+.termtip p { font-family: var(--ui); font-size: 12.5px; line-height: 1.55; color: var(--text); margin: 0; }
+/* The formula is the one place monospace is not decoration: the alignment
+   of the symbols is the meaning. */
+.termtip pre {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+  color: var(--text); background: var(--sunk);
+  border-left: 2px solid var(--rule2);
+  margin: 9px 0 0; padding: 7px 9px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.termtip p.note {
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--hline);
+  font-size: 11.5px; color: var(--text2);
+}
+
+/* ================= story overlay ================= */
+
+.storylayer { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
+.storyline {
+  fill: none; stroke: var(--text); stroke-width: 1.5; opacity: .45;
+  stroke-dasharray: 1400; stroke-dashoffset: 1400;
+  animation: drawIn .5s var(--delay, 0ms) ease forwards;
+}
+.storystep circle { fill: var(--text); stroke: var(--black); stroke-width: 2; }
+.storystep text { font-family: var(--mono); font-size: 11px; font-weight: 600; fill: var(--black); }
+
+/* ================= the region rail =================
+   Four words at the right edge, no container and no outline -- it floats
+   over the page rather than sitting in a box. The region you are in is the
+   only one at full strength; everything else is a label waiting to be used.
+   The digit is the keyboard shortcut, not decoration. */
+
+/* The dot field behind the rail. Sits under the labels, takes no pointer
+   events -- the ripple is driven from window pointermove, so the field
+   reacts as the cursor approaches rather than only once it is over it. */
+#railfield {
+  position: fixed; right: 0; top: 0; pointer-events: none;
+  /* Under the live bar (20), not over it -- the canvas runs the full height
+     of the window and would otherwise scatter dots across the bar's own
+     buttons. The bar's ground is opaque, so it simply covers the field. */
+  z-index: 10;
+}
+@media (max-width: 900px) { #railfield { display: none; } }
+
+.rail {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+  z-index: 40; width: 112px; padding: 10px 16px 10px 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.rail button {
+  background: none; border: none; cursor: pointer;
+  display: flex; align-items: baseline; justify-content: flex-end; gap: 8px;
+  padding: 5px 0; position: relative; width: 100%;
+  color: var(--faint); font-family: var(--ui);
+  font-size: 9.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+  transition: color .14s ease;
+}
+/* The rule is the only mark: it grows in from the edge rather than
+   appearing, so the eye follows it to the word it belongs to. */
+.rail button::before {
+  content: ""; position: absolute; left: 0; top: 50%;
+  width: 0; height: 1px; background: var(--text);
+  transition: width .18s ease;
+}
+.rail button:hover { color: var(--text2); }
+.rail button:hover::before { width: 8px; }
+.rail button.on { color: var(--text); }
+.rail button.on::before { width: 16px; }
+.rail .k {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0;
+  color: var(--rule2);
+}
+.rail button.on .k { color: var(--text2); }
+
+@media (max-width: 900px) {
+  /* Too narrow to spend 112px on an index. */
+  .rail { display: none; }
+  .grid { padding-right: 0; }
+}
+
+
+/* ================= live bar ================= */
+
+.livebar {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--black); color: var(--text2);
+  border-bottom: 1px solid var(--rule);
+  padding: 7px 13px; font-size: 10.5px;
+  letter-spacing: .08em; text-transform: uppercase;
+  position: sticky; top: 0; z-index: 20;
+}
+.livebar .grow { flex: 1; }
+/* The ticker and price lead the bar and are the only things in it set at
+   reading size -- everything else there is status, not information. The
+   vertical rule after them is the page's own separator convention. */
+.livebar .lbsym {
+  font-family: var(--ui); font-size: 12px; font-weight: 700;
+  letter-spacing: .16em; color: var(--text);
+}
+.livebar .lbprice {
+  display: flex; align-items: baseline; gap: 9px;
+  padding-right: 16px; margin-right: 2px;
+  border-right: 1px solid var(--vline);
+}
+.livebar .lbprice b {
+  font-family: var(--mono); font-size: 17px; font-weight: 500;
+  color: var(--text); text-transform: none; letter-spacing: 0;
+}
+.livebar .lbprice > span {
+  font-family: var(--mono); font-size: 11.5px; text-transform: none; letter-spacing: 0;
+}
+.livebar b { font-family: var(--mono); color: var(--text); text-transform: none; letter-spacing: 0; }
+/* No outline on any of these. A border draws a box the eye has to read
+   before the word inside it; the word is the control, and the pill only
+   needs to appear under the cursor to say so. */
+.livebar button {
+  background: none; border: none; color: var(--faint);
+  font-family: var(--ui); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 5px 13px; cursor: pointer; border-radius: 999px;
+  transition: background .12s ease, color .12s ease;
+}
+.livebar button:hover { background: var(--panel); color: var(--text); }
+.livebar button.on { background: var(--text); color: var(--black); }
+.livedot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text); margin-right: 7px; vertical-align: middle; }
+.livedot.off { background: var(--faint); }
+.stale { color: var(--text); text-decoration: underline; }
+
+/* ================= zoom ================= */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 90; background: rgba(6, 6, 7, .9);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: fadeIn .14s ease both;
+}
+.zoom {
+  background: var(--panel); border: 1px solid var(--rule2);
+  border-radius: 18px; overflow: hidden;
+  width: min(1240px, 94vw); height: min(92vh, 1000px);
+  display: flex; flex-direction: column; cursor: auto;
+}
+.zoom > header {
+  display: flex; align-items: baseline; gap: 16px;
+  background: var(--black); border-bottom: 1px solid var(--rule2); padding: 13px 20px;
+}
+.zoom > header h2 { font-family: var(--mast); font-weight: 700; font-size: 21px; text-transform: none; letter-spacing: 0; }
+.zoom > header .sub { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: .1em; }
+.zoom > header .grow { flex: 1; }
+/* the price, carried into every close-up -- see zoomPrice() */
+.zoom > header .zprice { display: flex; align-items: baseline; gap: 9px; margin-right: 16px; }
+.zoom > header .zprice b { font-family: var(--mono); font-size: 19px; font-weight: 500; color: var(--text); }
+.zoom > header .zprice > span { font-family: var(--mono); font-size: 12px; }
+.zoom > header .zprice i {
+  font-family: var(--ui); font-style: normal; font-size: 9.5px; font-weight: 700;
+  letter-spacing: .14em; color: var(--faint);
+  border-left: 1px solid var(--rule2); padding-left: 9px;
+}
+.zoom > header button {
+  background: none; border: none; color: var(--faint);
+  font-family: var(--ui); font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  padding: 7px 16px; cursor: pointer; border-radius: 999px;
+  transition: background .12s ease, color .12s ease;
+}
+.zoom > header button:hover { background: var(--raised); color: var(--text); }
+.zoom > .inner { flex: 1 1 auto; overflow-y: auto; padding: 20px 24px 26px; font-size: 14px; }
+.zoom > .inner::-webkit-scrollbar { width: 8px; }
+.zoom > .inner::-webkit-scrollbar-thumb { background: var(--rule2); }
+
+.zoom .kv, .zoom .kv > span { font-size: 13.5px; }
+.zoom .row { font-size: 12.5px; }
+.zoom .figure { font-size: 50px; }
+.zoom .prose { font-size: 15px; line-height: 1.7; }
+.zoom .gk .say, .zoom .verdict { font-size: 14.5px; line-height: 1.68; }
+.zoom .article .hl { font-size: 21px; }
+.zoom .article .stand { font-size: 13.5px; }
+.zoom .claim { font-size: 14px; }
+.zoom .colset { column-count: 2; column-gap: 26px; column-rule: 1px solid var(--rule); }
+.zoom h4 {
+  font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--text);
+  border-bottom: 1px solid var(--rule2); padding-bottom: 6px; margin: 22px 0 12px;
+}
+.zoom h4:first-child { margin-top: 0; }
+
+.dstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 14px; }
+.dstats > div { background: var(--panel); padding: 10px 13px; }
+.dstats span { display: block; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 3px; }
+.dstats b { font-family: var(--mono); font-size: 20px; font-weight: 500; color: var(--text); }
+
+.dbar { display: grid; grid-template-columns: 190px 1fr 150px; gap: 12px; align-items: center; padding: 3px 0; }
+.dbar-l { font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbar-t { height: 11px; border: 1px solid var(--rule2); position: relative; }
+.dbar-t i { position: absolute; inset: 0 auto 0 0; background: var(--text2); display: block; }
+.dbar-t i.pos { background: var(--text); }
+.dbar-t i.neg { background: var(--text); opacity: .45; }
+.dbar-v { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+
+.rbar { margin: 12px 0 16px; }
+.rbar-head, .rbar-foot { display: flex; justify-content: space-between; font-size: 10px; color: var(--faint); }
+.rbar-head { text-transform: uppercase; letter-spacing: .1em; margin-bottom: 5px; }
+.rbar-foot { font-family: var(--mono); margin-top: 4px; }
+.rbar-t { height: 6px; border: 1px solid var(--rule2); position: relative; }
+.rbar-t i { position: absolute; top: -5px; width: 2px; height: 14px; background: var(--text); transform: translateX(-50%); }
+
+.dexp { padding: 9px 0; }
+.dexp + .dexp { border-top: 1px solid var(--rule); }
+.dexp-h { display: flex; justify-content: space-between; align-items: baseline; }
+.dexp-h span { font-weight: 600; font-size: 12.5px; color: var(--text); }
+.dexp-h b { font-family: var(--mono); font-size: 15px; }
+.dexp-w { font-size: 12.5px; color: var(--text2); line-height: 1.55; }
+
+.dstory { border-left: 1px solid var(--rule2); padding: 9px 0 9px 13px; margin-bottom: 12px; }
+.dstory-h { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }
+.dstory .hl { font-family: var(--mast); font-weight: 700; font-size: 17px; line-height: 1.25; }
+.dstory .stand { font-size: 12.5px; color: var(--text2); }
+
+.dmsg { padding: 9px 0; font-size: 13px; color: var(--text2); }
+.dmsg + .dmsg { border-top: 1px solid var(--rule); }
+
+.zoomchart { border: 1px solid var(--rule); margin-bottom: 4px; }
+
+/* ================= misc ================= */
+
+a { color: inherit; text-decoration: none; }
+.link { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule2); }
+.link:hover { text-decoration-color: var(--text); }
+
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase;
+  border: 1px solid var(--rule2); color: var(--text2); margin-right: 6px;
+}
+.pill.hot, .pill.good { background: var(--text); color: var(--black); border-color: var(--text); }
+
+.loading, .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 72%; gap: 16px; color: var(--text2); }
+.loading b { font-family: var(--mast); font-weight: 700; color: var(--text); }
+.spinner { width: 22px; height: 22px; border: 1px solid var(--rule2); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.stage { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .1em; }
+
+/* ================= motion =================
+ * Only where it reports something: a panel opening, the story arrows drawing
+ * their path, a value that just changed. Nothing decorative, nothing looping. */
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes drawIn { to { stroke-dashoffset: 0; } }
+@keyframes flash { 0% { background: var(--rule2); } 100% { background: transparent; } }
+.tile.flash { animation: flash 1s ease-out; }
+.suggest div, .tile, .livebar button { transition: background .12s ease, color .12s ease, border-color .12s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ================= model tabs =================
+ * Two ways to price the same contract, side by side. Two models agreeing is
+ * information; two models disagreeing is more information -- it usually means
+ * early exercise is worth something, which only the tree can see. */
+
+.mtabs { display: flex; gap: 0; margin-bottom: 10px; border-bottom: 1px solid var(--rule); }
+.mtabs button {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--faint); cursor: pointer;
+  font-family: var(--ui); font-size: 10.5px; font-weight: 600;
+  letter-spacing: .12em; text-transform: uppercase; padding: 7px 14px;
+  transition: color .12s ease, border-color .12s ease;
+}
+.mtabs button:hover { color: var(--text2); }
+.mtabs button.on { color: var(--text); border-bottom-color: var(--text); }
+.mtabs .spacer { flex: 1; }
+.mtabs .note { align-self: center; font-family: var(--mono); font-size: 10px; color: var(--faint); padding-right: 2px; }

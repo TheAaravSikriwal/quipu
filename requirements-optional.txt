@@ -1,0 +1,3 @@
+# Optional heavier tiers -- install only if you want them
+news-please>=1.6
+firecrawl-py>=2.0
