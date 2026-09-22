@@ -550,12 +550,23 @@ function renderLadder(tab) {
   if (!c) return "";
 
   const exps = c.all_expiries || [];
-  const pills = `<div class="cseg expiries">${exps.slice(0, 14).map((e) => `
+  const pills = `<div class="cseg expiries">${exps.slice(0, 12).map((e) => `
     <button data-pexp="${esc(e)}" class="${e === u.expiry ? "on" : ""}">${esc(e.slice(5))}</button>`
   ).join("")}</div>`;
 
-  // One row per strike, both sides together. Union of strikes, because a
-  // board is rarely symmetrical at the wings.
+  /* Which rungs you are actually standing on. Without this the board and
+   * the chips above it are two unrelated lists of numbers, and the one
+   * question you have when you open the page -- where am I on this thing --
+   * needs you to read a strike off a chip and hunt for it. */
+  const held = new Map();
+  u.legs.forEach((l) => {
+    if (l.kind === "stock" || !l.strike) return;
+    const k = `${l.kind}:${Number(l.strike)}`;
+    const cur = held.get(k) || { qty: 0, expiry: l.expiry };
+    cur.qty += (l.side === "short" ? -1 : 1) * (Number(l.qty) || 0);
+    held.set(k, cur);
+  });
+
   const byStrike = new Map();
   (c.calls || []).forEach((r) => byStrike.set(r.strike, { strike: r.strike, call: r }));
   (c.puts || []).forEach((r) => {
@@ -566,48 +577,64 @@ function renderLadder(tab) {
   const maxOI = Math.max(1, ...rows.flatMap((r) =>
     [r.call?.open_interest || 0, r.put?.open_interest || 0]));
 
-  // Keep the ladder to the strikes anyone actually trades, centred on spot.
   const spot = c.spot || 0;
+  // Keep to the strikes near the money, but never drop one you hold.
   const near = rows
     .map((r, i) => ({ r, i, d: Math.abs(r.strike - spot) }))
-    .sort((a, b) => a.d - b.d).slice(0, 20)
-    .sort((a, b) => a.i - b.i).map((x) => x.r);
+    .sort((a, b) => a.d - b.d).slice(0, 18)
+    .concat(rows.map((r, i) => ({ r, i, d: 0 })).filter((x) =>
+      held.has(`call:${x.r.strike}`) || held.has(`put:${x.r.strike}`)))
+    .filter((x, i, arr) => arr.findIndex((y) => y.r.strike === x.r.strike) === i)
+    .sort((a, b) => a.r.strike - b.r.strike).map((x) => x.r);
 
   let spotDrawn = false;
   const body = near.map((row) => {
     const crossed = !spotDrawn && row.strike > spot;
     if (crossed) spotDrawn = true;
+
     const cell = (r, kind) => {
-      if (!r || !(r.mark || r.last)) return `<span class="lcell empty">--</span>`;
+      const h = held.get(`${kind}:${row.strike}`);
+      const mine = h && h.qty !== 0
+        ? `<span class="mine ${h.qty > 0 ? "long" : "short"}">${h.qty > 0 ? "+" : ""}${h.qty}</span>` : "";
+      if (!r || !(r.mark || r.last)) return `<span class="lcell empty">${mine}<em>&ndash;</em></span>`;
       const px = r.mark || r.last;
-      const oi = (r.open_interest || 0) / maxOI * 100;
+      const oi = Math.max(2, (r.open_interest || 0) / maxOI * 100);
       const itm = kind === "call" ? row.strike < spot : row.strike > spot;
-      return `<span class="lcell ${itm ? "itm" : ""}">
-        <i class="oi" style="width:${oi.toFixed(1)}%"></i>
+      return `<span class="lcell ${itm ? "itm" : ""} ${h && h.qty ? "held" : ""}">
+        <i class="oi" style="width:${oi.toFixed(1)}%" title="${big(r.open_interest)} open"></i>
+        ${mine}
         <b>${nf(px, 2)}</b>
         <em class="iv">${r.iv == null ? "" : nf(r.iv, 0) + "%"}</em>
         <span class="acts">
-          <button data-add="long|${kind}|${row.strike}|${px}">buy</button>
-          <button data-add="short|${kind}|${row.strike}|${px}">sell</button>
+          <button data-add="long|${kind}|${row.strike}|${px}" title="Buy one">buy</button>
+          <button data-add="short|${kind}|${row.strike}|${px}" title="Sell one">sell</button>
         </span></span>`;
     };
+
+    const anyHeld = held.get(`call:${row.strike}`)?.qty || held.get(`put:${row.strike}`)?.qty;
     return (crossed ? `<div class="spotline"><span>${money(spot)}</span></div>` : "")
-      + `<div class="lrow">
+      + `<div class="lrow${anyHeld ? " rowheld" : ""}">
         ${cell(row.call, "call")}
         <span class="lstrike">${nf(row.strike, row.strike % 1 ? 1 : 0)}</span>
         ${cell(row.put, "put")}
       </div>`;
   }).join("");
 
-  return `<div class="ladder">
-    <div class="lhead">
-      <span>calls &mdash; click a price to buy or sell</span>
-      ${pills}
-      <span>puts</span>
+  return `<div class="ladderwrap">
+    <div class="expbar">
+      <span class="explab">expiry</span>${pills}
+      <span class="exphint">${c.days == null ? "" : `${c.trading_days} sessions away`}</span>
     </div>
-    <div class="lcols"><span>price &middot; implied vol &middot; bar is open interest</span>
-      <span>strike</span><span>implied vol &middot; price</span></div>
-    ${body}
+    <div class="ladder">
+      <div class="lcols">
+        <span class="lc">calls</span>
+        <span class="lm">strike</span>
+        <span class="lp">puts</span>
+      </div>
+      ${body}
+      <div class="lfoot">price and implied vol, with the bar showing open interest
+        &mdash; click any price to buy or sell one</div>
+    </div>
   </div>`;
 }
 
