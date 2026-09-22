@@ -507,10 +507,17 @@ def _max_pain(calls: List[Dict], puts: List[Dict]) -> Optional[float]:
 
 
 def fetch_options(symbol: str, max_expiries: int = 4,
-                  div_yield: float = 0.0) -> Dict[str, Any]:
-    """Chains for the nearest expiries, with greeks and flow metrics."""
+                  div_yield: float = 0.0,
+                  only: Optional[str] = None) -> Dict[str, Any]:
+    """Chains for the nearest expiries, with greeks and flow metrics.
+
+    `only` pulls a single named expiry instead of the first few. The
+    position builder needs one specific board at a time and each expiry is
+    its own request, so fetching four to show one is three wasted seconds.
+    """
     ticker = yf.Ticker(symbol)
-    expiries = list(ticker.options or [])[:max_expiries]
+    listed = list(ticker.options or [])
+    expiries = [only] if (only and only in listed) else listed[:max_expiries]
     if not expiries:
         return {"available": False, "reason": "no listed options", "expiries": []}
 

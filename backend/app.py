@@ -167,6 +167,42 @@ def screen_refresh() -> Dict[str, Any]:
     return screen_store.meta()
 
 
+@app.get("/api/chain/{symbol}")
+def chain(symbol: str, expiry: str = None) -> Dict[str, Any]:
+    """One board of contracts, for building a position against.
+
+    Deliberately light. The full ticker route pulls news, filings and five
+    years of history; picking a strike needs none of that, and making the
+    builder wait six seconds to show a ladder would be the difference
+    between a tool you click around in and one you fill in.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 12:
+        raise HTTPException(status_code=400, detail="invalid symbol")
+
+    div = _div_yield(symbol)
+    data = options.fetch_options(symbol, max_expiries=1, div_yield=div, only=expiry)
+    if not data.get("available"):
+        raise HTTPException(status_code=404,
+                            detail=data.get("reason", f"no options for {symbol}"))
+
+    board = (data.get("expiries") or [{}])[0]
+    quote = quotes.fetch_quote(symbol) or {}
+    return {
+        "symbol": symbol,
+        "name": quote.get("name"),
+        "spot": data.get("spot") or quote.get("price"),
+        "change_pct": quote.get("change_pct"),
+        "all_expiries": data.get("all_expiries") or [],
+        "expiry": board.get("expiry"),
+        "days": board.get("days_to_expiry"),
+        "trading_days": board.get("trading_days"),
+        "stats": board.get("stats"),
+        "calls": board.get("calls") or [],
+        "puts": board.get("puts") or [],
+    }
+
+
 @app.post("/api/position")
 def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Analyse a trade that is already on.

@@ -170,41 +170,145 @@ body {
 .quick span:hover { background: var(--panel); color: var(--text); }
 
 /* ================= positions =================
-   The editor is a form and looks like one: fields in a row, one leg per
-   line, no card around it. Everything below the editor is read-only and
-   uses the panel vocabulary the rest of the app already speaks. */
+   The board, not a form. Calls left, puts right, strikes down the middle
+   and the share price drawn straight through the ladder where it actually
+   falls -- which is the layout a trader already has in their head, and the
+   one every options screen flattens into a spreadsheet.
+
+   Behind each price is a bar for open interest. It is the only encoding
+   here that is not a number, and it earns that: the difference between a
+   strike with forty contracts open and one with forty thousand decides
+   whether the trade is possible at all, and reading it out of a column of
+   integers takes ten seconds that a bar takes none. */
 
 .launchlinks { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 
-.posedit { border-bottom: 1px solid var(--rule); padding: 4px 0 8px; }
-.posrow {
-  display: grid; align-items: center; gap: 8px; padding: 4px 16px;
-  grid-template-columns: 74px 90px 90px 110px 130px 80px 110px 34px;
+.pospick {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--rule);
 }
-.poshead {
-  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
-  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
-  padding-bottom: 6px;
-}
-.posrow input, .posrow select {
-  background: var(--sunk); border: none; border-radius: 999px;
-  color: var(--text); font-family: var(--mono); font-size: 12px;
-  padding: 6px 12px; outline: none; width: 100%;
-}
-.posrow input:focus, .posrow select:focus { background: var(--raised); }
-.posrow input:disabled { color: var(--rule2); }
-.posrow button {
-  background: none; border: none; color: var(--rule2); cursor: pointer;
-  font-size: 16px; line-height: 1; padding: 4px; border-radius: 999px;
-}
-.posrow button:hover { color: var(--text); background: var(--panel); }
-.posadd { grid-template-columns: 140px 1fr; padding-top: 8px; }
-.posadd button {
+.pospick .searchwrap { position: relative; }
+.pospick .searchbox { background: var(--panel); }
+.pospick .searchbox input { padding: 10px 18px; font-size: 14px; }
+.pospick button {
+  background: none; border: none; color: var(--faint); cursor: pointer;
   font-family: var(--ui); font-size: 10px; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--faint); padding: 6px 12px;
+  text-transform: uppercase; padding: 7px 14px; border-radius: 999px;
+  transition: background .12s ease, color .12s ease;
 }
-.posadd .dim, .posrow .dim { font-size: 10.5px; line-height: 1.45; }
+.pospick button:hover { background: var(--panel); color: var(--text); }
 
+/* ---- the legs you hold, as chips ---- */
+.chips {
+  display: flex; flex-wrap: wrap; gap: 7px;
+  padding: 11px 16px; border-bottom: 1px solid var(--rule); min-height: 44px;
+}
+.empty-chips {
+  color: var(--faint); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  align-items: center;
+}
+.chip {
+  display: flex; align-items: baseline; gap: 6px;
+  background: var(--sunk); border-radius: 999px; padding: 5px 6px 5px 12px;
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+}
+/* Long and short are the one thing that must never be misread, so they get
+   a weight difference rather than a colour: bought is solid, sold hollow. */
+.chip.long { box-shadow: inset 0 0 0 1px var(--text); }
+.chip.short { box-shadow: inset 0 0 0 1px var(--rule2); }
+.chip .cs {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.chip.long .cs { color: var(--text); }
+.chip .ck { font-weight: 600; }
+.chip .cx, .chip .at { color: var(--faint); font-size: 11px; }
+.chip input {
+  background: none; border: none; border-bottom: 1px dashed var(--rule2);
+  color: var(--text); font-family: var(--mono); font-size: 12px;
+  width: 44px; text-align: center; padding: 0 2px; outline: none;
+}
+.chip input:focus { border-bottom-color: var(--text); }
+.chip button {
+  background: none; border: none; color: var(--rule2); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 5px;
+}
+.chip button:hover { color: var(--text); }
+
+/* ---- the ladder ---- */
+.ladder { padding: 0 16px 18px; }
+.lhead {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 14px; padding: 12px 0 10px;
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+}
+.lhead > span:last-child { text-align: right; }
+.expiries { flex-wrap: wrap; justify-content: center; max-width: 620px; }
+.lcols {
+  display: grid; grid-template-columns: 1fr 76px 1fr; gap: 10px;
+  font-family: var(--ui); font-size: 8px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--rule2);
+  padding: 0 10px 5px; border-bottom: 1px solid var(--rule);
+}
+.lcols > span:nth-child(2) { text-align: center; }
+.lcols > span:last-child { text-align: right; }
+
+.lrow {
+  display: grid; grid-template-columns: 1fr 76px 1fr; gap: 10px;
+  align-items: stretch; border-bottom: 1px solid var(--hline);
+}
+.lstrike {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--text);
+  text-align: center; align-self: center; padding: 4px 0;
+}
+.lcell {
+  position: relative; display: flex; align-items: baseline; gap: 8px;
+  padding: 5px 10px 6px; overflow: hidden; cursor: default;
+}
+.lrow > .lcell:last-child { flex-direction: row-reverse; }
+.lcell.empty { color: var(--rule2); font-family: var(--mono); font-size: 12px; }
+/* Open interest, as a strip along the foot of the cell.
+   It began as a full-height block behind the price and that was a mistake:
+   at any real spread of open interest half the board turns into grey
+   rectangles and the numbers have to be dug out of them. A 2px rule reads
+   just as fast for comparison, which is the only thing it is for, and
+   leaves the price as the thing you actually see. */
+.lcell .oi {
+  position: absolute; left: 0; bottom: 0; height: 2px;
+  background: var(--rule2); z-index: 0;
+}
+.lrow > .lcell:last-child .oi { left: auto; right: 0; }
+.lcell b, .lcell em, .lcell .acts { position: relative; z-index: 1; }
+.lcell b { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+.lcell em { font-family: var(--mono); font-style: normal; font-size: 10px; color: var(--faint); }
+/* In the money is the half of the board with real value in it. */
+.lcell.itm { background: rgba(242, 242, 240, .028); }
+.lcell.itm b { color: var(--text); }
+
+.lcell .acts { display: none; gap: 4px; margin-left: auto; }
+.lrow > .lcell:last-child .acts { margin-left: 0; margin-right: auto; }
+.lcell:hover .acts { display: flex; }
+.lcell:hover { background: var(--raised); }
+.lcell .acts button {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  padding: 2px 9px; border-radius: 999px; color: var(--faint);
+}
+.lcell .acts button:hover { background: var(--text); color: var(--black); }
+
+/* The share price, drawn where it falls between two strikes. */
+.spotline {
+  position: relative; height: 0; border-top: 1px solid var(--text);
+  margin: 0; display: flex; justify-content: center;
+}
+.spotline span {
+  position: relative; top: -8px; background: var(--black);
+  padding: 0 9px; font-family: var(--mono); font-size: 11px; color: var(--text);
+}
+
+/* ---- the read-out below ---- */
 .posbody { padding: 16px 16px 30px; }
 .phead { margin-bottom: 14px; }
 .phead h2 {
@@ -238,18 +342,19 @@ body {
   border-bottom: 1px solid var(--hline);
   font-family: var(--mono); font-size: 12px; color: var(--text2);
 }
-.pleg span:last-child, .pleg span:nth-child(5) { text-align: right; }
+.pleg span:last-child { text-align: right; }
 .pleg b { color: var(--text); font-weight: 600; }
 .plhead {
   font-family: var(--ui); font-size: 8.5px; font-weight: 700;
   letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
   border-bottom: 1px solid var(--rule);
 }
-.poschart { border: 1px solid var(--rule); margin-bottom: 4px; }
+.poschart { border: 1px solid var(--rule); margin-bottom: 16px; }
 .tab-position .sym { letter-spacing: .06em; }
 
 @media (max-width: 1100px) {
-  .posrow { grid-template-columns: 60px 76px 76px 88px 108px 64px 88px 28px; gap: 6px; }
+  .lhead { grid-template-columns: 1fr; gap: 8px; }
+  .lhead > span { display: none; }
   .pleg { grid-template-columns: minmax(120px,1.3fr) 92px 62px 62px 62px 62px 80px; gap: 7px; }
 }
 

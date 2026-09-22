@@ -151,14 +151,21 @@ function newPositionTab() {
     data: null, error: null, live: true, loading: false,
     ui: {
       symbol: saved?.symbol || "",
-      legs: saved?.legs?.length ? saved.legs : [blankLeg()],
+      // Legs start empty: they are picked off the board, not typed in.
+      legs: saved?.legs || [],
+      chain: null, expiry: null, chainLoading: false, chainError: null,
+      suggest: [],
       zoom: null,
     },
   };
   state.tabs.push(tab);
   state.active = tab.id;
   render();
-  if (tab.ui.symbol && tab.ui.legs.some((l) => l.strike || l.kind === "stock")) analysePosition(tab);
+  // Open on the board the position already lives in, not the nearest one:
+  // coming back to a trade you hold, the expiry you care about is yours.
+  if (tab.ui.symbol) {
+    loadChain(tab, tab.ui.legs.find((l) => l.expiry)?.expiry);
+  }
   return tab;
 }
 
@@ -166,8 +173,19 @@ async function analysePosition(tab) {
   const legs = tab.ui.legs.filter((l) =>
     Number(l.qty) > 0 && (l.kind === "stock" ? l.entry !== "" : l.strike !== "" && l.expiry));
   if (!tab.ui.symbol || !legs.length) { tab.data = null; render(); return; }
+
+  /* Every click on the board fires one of these, and they take a couple of
+   * seconds each. Adding a second leg while the first is still in flight
+   * meant two requests were racing, and whichever finished last won -- so
+   * building a spread by clicking twice quickly left the page insisting it
+   * was a single call, with the second leg visible in the chips above and
+   * missing from every number below. Stamp each request and let only the
+   * newest one land. */
+  const stamp = (tab.ui.req = (tab.ui.req || 0) + 1);
   tab.loading = true;
   renderPositionStatus(tab);
+
+  let data = null, error = null;
   try {
     const res = await fetch(`${API}/api/position`, {
       method: "POST",
@@ -176,12 +194,14 @@ async function analysePosition(tab) {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || res.statusText);
-    tab.data = body;
-    tab.error = null;
+    data = body;
   } catch (err) {
-    tab.error = String(err.message || err);
-    tab.data = null;
+    error = String(err.message || err);
   }
+
+  if (stamp !== tab.ui.req) return;        // a later click already won
+  tab.data = data;
+  tab.error = error;
   tab.loading = false;
   savePositions(tab);
   if (state.active === tab.id) render();
@@ -443,71 +463,217 @@ function renderLauncher() {
     </div>`;
 }
 
-/* ---- positions, drawn ------------------------------------------------ */
+/* ---- positions, drawn ------------------------------------------------
+ *
+ * Not a form. Every options tool in existence asks you to type a strike
+ * and an expiry into boxes, which means you have to already know what is
+ * listed and what it costs before you can describe what you own.
+ *
+ * So the board comes first. Pick the company, pick the date, and the
+ * actual contracts appear as a ladder with the share price drawn through
+ * it -- calls to the left, puts to the right, strikes down the middle,
+ * the way the chain is laid out in your head. Behind every price is a bar
+ * showing open interest, so the strikes that genuinely trade are visible
+ * at a glance instead of having to be read out of a column of integers.
+ *
+ * Then you click a price to say you bought or sold it. The leg carries
+ * the mark as its entry, which is wrong -- you paid your own price, not
+ * today's -- so every chip stays editable. Being approximately right in
+ * one click beats being exactly right in nine.
+ */
+
+async function loadChain(tab, expiry) {
+  const u = tab.ui;
+  if (!u.symbol) return;
+  u.chainLoading = true;
+  render();
+  try {
+    const q = expiry ? `?expiry=${encodeURIComponent(expiry)}` : "";
+    const res = await fetch(`${API}/api/chain/${encodeURIComponent(u.symbol)}${q}`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    u.chain = body;
+    u.expiry = body.expiry;
+    u.chainError = null;
+  } catch (err) {
+    u.chain = null;
+    u.chainError = String(err.message || err);
+  }
+  u.chainLoading = false;
+  render();
+  if (u.legs.some((l) => l.strike || l.kind === "stock")) analysePosition(tab);
+}
+
+let posSuggestTimer = null;
+
+async function posSuggest(tab, q) {
+  const u = tab.ui;
+  if (q.trim().length < 1) { u.suggest = []; paintPosSuggest(tab); return; }
+  try {
+    const res = await fetch(`${API}/api/search?q=${encodeURIComponent(q)}`);
+    u.suggest = ((await res.json()).results || []).slice(0, 8);
+  } catch { u.suggest = []; }
+  paintPosSuggest(tab);
+}
+
+function paintPosSuggest(tab) {
+  const box = document.getElementById("pos-suggest");
+  if (!box) return;
+  const rows = tab.ui.suggest || [];
+  if (!rows.length) { box.innerHTML = ""; box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = rows.map((r) => `<div data-psym="${esc(r.symbol)}">
+      <span class="s">${esc(r.symbol)}</span><span class="n">${esc(r.name)}</span>
+      <span class="e">${esc(r.exchange || "")}</span></div>`).join("");
+  box.querySelectorAll("[data-psym]").forEach((el) => {
+    el.onclick = () => {
+      tab.ui.symbol = el.dataset.psym;
+      tab.ui.suggest = [];
+      tab.ui.chain = null;
+      render();
+      loadChain(tab);
+    };
+  });
+}
+
+/** The contract ladder. */
+function renderLadder(tab) {
+  const u = tab.ui, c = u.chain;
+  if (u.chainLoading) {
+    return `<div class="loading" style="height:180px"><div class="spinner"></div>
+      <div>Loading the board for ${esc(u.symbol)}</div></div>`;
+  }
+  if (u.chainError) {
+    return `<div class="empty" style="height:130px"><div class="down">No contracts</div>
+      <div class="stage">${esc(u.chainError)}</div></div>`;
+  }
+  if (!c) return "";
+
+  const exps = c.all_expiries || [];
+  const pills = `<div class="cseg expiries">${exps.slice(0, 14).map((e) => `
+    <button data-pexp="${esc(e)}" class="${e === u.expiry ? "on" : ""}">${esc(e.slice(5))}</button>`
+  ).join("")}</div>`;
+
+  // One row per strike, both sides together. Union of strikes, because a
+  // board is rarely symmetrical at the wings.
+  const byStrike = new Map();
+  (c.calls || []).forEach((r) => byStrike.set(r.strike, { strike: r.strike, call: r }));
+  (c.puts || []).forEach((r) => {
+    const e = byStrike.get(r.strike) || { strike: r.strike };
+    e.put = r; byStrike.set(r.strike, e);
+  });
+  const rows = [...byStrike.values()].sort((a, b) => a.strike - b.strike);
+  const maxOI = Math.max(1, ...rows.flatMap((r) =>
+    [r.call?.open_interest || 0, r.put?.open_interest || 0]));
+
+  // Keep the ladder to the strikes anyone actually trades, centred on spot.
+  const spot = c.spot || 0;
+  const near = rows
+    .map((r, i) => ({ r, i, d: Math.abs(r.strike - spot) }))
+    .sort((a, b) => a.d - b.d).slice(0, 20)
+    .sort((a, b) => a.i - b.i).map((x) => x.r);
+
+  let spotDrawn = false;
+  const body = near.map((row) => {
+    const crossed = !spotDrawn && row.strike > spot;
+    if (crossed) spotDrawn = true;
+    const cell = (r, kind) => {
+      if (!r || !(r.mark || r.last)) return `<span class="lcell empty">--</span>`;
+      const px = r.mark || r.last;
+      const oi = (r.open_interest || 0) / maxOI * 100;
+      const itm = kind === "call" ? row.strike < spot : row.strike > spot;
+      return `<span class="lcell ${itm ? "itm" : ""}">
+        <i class="oi" style="width:${oi.toFixed(1)}%"></i>
+        <b>${nf(px, 2)}</b>
+        <em class="iv">${r.iv == null ? "" : nf(r.iv, 0) + "%"}</em>
+        <span class="acts">
+          <button data-add="long|${kind}|${row.strike}|${px}">buy</button>
+          <button data-add="short|${kind}|${row.strike}|${px}">sell</button>
+        </span></span>`;
+    };
+    return (crossed ? `<div class="spotline"><span>${money(spot)}</span></div>` : "")
+      + `<div class="lrow">
+        ${cell(row.call, "call")}
+        <span class="lstrike">${nf(row.strike, row.strike % 1 ? 1 : 0)}</span>
+        ${cell(row.put, "put")}
+      </div>`;
+  }).join("");
+
+  return `<div class="ladder">
+    <div class="lhead">
+      <span>calls &mdash; click a price to buy or sell</span>
+      ${pills}
+      <span>puts</span>
+    </div>
+    <div class="lcols"><span>price &middot; implied vol &middot; bar is open interest</span>
+      <span>strike</span><span>implied vol &middot; price</span></div>
+    ${body}
+  </div>`;
+}
 
 function renderPosition(tab) {
-  const u = tab.ui, d = tab.data;
+  const u = tab.ui, d = tab.data, c = u.chain;
+
   const bar = `<div class="livebar">
     <span class="lbsym">${esc(u.symbol || "Position")}</span>
-    ${d ? `<span class="lbprice"><b>${money(d.spot)}</b>
-      <span class="${sign(d.change_pct)}">${signed(d.change_pct, 2)}</span></span>` : ""}
+    ${c ? `<span class="lbprice"><b>${money(c.spot)}</b>
+      <span class="${sign(c.change_pct)}">${signed(c.change_pct, 2)}</span></span>` : ""}
     <span class="grow"></span>
     <span id="pos-status" class="dim"></span>
     ${d ? `<span>${d.marks_live}/${d.legs.filter((l) => l.kind !== "stock").length} legs priced live</span>
-      <span>IV <b>${pct(d.vol_used, 1)}</b></span>` : ""}
-    <button id="pos-price">Reprice</button>
+           <span>IV <b>${pct(d.vol_used, 1)}</b></span>` : ""}
+    ${d ? `<button id="pos-price">Reprice</button>` : ""}
   </div>`;
 
-  const editor = `<div class="posedit">
-    <div class="posrow poshead">
-      <span>leg</span><span>side</span><span>type</span><span>strike</span>
-      <span>expiry</span><span>qty</span><span>entry</span><span></span>
+  const picker = `<div class="pospick">
+    <div class="searchwrap" style="width:min(420px,60vw)">
+      <div class="searchbox">
+        <input id="pos-sym" value="${esc(u.symbol)}" autocomplete="off" spellcheck="false"
+          placeholder="Company name or ticker">
+      </div>
+      <div class="suggest" id="pos-suggest" style="display:none"></div>
     </div>
-    <div class="posrow">
-      <input id="pos-sym" value="${esc(u.symbol)}" placeholder="AAPL" spellcheck="false">
-      <span class="dim" style="grid-column:2/-1">the underlying every leg below is written on</span>
-    </div>
-    ${u.legs.map((l, i) => `
-      <div class="posrow" data-leg="${i}">
-        <span class="dim">leg ${i + 1}</span>
-        <select data-f="side">
-          <option ${l.side === "long" ? "selected" : ""}>long</option>
-          <option ${l.side === "short" ? "selected" : ""}>short</option>
-        </select>
-        <select data-f="kind">
-          ${["call", "put", "stock"].map((k) =>
-            `<option ${l.kind === k ? "selected" : ""}>${k}</option>`).join("")}
-        </select>
-        <input data-f="strike" value="${esc(l.strike)}" placeholder="${l.kind === "stock" ? "--" : "150"}" ${l.kind === "stock" ? "disabled" : ""}>
-        <input data-f="expiry" value="${esc(l.expiry)}" placeholder="${l.kind === "stock" ? "--" : "2026-10-09"}" ${l.kind === "stock" ? "disabled" : ""}>
-        <input data-f="qty" value="${esc(l.qty)}" placeholder="${l.kind === "stock" ? "100" : "1"}">
-        <input data-f="entry" value="${esc(l.entry)}" placeholder="4.20">
-        <button data-drop="${i}" title="Remove leg">&times;</button>
-      </div>`).join("")}
-    <div class="posrow posadd">
-      <button id="pos-add">+ add a leg</button>
-      <span class="dim" style="grid-column:2/-1">quantity is contracts for options and shares for stock; entry is the price per share, so a contract bought at $4.20 is 4.20 and never 420</span>
-    </div>
+    <button id="pos-stock">+ shares</button>
+    ${u.legs.length ? `<button id="pos-clear">clear all</button>` : ""}
   </div>`;
+
+  const chips = u.legs.length ? `<div class="chips">
+    ${u.legs.map((l, i) => `<div class="chip ${l.side}" data-leg="${i}">
+      <span class="cs">${l.side}</span>
+      <input data-f="qty" value="${esc(l.qty)}" title="contracts, or shares for stock">
+      <span class="ck">${l.kind === "stock" ? "shares"
+        : `${nf(Number(l.strike), Number(l.strike) % 1 ? 1 : 0)} ${l.kind}`}</span>
+      ${l.kind === "stock" ? "" : `<span class="cx">${esc((l.expiry || "").slice(5))}</span>`}
+      <span class="at">@</span>
+      <input data-f="entry" value="${esc(l.entry)}" title="what you actually paid, per share">
+      <button data-drop="${i}" title="Remove">&times;</button>
+    </div>`).join("")}
+  </div>` : `<div class="chips empty-chips">Nothing yet &mdash; click a price on the board below</div>`;
+
+  let out = bar + picker + chips;
+  if (!u.symbol) {
+    out += `<div class="loading" style="height:34%">
+      <div>Search for the company you traded</div>
+      <div class="stage">the contracts load, you click the ones you own,
+        and the strategy is worked out from them</div></div>`;
+    return out;
+  }
+  out += renderLadder(tab);
 
   if (tab.error) {
-    return bar + editor + `<div class="empty"><div class="down">Could not price that</div>
+    return out + `<div class="empty" style="height:140px"><div class="down">Could not price that</div>
       <div class="stage">${esc(tab.error)}</div></div>`;
   }
-  if (!d) {
-    return bar + editor + `<div class="loading" style="height:26%">
-      <div>Enter the legs you are holding</div>
-      <div class="stage">the strategy is worked out from them, not chosen</div></div>`;
-  }
+  if (!d) return out;
 
   const s = d.strategy;
   const plCls = d.pl >= 0 ? "up" : "down";
+  const DASH = "−";
   const chip = (label, value, cls = "") =>
     `<div class="pstat"><span>${label}</span><b class="${cls}">${value}</b></div>`;
-  const DASH = "−";
   const optLegs = d.legs.filter((l) => l.kind !== "stock").length;
 
-  return bar + editor + `
+  return out + `
     <div class="posbody">
       <div class="phead">
         <h2>${esc(s.name)}</h2>
@@ -525,6 +691,9 @@ function renderPosition(tab) {
         ${chip("break-even", (d.breakevens || []).map((b) => money(b)).join("  /  ") || "--")}
         ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
       </div>
+
+      <h4>Profit at expiry, against where it finishes</h4>
+      <div class="qchart-host poschart" style="height:250px"></div>
 
       <h4>What the position is, in shares and dollars</h4>
       <div class="pstats">
@@ -563,55 +732,84 @@ function renderPosition(tab) {
           </div>`).join("")}
       </div>
 
-      <h4>Profit at expiry, against where it finishes</h4>
-      <div class="qchart-host poschart" style="height:250px"></div>
       <div class="fnote prose">
         Marks come from the live chain where the contract is listed and from
         Black-Scholes where it is not &mdash; ${d.marks_live} of ${optLegs} option
-        legs here are real quotes. Commissions are not included, and neither is
-        the spread you would pay to close. Volatility ${pct(d.vol_used, 1)},
-        rate ${pct(d.rate, 2)}, dividend yield ${pct(d.div_yield, 2)}.
+        legs here are real quotes. Entry prices default to today's mark, which is
+        not what you paid: edit them on the chips above. Commissions are not
+        included, and neither is the spread you would pay to close. Volatility
+        ${pct(d.vol_used, 1)}, rate ${pct(d.rate, 2)}, dividend yield ${pct(d.div_yield, 2)}.
       </div>
     </div>`;
 }
 
 function wirePosition(tab) {
   const u = tab.ui;
-  const sym = document.getElementById("pos-sym");
-  if (sym) sym.onchange = () => {
-    u.symbol = sym.value.trim().toUpperCase();
-    analysePosition(tab);
-  };
 
-  document.querySelectorAll("[data-leg]").forEach((row) => {
-    const i = Number(row.dataset.leg);
-    row.querySelectorAll("[data-f]").forEach((inp) => {
-      inp.onchange = () => {
-        u.legs[i][inp.dataset.f] = inp.value.trim();
-        // Switching a leg to stock retires the fields that cannot apply to
-        // it, so the row has to be redrawn rather than just revalued.
-        if (inp.dataset.f === "kind") render();
-        analysePosition(tab);
-      };
-    });
-    const drop = row.querySelector("[data-drop]");
-    if (drop) drop.onclick = () => {
-      u.legs.splice(i, 1);
-      if (!u.legs.length) u.legs.push(blankLeg());
+  const sym = document.getElementById("pos-sym");
+  if (sym) {
+    sym.oninput = () => {
+      clearTimeout(posSuggestTimer);
+      const q = sym.value;
+      posSuggestTimer = setTimeout(() => posSuggest(tab, q), 200);
+    };
+    sym.onkeydown = (e) => {
+      if (e.key !== "Enter") return;
+      u.symbol = sym.value.trim().toUpperCase();
+      u.suggest = [];
+      u.chain = null;
+      render();
+      loadChain(tab);
+    };
+  }
+  paintPosSuggest(tab);
+
+  document.querySelectorAll("[data-pexp]").forEach((b) => {
+    b.onclick = () => loadChain(tab, b.dataset.pexp);
+  });
+
+  // Click a price: that contract, that side, one lot, at today's mark.
+  document.querySelectorAll("[data-add]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const [side, kind, strike, px] = b.dataset.add.split("|");
+      u.legs.push({ kind, side, strike, qty: 1, entry: px, expiry: u.expiry });
       render();
       analysePosition(tab);
     };
   });
 
-  const add = document.getElementById("pos-add");
-  if (add) add.onclick = () => { u.legs.push(blankLeg()); render(); };
+  const addStock = document.getElementById("pos-stock");
+  if (addStock) addStock.onclick = () => {
+    u.legs.push({ kind: "stock", side: "long", strike: "", qty: 100,
+                  entry: u.chain?.spot ? String(u.chain.spot) : "", expiry: "" });
+    render();
+    analysePosition(tab);
+  };
+
+  const clear = document.getElementById("pos-clear");
+  if (clear) clear.onclick = () => { u.legs = []; tab.data = null; render(); savePositions(tab); };
+
+  document.querySelectorAll(".chip[data-leg]").forEach((row) => {
+    const i = Number(row.dataset.leg);
+    row.querySelectorAll("[data-f]").forEach((inp) => {
+      inp.onchange = () => { u.legs[i][inp.dataset.f] = inp.value.trim(); analysePosition(tab); };
+    });
+    const drop = row.querySelector("[data-drop]");
+    if (drop) drop.onclick = () => {
+      u.legs.splice(i, 1);
+      render();
+      if (u.legs.length) analysePosition(tab); else { tab.data = null; render(); }
+    };
+  });
+
   const price = document.getElementById("pos-price");
   if (price) price.onclick = () => analysePosition(tab);
 
   const host = document.querySelector(".poschart");
   if (host && tab.data?.curve?.length) {
-    // The payoff is a curve of profit against price, not a price series, so
-    // zero is the reference line rather than a previous close.
+    // A payoff is profit against price, not a price series, so the
+    // reference line is zero rather than a previous close.
     const c = window.QUIPU_CHART.makeChart(host, {
       points: tab.data.curve.map((p) => ({ date: p.s.toFixed(2), close: p.pl })),
       reference: 0,
