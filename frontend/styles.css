@@ -1222,3 +1222,124 @@ a { color: inherit; text-decoration: none; }
 .evfoot {
   padding-top: 11px; font-size: 10px; line-height: 1.5; color: var(--faint);
 }
+
+
+/* ---- one setup, opened up ----
+   The card is a menu entry; this is the thing itself. Laid out in the
+   order the questions arrive: what is it, what are the odds, what does it
+   cost and pay, what am I actually buying, and what is it worth if the
+   stock ends up somewhere. Nothing is revealed on hover -- a reader
+   deciding whether to put money on something should not have to go
+   looking for the terms. */
+.pdhead {
+  display: flex; align-items: flex-start; gap: 28px; flex-wrap: wrap;
+  padding: 6px 0 18px; border-bottom: 1px solid var(--rule);
+}
+.pdname { flex: 1 1 320px; }
+.pdname h4 {
+  font-family: var(--ui); font-size: 19px; font-weight: 600;
+  color: var(--text); letter-spacing: -.01em;
+}
+.pdview {
+  margin-top: 6px; max-width: 62ch;
+  font-size: 12.5px; line-height: 1.6; color: var(--text2);
+}
+
+/* The odds, said once, properly. The number was the confusing part of the
+   card -- "40 in 100" is a percentage wearing a hat -- so it is a
+   percentage here with the sentence that defines it sitting underneath
+   rather than hidden in a tooltip. */
+.pdodds { flex: 0 0 auto; max-width: 260px; text-align: right; }
+.pdodds b {
+  display: block; font-family: var(--mono); font-size: 40px; font-weight: 400;
+  line-height: 1; color: var(--text);
+}
+.pdodds span {
+  display: block; margin-top: 5px;
+  font-family: var(--ui); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.pdodds em {
+  display: block; margin-top: 8px; font-style: normal;
+  font-size: 10.5px; line-height: 1.5; color: var(--faint);
+}
+
+.pdgrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px; background: var(--rule); margin: 1px 0 0;
+}
+.pdbox { background: var(--panel); padding: 13px 15px; }
+.pdlab {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.pdnum {
+  margin-top: 5px; font-family: var(--mono); font-size: 16px; color: var(--text);
+}
+
+.pdsec {
+  padding: 20px 0 8px;
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+}
+
+/* Each leg on its own, with the reason that strike was picked. The
+   reason is the part a ready-made setup normally hides, and it is the
+   only part that teaches you anything. */
+.pdleg {
+  display: grid; grid-template-columns: 1fr auto; gap: 3px 16px;
+  padding: 10px 0; border-bottom: 1px solid var(--hline);
+}
+.pdlt { font-size: 13px; color: var(--text); }
+.pdlc { font-family: var(--mono); font-size: 13px; color: var(--text); text-align: right; }
+.pdlw {
+  grid-column: 1 / -1; max-width: 76ch;
+  font-size: 11px; line-height: 1.55; color: var(--faint);
+}
+
+.pdcurve {
+  display: block; width: 100%; height: 110px; margin-top: 4px;
+  background: var(--sunk);
+}
+.pdline { fill: none; stroke: var(--text); stroke-width: 1.6; }
+.pdzero { stroke: var(--rule2); stroke-width: 1; }
+.pdbe { stroke: var(--rule2); stroke-width: 1; stroke-dasharray: 2 3; }
+.pdaxis {
+  display: flex; justify-content: space-between; padding: 5px 1px 0;
+  font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+}
+
+/* The same curve as arithmetic, for people who do not read charts -- and
+   as a check for people who do that they read it the right way round. */
+.pdscen {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 1px; background: var(--rule); margin-top: 14px;
+}
+.pdsrow {
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--panel); padding: 9px 10px;
+}
+.pdsrow.win { background: var(--raised); }
+.pdsm {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; color: var(--faint);
+}
+.pdsp { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+.pdsv { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.pdsrow:not(.win) .pdsv { color: var(--text2); }
+
+.pduse {
+  margin-top: 20px; width: 100%; cursor: pointer; border: none;
+  background: var(--text); color: var(--black);
+  font-family: var(--ui); font-size: 11px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+  padding: 14px 18px; border-radius: 3px;
+  transition: opacity .12s ease;
+}
+.pduse:hover { opacity: .86; }
+
+.prenote {
+  padding: 12px 1px 0; max-width: 82ch;
+  font-size: 10.5px; line-height: 1.6; color: var(--faint);
+}
+.prenote b { color: var(--text2); }

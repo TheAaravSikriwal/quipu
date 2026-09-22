@@ -48,7 +48,13 @@ def _leg(row: Dict, kind: str, side: str, expiry: str, qty: int = 1) -> Optional
     if not px:
         return None
     return {"kind": kind, "side": side, "strike": row["strike"],
-            "qty": qty, "entry": round(float(px), 4), "expiry": expiry}
+            "qty": qty, "entry": round(float(px), 4), "expiry": expiry,
+            # Kept for the detail view: the delta is the reason this strike
+            # was chosen rather than the one next to it, and "the market
+            # gives this about a 30% chance of finishing in the money" is
+            # the only honest way to explain a strike choice to someone who
+            # did not make it.
+            "delta": row.get("delta"), "iv": row.get("iv")}
 
 
 def _all(*legs) -> Optional[List[Dict]]:
@@ -152,15 +158,142 @@ CATALOGUE = [
 ]
 
 
+def _usd(v: float) -> str:
+    return P._usd(v)
+
+
+def _years(expiry: str) -> float:
+    return P._years(expiry) or (1 / 252.0)
+
+
+def _px(v: float) -> str:
+    """A price per share, always to the cent.
+
+    _usd drops the cents above $100, which is right for a total and wrong
+    for a number someone is going to type into an order ticket: it
+    rendered a $341.22 share as "$341". Same failure as rounding a 337.5
+    strike to 338 -- a correct total sitting on top of a price that was
+    never quoted.
+    """
+    return f"${v:,.2f}"
+
+
+def _strike(v: float) -> str:
+    """A strike, printed as the contract is actually listed.
+
+    Rounding to whole dollars turned the 337.5 put into "338" -- a
+    contract that does not exist. Every number under it was right, which
+    is what made it dangerous: the arithmetic checked out and the ticket
+    would have been wrong.
+    """
+    return f"{v:,.0f}" if float(v).is_integer() else f"{v:,.2f}".rstrip("0").rstrip(".")
+
+
+def _leg_words(leg: Dict[str, Any]) -> Dict[str, Any]:
+    """One leg, spelled out the way you would say it out loud."""
+    qty = int(leg.get("qty") or 1)
+    side = "Buy" if leg["side"] == "long" else "Sell"
+    cash = float(leg.get("entry") or 0) * qty * (1 if leg["kind"] == "stock" else 100)
+
+    if leg["kind"] == "stock":
+        what = f"{qty} shares"
+        why = "The shares themselves, which is what the call is sold against."
+    else:
+        what = (f"{qty} contract{'s' if qty > 1 else ''} of the "
+                f"{_strike(leg['strike'])} {leg['kind']}")
+        d = leg.get("delta")
+        if d is None:
+            why = ""
+        else:
+            pct = abs(d) * 100
+            moneyness = ("roughly at the money" if pct > 45
+                         else "close to the money" if pct > 35
+                         else "a fair way out of the money" if pct > 18
+                         else "well out of the money")
+            role = ("Bought to cap the loss rather than to make money."
+                    if leg["side"] == "long" and pct < 20
+                    else "This is the leg that has to work."
+                    if leg["side"] == "long" and pct > 35
+                    else "Sold to bring in the premium; you keep it if the "
+                         "price stays away from this strike."
+                    if leg["side"] == "short" else "")
+            why = (f"Chosen because it is {moneyness} — the market puts the "
+                   f"odds of it finishing in the money at about {pct:.0f}%. {role}").strip()
+
+    return {
+        "text": f"{side} {what} at {_px(leg['entry'])} a share",
+        "cash": round(cash if leg["side"] == "long" else -cash, 2),
+        "direction": "out" if leg["side"] == "long" else "in",
+        "why": why,
+        "iv": leg.get("iv"),
+    }
+
+
+def _curve(legs: List[Dict], spot: float, vol: float, years: float) -> List[Dict]:
+    """The payoff, drawn over the range the stock can actually reach.
+
+    analyse() scans from 40% to 180% of spot, which is the right range to
+    hunt for break-evens in and the wrong one to draw: on a one-day
+    expiry it put $136 and $621 on the axis of an Apple chart and squeezed
+    every strike that mattered into a sliver in the middle.
+
+    So the width comes from the move the option itself is priced for --
+    three standard deviations either side, which is where the lognormal
+    has essentially all of its mass -- and is then widened if it has to be
+    to keep every strike on the page.
+    """
+    norm = [P._norm(l) for l in legs]
+    strikes = [l["strike"] for l in norm if l["strike"]]
+
+    sd = (vol or 0.3) * (max(years, 1 / 252.0) ** 0.5)
+    band = max(3.0 * sd, 0.03)
+    lo, hi = spot * (1 - band), spot * (1 + band)
+
+    if strikes:
+        pad = (max(strikes) - min(strikes)) * 0.25 or spot * 0.02
+        lo = min(lo, min(strikes) - pad)
+        hi = max(hi, max(strikes) + pad)
+    lo = max(0.01, lo)
+
+    return [{"s": round(lo + (hi - lo) * i / 60, 2),
+             "pl": round(P.payoff_at(norm, lo + (hi - lo) * i / 60), 2)}
+            for i in range(61)]
+
+
+def _scenarios(legs: List[Dict], spot: float) -> List[Dict[str, Any]]:
+    """What it is worth at expiry across a spread of finishing prices.
+
+    A payoff curve shows the shape; this shows the arithmetic. People who
+    do not read charts read this, and people who do use it to check that
+    they read the chart the right way round.
+    """
+    # payoff_at works on normalised legs -- signed sides and a per-leg
+    # multiplier -- which analyse() builds internally. Handing it the raw
+    # catalogue legs looks like it works right up until it does not.
+    norm = [P._norm(l) for l in legs]
+    out = []
+    for move in (-0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15):
+        price = spot * (1 + move)
+        pl = P.payoff_at(norm, price)
+        out.append({
+            "move": round(move * 100),
+            "price": round(price, 2),
+            "pl": round(pl, 2),
+            "good": pl > 0,
+        })
+    return out
+
+
 def _sentence(a: Dict[str, Any], spot: float) -> str:
-    """The odds and the trade-off, in one line."""
-    ch = a.get("chance")
+    """The trade-off -- what it costs, what it can do -- in one line."""
     mp, ml = a.get("max_profit"), a.get("max_loss")
     cost = a.get("net_cost", 0)
     bits = []
 
-    if ch is not None:
-        bits.append(f"About <b>{ch:.0f} in 100</b> that this finishes ahead")
+    # The odds used to lead this sentence as "about 40 in 100 that this
+    # finishes ahead", which is a percentage wearing a hat. It is the
+    # headline figure on the card now, said as a percentage, so repeating
+    # it here in worse words only made the card longer.
     if cost > 0:
         bits.append(f"costs <b>{P._usd(cost)}</b>")
     elif cost < 0:
@@ -180,7 +313,8 @@ def _sentence(a: Dict[str, Any], spot: float) -> str:
         bits.append(f"break-even <b>${bes[0]:,.2f}</b>")
     elif len(bes) > 1:
         bits.append(f"break-even <b>${min(bes):,.2f}</b> and <b>${max(bes):,.2f}</b>")
-    return ", ".join(bits) + "."
+    out = ", ".join(bits) + "."
+    return out[:1].upper() + out[1:]
 
 
 def build(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
@@ -198,6 +332,13 @@ def build(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
         if not a.get("ok"):
             continue
         out.append({
+            "legs_explained": [_leg_words(l) for l in legs],
+            "scenarios": _scenarios(legs, spot),
+            "greeks": a.get("greeks"),
+            "days_left": a.get("days_left"),
+            "curve": _curve(legs, spot, vol, _years(expiry)),
+            "risk": a.get("risk"),
+            "expiry": expiry,
             "id": spec["id"],
             "name": spec["name"],
             "view": spec["view"],

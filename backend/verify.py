@@ -374,6 +374,48 @@ try:
 except Exception as exc:
     RESULTS.append((False, "event calendar", f"could not run: {exc}"))
 
+section("A setup says the contract it would actually buy")
+
+try:
+    import presets as PR
+
+    # Half-dollar strikes are the norm near the money on a liquid name.
+    # Printing them to the nearest whole dollar named a contract that does
+    # not exist, under arithmetic that was entirely correct -- which is
+    # what made it worth a permanent check rather than a one-line fix.
+    strikes = [335, 337.5, 347.5, 12.25, 1250, 7.0, 0.5, 2.5]
+    wrong = [v for v in strikes if float(PR._strike(v).replace(",", "")) != float(v)]
+    RESULTS.append((not wrong, "printed strike parses back to the real one",
+                    f"{len(strikes)} checked" if not wrong else f"wrong: {wrong}"))
+
+    half = PR._strike(337.5)
+    RESULTS.append((half == "337.5", "half-dollar strikes keep their half",
+                    f'337.5 prints as "{half}"'))
+
+    # The words a leg is described in must name the same strike the leg
+    # carries, or the explanation and the ticket disagree.
+    leg = {"kind": "put", "side": "short", "strike": 337.5, "qty": 1,
+           "entry": 0.56, "expiry": "2026-09-23", "delta": -0.25}
+    words = PR._leg_words(leg)
+    RESULTS.append(("337.5" in words["text"], "leg description names its own strike",
+                    words["text"]))
+
+    # A short leg brings money in; a long leg sends it out. Getting this
+    # backwards flips the cost of every spread on the page.
+    # A per-share price is a number someone types into a ticket, so it
+    # keeps its cents no matter how large it is.
+    share = PR._leg_words({"kind": "stock", "side": "long", "strike": None,
+                           "qty": 100, "entry": 341.2235, "expiry": None})
+    RESULTS.append(("$341.22" in share["text"], "per-share prices keep their cents",
+                    share["text"]))
+
+    short_cash = PR._leg_words(leg)["cash"]
+    long_cash = PR._leg_words(dict(leg, side="long"))["cash"]
+    RESULTS.append((short_cash < 0 < long_cash, "selling credits, buying debits",
+                    f"sell {short_cash}, buy {long_cash}"))
+except Exception as exc:
+    RESULTS.append((False, "setup descriptions", f"could not run: {exc}"))
+
 section("Source files carry no corrupted escapes")
 
 # A patch once wrote literal backspace bytes where a regex word boundary

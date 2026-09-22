@@ -554,28 +554,145 @@ function renderPresets(tab, c) {
   const list = c.presets || [];
   if (!list.length) return "";
   const open = tab.ui.presetsOpen !== false;
+  const chosen = list.find((p) => p.id === tab.ui.preset);
+
+  // Picking one opens it rather than loading it. Eleven cards is a menu,
+  // and a menu that commits you the moment you touch it is a trap -- the
+  // whole point of looking at a setup is to find out whether you want it.
+  if (chosen) return `<div class="presets">${presetDetail(tab, chosen, c)}</div>`;
 
   return `<div class="presets">
     <div class="expbar">
       <span class="explab">ready-made setups</span>
       <button class="plink" id="pre-toggle">${open ? "hide" : "show"}</button>
-      <span class="exphint">what you would have to believe, and the odds on it</span>
+      <span class="exphint">pick one to see how it works</span>
     </div>
     ${open ? `<div class="pregrid">
       ${list.map((p) => `
         <button class="pcard" data-preset="${esc(p.id)}">
-          <span class="odds"><b>${p.chance == null ? "--" : nf(p.chance, 0)}</b>
-            <i>in 100 finish ahead</i></span>
+          <span class="odds"><b>${p.chance == null ? "--" : nf(p.chance, 0) + "%"}</b>
+            <i>chance of making money</i></span>
           <span class="pname">${esc(p.name)}</span>
           <span class="pview">${esc(p.view)}</span>
           <span class="psum">${p.summary}</span>
           <span class="plegs">${p.legs.map((l) =>
             `${l.side === "long" ? "buy" : "sell"} ${l.qty}
-             ${l.kind === "stock" ? "shares" : `${nf(l.strike, 0)} ${l.kind}`}`).join(" &middot; ")}</span>
-          <span class="puse">use this &rarr;</span>
+             ${l.kind === "stock" ? "shares"
+               : `${nf(l.strike, l.strike % 1 ? 1 : 0)} ${l.kind}`}`).join(" &middot; ")}</span>
+          <span class="puse">open &rarr;</span>
         </button>`).join("")}
-    </div>` : ""}
+    </div>
+    <div class="prenote">The percentage is the chance the setup is worth more
+      than it cost by expiry, worked out from today&rsquo;s option prices. It is
+      not a forecast, and it says nothing about <b>how much</b> &mdash; the setups
+      with the best odds are the ones that make the least.</div>` : ""}
   </div>`;
+}
+
+/* One setup, opened up.
+ *
+ * The card answers "what is this". This answers "what am I actually
+ * signing up for", which is a different question and needs the arithmetic
+ * rather than a summary of it: every leg spelled out and why that strike
+ * and not the one beside it, what it is worth across a spread of finishing
+ * prices, and where the line crosses zero.
+ */
+function presetDetail(tab, p, c) {
+  const legs = p.legs_explained || [];
+  const cost = p.net_cost || 0;
+
+  const maxp = p.max_profit_unbounded ? "no cap"
+    : p.max_profit == null ? "&ndash;" : money(p.max_profit);
+  const maxl = p.max_loss_unbounded ? "no limit"
+    : p.max_loss == null ? "&ndash;" : money(Math.abs(p.max_loss));
+  const bes = p.breakevens || [];
+
+  return `
+  <div class="expbar">
+    <button class="plink" id="pre-back">&larr; all setups</button>
+    <span class="exphint">${esc(p.expiry || "")}${p.days_left == null ? ""
+      : ` &middot; ${p.days_left} trading session${p.days_left === 1 ? "" : "s"} left`}</span>
+  </div>
+
+  <div class="pdhead">
+    <div class="pdname">
+      <h4>${esc(p.name)}</h4>
+      <div class="pdview">${esc(p.view)} ${esc(p.note || "")}</div>
+    </div>
+    <div class="pdodds">
+      <b>${p.chance == null ? "--" : nf(p.chance, 0) + "%"}</b>
+      <span>chance of making money</span>
+      <em>The odds this is worth more than it cost by ${esc(p.expiry || "expiry")},
+        worked out from today&rsquo;s option prices. Not a forecast.</em>
+    </div>
+  </div>
+
+  <div class="pdgrid">
+    <div class="pdbox">
+      <div class="pdlab">${cost > 0 ? "costs you" : "pays you"}</div>
+      <div class="pdnum">${money(Math.abs(cost))}</div>
+    </div>
+    <div class="pdbox">
+      <div class="pdlab">most it can make</div>
+      <div class="pdnum">${maxp}</div>
+    </div>
+    <div class="pdbox">
+      <div class="pdlab">most it can lose</div>
+      <div class="pdnum">${maxl}</div>
+    </div>
+    <div class="pdbox">
+      <div class="pdlab">breaks even at</div>
+      <div class="pdnum">${bes.length ? bes.map((b) => money(b)).join(" and ") : "&ndash;"}</div>
+    </div>
+  </div>
+
+  <div class="pdsec">what you are buying and selling</div>
+  ${legs.map((l) => `<div class="pdleg">
+      <span class="pdlt">${esc(l.text)}</span>
+      <span class="pdlc">${l.direction === "out" ? "&minus;" : "+"}${money(Math.abs(l.cash))}</span>
+      ${l.why ? `<span class="pdlw">${esc(l.why)}</span>` : ""}
+    </div>`).join("")}
+
+  <div class="pdsec">what it is worth if the stock finishes at</div>
+  ${presetCurve(p)}
+  <div class="pdscen">
+    ${(p.scenarios || []).map((s) => `<div class="pdsrow ${s.good ? "win" : ""}">
+        <span class="pdsm">${s.move > 0 ? "+" : ""}${s.move}%</span>
+        <span class="pdsp">${money(s.price)}</span>
+        <span class="pdsv">${s.pl >= 0 ? "+" : "&minus;"}${money(Math.abs(s.pl))}</span>
+      </div>`).join("")}
+  </div>
+
+  <button class="pduse" data-use="${esc(p.id)}">Load this into the position &rarr;</button>
+  <div class="prenote">Every leg is priced at what you would actually pay to
+    buy or receive to sell right now, not the midpoint between them. Loading
+    it places nothing with a broker &mdash; it fills in the position above so
+    you can work on it.</div>`;
+}
+
+/* The payoff at expiry, drawn small. Where the line crosses zero is the
+ * only thing on it worth marking, so it is the only thing marked. */
+function presetCurve(p) {
+  const pts = p.curve || [];
+  if (pts.length < 2) return "";
+  const xs = pts.map((q) => q.s), ys = pts.map((q) => q.pl);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys, 0), y1 = Math.max(...ys, 0);
+  const W = 640, H = 110, pad = 3;
+  const px = (v) => ((v - x0) / (x1 - x0 || 1)) * W;
+  const py = (v) => H - pad - ((v - y0) / (y1 - y0 || 1)) * (H - pad * 2);
+
+  const line = pts.map((q, i) =>
+    `${i ? "L" : "M"}${px(q.s).toFixed(1)},${py(q.pl).toFixed(1)}`).join("");
+
+  return `<svg class="pdcurve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <line x1="0" y1="${py(0).toFixed(1)}" x2="${W}" y2="${py(0).toFixed(1)}" class="pdzero"/>
+    ${(p.breakevens || []).filter((b) => b >= x0 && b <= x1).map((b) =>
+      `<line x1="${px(b).toFixed(1)}" y1="0" x2="${px(b).toFixed(1)}" y2="${H}" class="pdbe"/>`).join("")}
+    <path d="${line}" class="pdline"/>
+  </svg>
+  <div class="pdaxis"><span>share price ${money(x0)}</span>
+    <span>the flat line is break-even</span><span>${money(x1)}</span></div>`;
 }
 
 /** The option chain, laid out the way an option chain is laid out.
@@ -906,12 +1023,24 @@ function wirePosition(tab) {
   if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(); };
 
   document.querySelectorAll("[data-preset]").forEach((b) => {
+    b.onclick = () => { u.preset = b.dataset.preset; render(); };
+  });
+  const pb = document.getElementById("pre-back");
+  if (pb) pb.onclick = () => { u.preset = null; render(); };
+
+  document.querySelectorAll("[data-use]").forEach((b) => {
     b.onclick = () => {
-      const p = (u.chain?.presets || []).find((x) => x.id === b.dataset.preset);
+      const p = (u.chain?.presets || []).find((x) => x.id === b.dataset.use);
       if (!p) return;
       // Replaces rather than appends: these are whole structures, and
       // stacking two of them silently makes a third thing you did not pick.
-      u.legs = p.legs.map((l) => ({ ...l, strike: l.strike ?? "", expiry: l.expiry ?? "" }));
+      // Only the fields a leg is made of -- the catalogue rows also carry
+      // the delta and IV they were chosen by, which are not part of a leg.
+      u.legs = p.legs.map((l) => ({
+        kind: l.kind, side: l.side, qty: l.qty, entry: l.entry,
+        strike: l.strike ?? "", expiry: l.expiry ?? "",
+      }));
+      u.preset = null;
       render();
       analysePosition(tab);
       document.querySelector(".posbody")?.scrollIntoView({ behavior: "smooth", block: "start" });
