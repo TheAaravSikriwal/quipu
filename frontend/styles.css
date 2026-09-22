@@ -1415,3 +1415,54 @@ a { color: inherit; text-decoration: none; }
   padding: 11px 1px 0; font-size: 12px; color: var(--text2);
 }
 .mnyratio b { color: var(--text); font-family: var(--mono); }
+
+
+/* ---- the accounts ----
+   A financial statement is a table and has been for five hundred years.
+   Label on the left, one column per period, figures right-aligned in
+   tabular figures so the magnitudes line up and a missing digit is
+   visible as a gap rather than as a slightly shorter number. */
+.ftab { display: table; width: 100%; border-collapse: collapse; }
+.fr {
+  display: grid; align-items: baseline;
+  grid-template-columns: minmax(130px, 1.6fr) repeat(auto-fit, minmax(58px, 1fr));
+  border-bottom: 1px solid var(--hline);
+}
+.fr.fhead { border-bottom: 1px solid var(--rule); }
+.fr.fgap { height: 9px; border: none; }
+
+.fl {
+  font-size: 11.5px; color: var(--text2); padding: 6px 8px 6px 0;
+}
+.fhead .fl, .fhead .fv {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+  padding-bottom: 6px;
+}
+.fv {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text);
+  text-align: right; padding: 6px 0; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fhead .fv { color: var(--text2); }
+
+.fsub {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  padding: 16px 0 6px;
+}
+
+/* The link back to the document. The point of the whole panel. */
+.fcite { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 11px 0 0; }
+.fcite a {
+  font-family: var(--ui); font-size: 9px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  text-decoration: none; border-bottom: 1px solid var(--rule);
+}
+.fcite a:hover { color: var(--text); border-bottom-color: var(--text); }
+
+.fnote {
+  padding-top: 9px; max-width: 76ch;
+  font-size: 10.5px; line-height: 1.55; color: var(--faint);
+}
+.fnote b { color: var(--text2); font-family: var(--mono); font-size: 10px; }

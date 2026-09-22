@@ -416,6 +416,118 @@ try:
 except Exception as exc:
     RESULTS.append((False, "setup descriptions", f"could not run: {exc}"))
 
+section("Discrete dividends, priced the way the market pays them")
+
+try:
+    from datetime import datetime as _dt, timezone as _tz
+
+    NOW = _dt(2026, 1, 2, tzinfo=_tz.utc)
+    DIVS = [{"date": "2026-02-13", "amount": 0.50},
+            {"date": "2026-05-15", "amount": 0.50},
+            {"date": "2027-02-12", "amount": 0.50}]
+    S0, R = 100.0, 0.04
+
+    # Only the payments that fall before expiry come out of the spot.
+    e1 = O.escrowed_spot(S0, DIVS, "2026-03-31", R, NOW)
+    check("one dividend before a March expiry", len(e1["used"]), 1, 0)
+    e2 = O.escrowed_spot(S0, DIVS, "2026-06-30", R, NOW)
+    check("two before a June expiry", len(e2["used"]), 2, 0)
+    e0 = O.escrowed_spot(S0, DIVS, "2026-01-30", R, NOW)
+    check("none before a January expiry", len(e0["used"]), 0, 0)
+
+    # The amount taken out is the present value, never the face value.
+    t = O.trading_days(NOW, _dt(2026, 2, 13, tzinfo=_tz.utc)) / 252.0
+    check("dividend is discounted, not just subtracted",
+          e1["pv"], 0.50 * math.exp(-R * t), 1e-6)
+    RESULTS.append((e1["pv"] < 0.50, "present value is below face value",
+                    f'{e1["pv"]:.4f} < 0.50'))
+
+    # Put-call parity under the escrowed model is an identity and must
+    # hold to the penny: C - P = S_adj - K.e^(-rT). If this drifts, the
+    # dividend is being counted twice somewhere, or not at all.
+    T, VOL, K = 0.5, 0.25, 100.0
+    sadj = O.escrowed_spot(S0, DIVS, "2026-06-30", R, NOW)["spot"]
+    c = O.bs_price(sadj, K, T, VOL, R, True, 0.0)
+    p_ = O.bs_price(sadj, K, T, VOL, R, False, 0.0)
+    check("parity holds with discrete dividends",
+          c - p_, sadj - K * math.exp(-R * T), 1e-9)
+
+    # And the whole point: over a short window straddling an ex-date the
+    # two models must NOT agree. A continuous yield spreads the payment
+    # out; the market takes it all on the day.
+    yld = (0.50 * 4) / S0
+    short_T = 14 / 252
+    cont = O.bs_price(S0 * math.exp(-yld * short_T), K, short_T, VOL, R, True, 0.0)
+    disc = O.bs_price(O.escrowed_spot(S0, DIVS, "2026-01-22", R, NOW)["spot"],
+                      K, short_T, VOL, R, True, 0.0)
+    RESULTS.append((abs(cont - disc) > 0.05,
+                    "the two dividend models differ across an ex-date",
+                    f"continuous {cont:.3f} vs escrowed {disc:.3f}"))
+
+    # A company with no dividend history must price identically either
+    # way -- the new path cannot move a non-payer.
+    plain = O.escrowed_spot(S0, [], "2026-06-30", R, NOW)
+    check("no dividends means no adjustment", plain["spot"], S0, 1e-12)
+except Exception as exc:
+    RESULTS.append((False, "discrete dividends", f"could not run: {exc}"))
+
+section("Filed accounts agree with the filings")
+
+try:
+    from sources import sec_edgar as SE, sec_xbrl as SX
+
+    facts = SX.fetch("AAPL", SE.lookup_cik)
+    RESULTS.append((facts.get("available"), "Apple's XBRL facts load",
+                    facts.get("entity") or facts.get("reason", "")))
+    rows = {r["end"]: r for r in facts.get("annual", [])}
+
+    # Apple's FY2024 as printed on the cover of the 10-K. An outside
+    # number, not something this code can talk itself into.
+    fy24 = rows.get("2024-09-28", {})
+    check("AAPL FY2024 revenue", fy24.get("revenue"), 391_035_000_000, 1)
+    check("AAPL FY2024 net income", fy24.get("net_income"), 93_736_000_000, 1)
+
+    # The accounting identity. Assets = liabilities + equity is true by
+    # construction in a filed balance sheet, so if it fails here the
+    # three figures have been read off different periods or filings.
+    bad = []
+    for end, r in rows.items():
+        a, l, e = r.get("assets"), r.get("liabilities"), r.get("equity")
+        if a and l and e and abs(a - (l + e)) / a > 0.005:
+            bad.append(end)
+    RESULTS.append((not bad, "assets = liabilities + equity",
+                    f"{len(rows)} years balance" if not bad else f"off in {bad}"))
+
+    # Margins are computed here, so they must reproduce by hand.
+    r = rows.get("2024-09-28", {})
+    if r.get("revenue") and r.get("net_income"):
+        check("net margin recomputes", r["net_margin"],
+              r["net_income"] / r["revenue"], 1e-9)
+
+    # Revenue cannot be smaller than the profit left after costs.
+    upside_down = [end for end, r in rows.items()
+                   if r.get("gross_profit") and r.get("revenue")
+                   and r["gross_profit"] > r["revenue"]]
+    RESULTS.append((not upside_down, "gross profit never exceeds revenue",
+                    "consistent" if not upside_down else str(upside_down)))
+
+    # Restatements collapse: one row per period end, never two.
+    ends = [r["end"] for r in facts.get("annual", [])]
+    RESULTS.append((len(ends) == len(set(ends)), "one row per fiscal year",
+                    f"{len(ends)} years, no repeats"))
+
+    # A REIT stops tagging rent as contract revenue when the lease
+    # standard changes. Preferring the tag by list order alone gave
+    # Realty Income a 2018 income statement and $1.3bn of revenue
+    # against an actual $5.5bn, which is the kind of wrong that looks
+    # entirely plausible on screen.
+    o = SX.fetch("O", SE.lookup_cik)
+    latest = (o.get("annual") or [{}])[-1].get("end", "")
+    RESULTS.append((latest >= "2023", "a REIT reports its recent years",
+                    f"latest annual period {latest or 'none'}"))
+except Exception as exc:
+    RESULTS.append((False, "filed accounts", f"could not run: {exc}"))
+
 section("No dict literal quietly overwrites itself")
 
 # A patch once inserted a new "events" key next to the old one instead of

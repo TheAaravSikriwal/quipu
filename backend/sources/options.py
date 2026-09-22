@@ -506,9 +506,73 @@ def _max_pain(calls: List[Dict], puts: List[Dict]) -> Optional[float]:
     return best_strike
 
 
+def escrowed_spot(spot: float, dividends: Optional[List[Dict]], expiry: str,
+                  rate: float, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Spot with the dividends due before expiry taken out of it.
+
+    A continuous dividend yield is the right model for an index and the
+    wrong one for a single company, which pays four times a year on
+    dates it has announced. The distinction is invisible over a year and
+    enormous over a fortnight: Coca-Cola's 2.4% annual yield spread
+    smoothly across two weeks removes 8 cents from the spot, but if the
+    ex-date falls inside those two weeks the market removes the whole 53.
+    Priced both ways the same option differs by 11%, in opposite
+    directions for calls and puts.
+
+    So where the payment dates are known, the standard escrowed model is
+    used instead: subtract the present value of each dividend going ex
+    before expiry, and price off what is left with no yield term at all.
+    Put-call parity then reads C - P = S_adj - K.e^(-rT), and the
+    early-exercise test in the binomial sees a real dividend on a real
+    date rather than a trickle.
+
+    Falls back to whatever continuous yield it was given when the
+    schedule is not known -- which is most non-payers, where it is zero
+    and the distinction does not arise.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not dividends or not spot:
+        return {"spot": spot, "pv": 0.0, "used": [], "model": "yield"}
+
+    try:
+        end = datetime.strptime(expiry, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return {"spot": spot, "pv": 0.0, "used": [], "model": "yield"}
+
+    pv, used = 0.0, []
+    for d in dividends:
+        when, amount = d.get("date"), d.get("amount")
+        if not when or not amount:
+            continue
+        try:
+            ex = datetime.strptime(str(when)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        # Strictly between now and expiry. A dividend that has already
+        # gone is in the price; one that goes after expiry is not the
+        # option holder's concern.
+        if not (now <= ex <= end):
+            continue
+        t = max(trading_days(now, ex) / 252.0, 0.0)
+        cash = float(amount) * math.exp(-rate * t)
+        pv += cash
+        used.append({"date": str(when)[:10], "amount": float(amount),
+                     "pv": round(cash, 4)})
+
+    if not used:
+        # Known schedule, nothing due before expiry: the correct yield is
+        # zero, not the annual average. Saying "yield" here would apply a
+        # dividend that is not coming.
+        return {"spot": spot, "pv": 0.0, "used": [], "model": "discrete"}
+
+    return {"spot": round(spot - pv, 6), "pv": round(pv, 6),
+            "used": used, "model": "discrete"}
+
+
 def fetch_options(symbol: str, max_expiries: int = 4,
                   div_yield: float = 0.0,
-                  only: Optional[str] = None) -> Dict[str, Any]:
+                  only: Optional[str] = None,
+                  dividends: Optional[List[Dict]] = None) -> Dict[str, Any]:
     """Chains for the nearest expiries, with greeks and flow metrics.
 
     `only` pulls a single named expiry instead of the first few. The
@@ -541,8 +605,15 @@ def fetch_options(symbol: str, max_expiries: int = 4,
         tdays = trading_days(now, expiry_dt)
         years = max(tdays / 252.0, 1 / 252.0)
 
-        calls = _rows(chain.calls, spot, years, rate, True, div_yield)
-        puts = _rows(chain.puts, spot, years, rate, False, div_yield)
+        # Price off the escrowed spot where the payment dates are known,
+        # and off the continuous yield where they are not. Never both --
+        # that would charge the dividend twice.
+        esc = escrowed_spot(spot, dividends, expiry, rate, now)
+        use_spot = esc["spot"]
+        use_q = 0.0 if esc["model"] == "discrete" else div_yield
+
+        calls = _rows(chain.calls, use_spot, years, rate, True, use_q)
+        puts = _rows(chain.puts, use_spot, years, rate, False, use_q)
 
         call_vol = sum(r["volume"] for r in calls)
         put_vol = sum(r["volume"] for r in puts)

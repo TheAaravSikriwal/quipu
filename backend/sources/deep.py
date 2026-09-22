@@ -195,6 +195,10 @@ def fetch_dividends(symbol: str) -> Dict[str, Any]:
         "history": [], "cadence": None, "gap_days": None,
         "next_ex": None, "next_ex_estimated": True,
         "pay_date": None, "amount": None,
+        # Set here too: a company that has never paid returns early, and
+        # a caller reaching for the schedule should find an empty list
+        # rather than a missing key.
+        "schedule": [],
     }
 
     try:
@@ -247,6 +251,34 @@ def fetch_dividends(symbol: str) -> Dict[str, Any]:
     except Exception:
         pass
 
+    out["schedule"] = _forward_schedule(out)
+    return out
+
+
+def _forward_schedule(div: Dict[str, Any], horizon_days: int = 800) -> List[Dict]:
+    """The dividends still to come, projected out on the same cadence.
+
+    Option pricing needs to know which payments fall before each expiry,
+    and the answer for a two-year LEAP is not "the next one". Once a
+    company has established a rhythm the later dates are a worse guess
+    than the first -- but a dividend assumed on roughly the right day is
+    far closer to the truth than pretending there is none, which is what
+    a zero yield would say.
+    """
+    ex, gap, amount = div.get("next_ex"), div.get("gap_days"), div.get("amount")
+    if not ex or not gap or not amount:
+        return []
+
+    out, when = [], date.fromisoformat(ex)
+    stop = date.today() + timedelta(days=horizon_days)
+    while when <= stop and len(out) < 12:
+        out.append({"date": when.isoformat(), "amount": amount,
+                    # Only the first can be an announced date; the rest
+                    # are this function's arithmetic and say so.
+                    "estimated": bool(out) or bool(div.get("next_ex_estimated"))})
+        when = when + timedelta(days=gap)
+        while when.weekday() > 4:
+            when += timedelta(days=1)
     return out
 
 

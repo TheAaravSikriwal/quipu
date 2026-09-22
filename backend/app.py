@@ -32,7 +32,7 @@ from fanout import bounded_map, fanout  # noqa: E402
 import position as position_engine  # noqa: E402
 import presets as preset_engine  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
-from sources import deep, events, news_rss, options, quotes, sec_edgar, symbols  # noqa: E402
+from sources import deep, events, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -46,6 +46,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _div_schedule(symbol: str):
+    """Upcoming ex-dividend dates, for the escrowed pricing model.
+
+    Wrapped because it must never be the reason a chain fails to load:
+    a company with no dividend history and a company whose history
+    could not be fetched both correctly price as if nothing is due.
+    """
+    try:
+        return (deep.fetch_dividends(symbol) or {}).get("schedule") or []
+    except Exception:                                  # noqa: BLE001
+        return []
 
 
 def _div_yield(symbol: str) -> float:
@@ -203,7 +216,9 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
         raise HTTPException(status_code=400, detail="invalid symbol")
 
     div = _div_yield(symbol)
-    data = options.fetch_options(symbol, max_expiries=1, div_yield=div, only=expiry)
+    sched = _div_schedule(symbol)
+    data = options.fetch_options(symbol, max_expiries=1, div_yield=div,
+                                 only=expiry, dividends=sched)
     if not data.get("available"):
         raise HTTPException(status_code=404,
                             detail=data.get("reason", f"no options for {symbol}"))
@@ -228,6 +243,14 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
     rate = options.risk_free_rate()
     years = max((board.get("trading_days") or 0) / 252.0, 1 / 252.0)
 
+    # Everything below prices in the same currency the board was priced
+    # in. Where the dividend dates are known that is the escrowed spot --
+    # the share price less the payments due before expiry -- and mixing
+    # the two would apply the dividend twice or not at all.
+    esc = options.escrowed_spot(spot_quoted, sched, expiry or board.get("expiry"), rate)
+    use_q = 0.0 if esc["model"] == "discrete" else div
+    spot_ref = esc["spot"]
+
     calls = board.get("calls") or []
     puts = board.get("puts") or []
     put_at = {p["strike"]: p for p in puts}
@@ -235,7 +258,7 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
     def _two_sided(r):
         return r.get("bid") and r.get("ask") and r["ask"] > r["bid"]
 
-    spot = spot_quoted
+    spot = spot_ref
     spot_source = "quote"
     pairs = [(c, put_at[c["strike"]]) for c in calls
              if c["strike"] in put_at and _two_sided(c) and _two_sided(put_at[c["strike"]])]
@@ -243,22 +266,29 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
         # The nearest-the-money pair, where the spread is tightest and the
         # parity read is therefore cleanest.
         c, p = min(pairs, key=lambda cp: abs(cp[0]["strike"] - spot_quoted))
-        implied = ((c["mark"] - p["mark"]) + c["strike"] * math.exp(-rate * years))             / math.exp(-div * years)
+        # Parity has to be written against whichever dividend model the
+        # board was priced under, or the identity is being solved for the
+        # wrong unknown. Escrowed:  C - P = S_adj - K.e^(-rT), and S_adj
+        # already has the dividends removed. Continuous: the old form
+        # with the e^(-qT) term.
+        forward = (c["mark"] - p["mark"]) + c["strike"] * math.exp(-rate * years)
+        implied = (forward if esc["model"] == "discrete"
+                   else forward / math.exp(-div * years))
         # Only trust it if it is close; a wild number means a broken quote,
         # not a stale one.
-        if abs(implied / spot_quoted - 1) < 0.03:
+        if spot_ref and abs(implied / spot_ref - 1) < 0.03:
             spot, spot_source = implied, f"put-call parity at {c['strike']:g}"
 
     # Re-solve every implied vol against that spot, because the ones on the
     # rows were solved against the stale one.
-    if abs(spot - spot_quoted) > 0.005:
+    if abs(spot - spot_ref) > 0.005:
         for side, rows in (("call", calls), ("put", puts)):
             for r in rows:
                 mk = r.get("mark") or r.get("last")
                 if not mk:
                     continue
                 iv = options.implied_vol(mk, spot, float(r["strike"]), years,
-                                         rate, side == "call", div)
+                                         rate, side == "call", use_q)
                 if iv:
                     r["iv"] = round(iv * 100, 2)
                     r["iv_source"] = "solved"
@@ -296,7 +326,7 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
                 r["fair"] = r["edge"] = r["edge_vol"] = None
                 continue
             fair = options.bs_price(spot, float(r["strike"]), years,
-                                    ref / 100.0, rate, side == "call", div)
+                                    ref / 100.0, rate, side == "call", use_q)
             r["fair"] = round(fair, 4)
             r["edge"] = round(mark - fair, 4)
             # The same mispricing in volatility terms. Dollars alone cannot
@@ -482,8 +512,11 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                 "fundamentals": lambda: quotes.fetch_fundamentals(symbol),
                 "history": lambda: quotes.fetch_history(symbol),
                 "intraday": lambda: quotes.fetch_intraday(symbol),
-                "options": lambda: options.fetch_options(symbol, div_yield=_div_yield(symbol)),
+                "options": lambda: options.fetch_options(
+                    symbol, div_yield=_div_yield(symbol),
+                    dividends=_div_schedule(symbol)),
                 "filings": lambda: sec_edgar.fetch_filings(symbol),
+                "sec": lambda: sec_xbrl.fetch(symbol, sec_edgar.lookup_cik),
                 "social": lambda: news_rss.stocktwits(symbol),
                 "profile": lambda: deep.fetch_profile(symbol),
                 "financials": lambda: deep.fetch_financials(symbol),
@@ -579,6 +612,7 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
         "intraday": stage1["intraday"].data if stage1["intraday"].ok else None,
         "options": stage1["options"].data if stage1["options"].ok else None,
         "filings": stage1["filings"].data if stage1["filings"].ok else None,
+        "sec": stage1["sec"].data if stage1["sec"].ok else None,
         "social": stage1["social"].data if stage1["social"].ok else None,
         "profile": stage1["profile"].data if stage1["profile"].ok else None,
         "financials": stage1["financials"].data if stage1["financials"].ok else None,

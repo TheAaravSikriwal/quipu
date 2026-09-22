@@ -1373,6 +1373,8 @@ const SOURCES = {
   greeks: "Black-Scholes, computed here from live quotes",
   profile: "Company filings via Yahoo Finance",
   financials: "Annual reports via Yahoo Finance",
+  secfin: "SEC EDGAR &middot; XBRL, exactly as filed",
+  secmargins: "Computed here from the filed figures",
   valuation: "Yahoo Finance &middot; trailing and forward",
   earnings: "Reported results and consensus estimates",
   analysts: "Sell-side consensus via Yahoo Finance",
@@ -1446,8 +1448,9 @@ const REGIONS = [
   { id: "price",    label: "Price",    keys: ["quote", "price", "returns", "volume"] },
   { id: "options",  label: "Options",  keys: ["vol", "options", "optionstory", "probability",
                                               "unusual", "greeks", "chain"] },
-  { id: "business", label: "Business", keys: ["profile", "financials", "valuation", "earnings",
-                                              "analysts", "ownership", "short", "filings"] },
+  { id: "business", label: "Business", keys: ["profile", "secfin", "secmargins", "financials",
+                                              "valuation", "earnings", "analysts", "ownership",
+                                              "short", "filings"] },
   { id: "news",     label: "News",     keys: ["calendar", "news", "unique", "corroborated",
                                               "stories", "social", "pipeline"] },
 ];
@@ -2419,6 +2422,146 @@ function volumeTile(v) {
   );
 }
 
+/* ---- the accounts, as filed -----------------------------------------
+ *
+ * Every other business panel here is Yahoo's version of the accounts.
+ * Yahoo is a convenience layer over exactly this data, and convenience
+ * layers normalise -- somebody decides what counts as revenue for a
+ * company that reports three kinds, picks one, and hands you a number
+ * with no way to ask which.
+ *
+ * These come from the filing. Each row says which form it is from and
+ * when it was filed, and links to that filing on EDGAR. That is the
+ * whole argument for the panel: not that the numbers are better, but
+ * that you can go and check them.
+ */
+const BIG = (v) => {
+  if (v == null) return "&ndash;";
+  const a = Math.abs(v);
+  const s = v < 0 ? "&minus;" : "";
+  if (a >= 1e12) return `${s}$${nf(a / 1e12, 2)}T`;
+  if (a >= 1e9) return `${s}$${nf(a / 1e9, 1)}B`;
+  if (a >= 1e6) return `${s}$${nf(a / 1e6, 1)}M`;
+  return `${s}$${nf(a, 0)}`;
+};
+const PCT1 = (v) => (v == null ? "&ndash;" : `${nf(v * 100, 1)}%`);
+const FYLAB = (end) => {
+  const d = new Date(end + "T12:00:00");
+  // A September year end is FY25, not FY26. Anything from the second
+  // half of the calendar year belongs to the year it started in only
+  // for the handful of filers with a January close, so the label just
+  // follows the year the period ENDED, which is what the cover of the
+  // 10-K says.
+  return `FY${String(d.getFullYear()).slice(2)}`;
+};
+
+function secFinTile(d) {
+  const x = d.sec;
+  if (!x?.available) {
+    return x?.reason || x?.note
+      ? tile("secfin", "e-filed", "w2 h1", "The accounts, as filed",
+             `<div class="dim">${esc(x.note || x.reason)}</div>`)
+      : "";
+  }
+  const rows = (x.annual || []).slice(-5);
+  const qs = (x.quarterly || []).slice(-4);
+  if (!rows.length && !qs.length) return "";
+
+  const line = (label, key, fmt = BIG) => `<div class="fr">
+      <span class="fl">${label}</span>
+      ${rows.map((r) => `<span class="fv">${fmt(r[key])}</span>`).join("")}
+    </div>`;
+
+  return tile(
+    "secfin", "elastic e-filed", "w3 h3", "The accounts, as filed",
+    `${x.note ? `<div class="dim" style="margin-bottom:8px">${esc(x.note)}</div>` : ""}
+     ${rows.length ? `
+     <div class="ftab">
+       <div class="fr fhead">
+         <span class="fl">year to</span>
+         ${rows.map((r) => `<span class="fv">${FYLAB(r.end)}</span>`).join("")}
+       </div>
+       ${line("revenue", "revenue")}
+       ${line("gross profit", "gross_profit")}
+       ${line("operating income", "operating_income")}
+       ${line("net income", "net_income")}
+       ${line("earnings per share", "eps_diluted", (v) => v == null ? "&ndash;" : `$${nf(v, 2)}`)}
+       ${line("cash from operations", "operating_cash_flow")}
+       ${line("capital spending", "capex")}
+       ${line("free cash flow", "free_cash_flow")}
+       <div class="fr fgap"></div>
+       ${line("cash on hand", "cash")}
+       ${line("total assets", "assets")}
+       ${line("total liabilities", "liabilities")}
+       ${line("shareholders equity", "equity")}
+     </div>` : ""}
+
+     ${qs.length ? `<h4 class="fsub">the last four quarters</h4>
+     <div class="ftab">
+       <div class="fr fhead">
+         <span class="fl">quarter to</span>
+         ${qs.map((r) => `<span class="fv">${esc(r.end.slice(2))}</span>`).join("")}
+       </div>
+       <div class="fr"><span class="fl">revenue</span>
+         ${qs.map((r) => `<span class="fv">${BIG(r.revenue)}</span>`).join("")}</div>
+       <div class="fr"><span class="fl">against a year earlier</span>
+         ${qs.map((r) => `<span class="fv">${r.revenue_growth == null ? "&ndash;"
+            : signed(r.revenue_growth * 100, 1)}</span>`).join("")}</div>
+       <div class="fr"><span class="fl">net income</span>
+         ${qs.map((r) => `<span class="fv">${BIG(r.net_income)}</span>`).join("")}</div>
+     </div>` : ""}
+
+     <div class="fcite">
+       ${rows.slice(-3).reverse().map((r) => r.cite ? `<a href="${esc(r.cite.url || x.source_url)}"
+          target="_blank" rel="noopener">${FYLAB(r.end)} ${esc(r.cite.form || "")}
+          &middot; filed ${esc(r.cite.filed || "")}</a>` : "").join("")}
+     </div>
+     <div class="fnote">Figures are taken from the company&rsquo;s own XBRL filings.
+       Where a year has been restated in a later report, the later version is
+       shown. Revenue is read from
+       <b>${esc((x.tags || {}).revenue || "the filed revenue tag")}</b>.</div>`,
+    `${rows.length} years`
+  );
+}
+
+function secMarginsTile(d) {
+  const x = d.sec;
+  const rows = (x?.annual || []).slice(-5);
+  if (!rows.length) return "";
+  const last = rows[rows.length - 1];
+
+  const line = (label, key) => `<div class="fr">
+      <span class="fl">${label}</span>
+      ${rows.map((r) => `<span class="fv">${PCT1(r[key])}</span>`).join("")}
+    </div>`;
+
+  return tile(
+    "secmargins", "elastic e-derived", "w2 h2", "What it keeps, and what it owes",
+    `<div class="ftab">
+       <div class="fr fhead"><span class="fl">year to</span>
+         ${rows.map((r) => `<span class="fv">${FYLAB(r.end)}</span>`).join("")}</div>
+       ${line("gross margin", "gross_margin")}
+       ${line("operating margin", "operating_margin")}
+       ${line("net margin", "net_margin")}
+       ${line("return on equity", "roe")}
+       <div class="fr fgap"></div>
+       <div class="fr"><span class="fl">current ratio</span>
+         ${rows.map((r) => `<span class="fv">${r.current_ratio == null ? "&ndash;"
+            : nf(r.current_ratio, 2)}</span>`).join("")}</div>
+       <div class="fr"><span class="fl">long-term debt to equity</span>
+         ${rows.map((r) => `<span class="fv">${r.debt_to_equity == null ? "&ndash;"
+            : nf(r.debt_to_equity, 2)}</span>`).join("")}</div>
+     </div>
+     <div class="fnote">Worked out here from the filed figures above, so each one
+       can be checked against the filing rather than taken on trust. Gross margin
+       is what survives the cost of making the thing; net margin is what survives
+       everything. A current ratio under 1 means more falls due within the year
+       than there are liquid assets to meet it
+       &mdash; normal in some industries, a warning in others.</div>`,
+    last.net_margin == null ? "" : `${nf(last.net_margin * 100, 0)}% net`
+  );
+}
+
 function filingsTile(f) {
   if (!f?.available) return "";
   return tile(
@@ -3310,6 +3453,8 @@ function renderDashboard(d, tab) {
     chainTile(d, tab),
 
     profileTile(d.profile),
+    secFinTile(d),
+    secMarginsTile(d),
     financialsTile(d.financials),
     valuationTile(d.fundamentals),
     earningsTile(d.earnings),
