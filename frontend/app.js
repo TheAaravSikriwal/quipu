@@ -2006,7 +2006,7 @@ function priceChartTile(d, tab) {
   tab.ui.priceRange = sel;
   const ui = (tab.ui.priceOpts ||= {
     candles: true, log: false, mas: { 20: false, 50: false, 200: false },
-    bands: false, osc: null,
+    bands: false, osc: null, crosses: false,
   });
 
   const btn = (label, on, attr) => `<button ${attr} class="${on ? "on" : ""}">${label}</button>`;
@@ -2029,6 +2029,7 @@ function priceChartTile(d, tab) {
        </div>
        <div class="cseg">
          ${btn("bands", ui.bands, `data-ptool="bands"`)}
+         ${btn("50/200 cross", ui.crosses, `data-ptool="crosses"`)}
          ${btn("RSI", ui.osc === "rsi", `data-posc="rsi"`)}
          ${btn("MACD", ui.osc === "macd", `data-posc="macd"`)}
        </div>
@@ -4062,6 +4063,7 @@ function mountPriceChart(tab, host, keyPrefix, statsSel, keepZoom = true) {
     mas: ui.mas,
     bands: ui.bands,
     osc: ui.osc,
+    crosses: ui.crosses,
     range: keepZoom ? tab.ui.chartRanges[key + ":" + sel] : null,
     onRange: (r) => { tab.ui.chartRanges[key + ":" + sel] = r; },
     onState: (s) => paintChartStats(s, sel, statsSel),
@@ -4100,6 +4102,14 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
       b.classList.toggle("on", on);
       if (t === "candles") { ui.candles = on; chart()?.setCandles(on); }
       else if (t === "bands") { ui.bands = on; chart()?.setBands(on); }
+      else if (t === "crosses") {
+        // The marks are on the two averages, so turning the marks on
+        // turns the lines on. Asking someone to switch on three things
+        // to see one is a puzzle, not an interface.
+        ui.crosses = on;
+        if (on) { ui.mas[50] = true; ui.mas[200] = true; }
+        render();
+      }
       else { ui.log = on; chart()?.setLog(on); }
     };
   });
@@ -4146,9 +4156,45 @@ function paintIndicatorNote(tab, chart, root = document) {
   const host = root.querySelector("[data-pind]");
   if (!host) return;
   const ui = tab.ui.priceOpts || {};
-  if (!ui.osc || !chart?.readings) { host.innerHTML = ""; return; }
+  if ((!ui.osc && !ui.crosses) || !chart?.readings) { host.innerHTML = ""; return; }
 
   const r = chart.readings();
+
+  /* The 50/200 cross, named correctly.
+   *
+   * They are two different events with two different names, and the
+   * bearish one is the DEATH cross -- the 50 falling through the 200.
+   * A golden cross is the opposite and is read as strength. Labelling
+   * either one wrong would be the exact failure this app exists to
+   * avoid, so the panel says which is which and what it means. */
+  let crossNote = "";
+  if (ui.crosses) {
+    if (!r.cross && r.above == null) {
+      crossNote = `<span class="indname">50 / 200 cross</span>
+        Not enough history on this range to have a 200-day average yet.
+        Try 1Y or 5Y.`;
+    } else {
+      const side = r.above
+        ? "The 50-day average is <b>above</b> the 200-day"
+        : "The 50-day average is <b>below</b> the 200-day";
+      const last = r.cross
+        ? ` The last crossing was a <b>${r.cross.kind === "golden"
+            ? "golden cross" : "death cross"}</b> on ${esc(String(r.cross.t).slice(0, 10))},
+            ${r.cross.bars_ago} sessions ago.`
+        : " There has been no crossing inside this range.";
+      crossNote = `<span class="indname">50 / 200 cross</span>${side}.${last}
+        <span class="inddef">A <b>golden cross</b> is the 50 rising through the
+        200 and is read as strength. A <b>death cross</b> is the 50 falling
+        through it &mdash; that is the one people worry about and the one that
+        gets written up. Both lag by construction: a 200-day average cannot say
+        anything until the move is already 200 days old, so a crossing confirms
+        what has happened rather than predicting what will. They are worth
+        marking because so many people watch them, not because the record is
+        strong.</span>`;
+    }
+  }
+  if (!ui.osc) { host.innerHTML = crossNote; return; }
+  const tail = crossNote ? `<div class="indsplit">${crossNote}</div>` : "";
   if (ui.osc === "rsi") {
     if (r.rsi == null) { host.innerHTML = ""; return; }
     const v = r.rsi;
@@ -4166,7 +4212,8 @@ function paintIndicatorNote(tab, chart, root = document) {
            of the time.`;
     host.innerHTML = `<span class="indname">RSI 14</span> ${verdict}
       <span class="inddef">Compares the size of recent gains with recent losses
-      over fourteen sessions, on a scale of 0 to 100. Wilder&rsquo;s smoothing.</span>`;
+      over fourteen sessions, on a scale of 0 to 100. Wilder&rsquo;s smoothing.</span>`
+      + tail;
     return;
   }
 
@@ -4179,7 +4226,8 @@ function paintIndicatorNote(tab, chart, root = document) {
       <span class="inddef">The distance between a 12-day and a 26-day
       exponential average. Above zero the shorter average is higher, which
       means the recent trend is upward; the crossing is what people watch,
-      and it lags by construction.</span>`;
+      and it lags by construction.</span>`
+      + tail;
   }
 }
 

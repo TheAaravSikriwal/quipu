@@ -1599,3 +1599,9 @@ a { color: inherit; text-decoration: none; }
   margin-right: 8px;
 }
 .inddef { display: block; margin-top: 3px; font-size: 10.5px; color: var(--faint); }
+
+/* A second reading under the first, ruled off so they do not read as
+   one run-on sentence about two different things. */
+.indsplit {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hline);
+}

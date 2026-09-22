@@ -22,7 +22,7 @@ const src = fs.readFileSync(path.join(__dirname, "chart.js"), "utf8");
 // Run it in its own scope. Evaluated inline, chart.js's top-level
 // declarations collide with this file's imports of the same names.
 new Function(src).call(global);
-const { rsi, ema, macd, bollinger, sma } = global.window.QUIPU_CHART;
+const { rsi, ema, macd, bollinger, sma, crossovers } = global.window.QUIPU_CHART;
 
 let pass = 0, fail = 0;
 const bars = (closes) => closes.map((c) => ({ t: "", o: c, h: c, l: c, c, v: 0 }));
@@ -130,6 +130,55 @@ near("the band is symmetric about the average",
 // Two standard deviations of nothing is nothing.
 const bflat = bollinger(bars(new Array(40).fill(7)), 20, 2);
 near("a flat series has no width", bflat.up[39] - bflat.dn[39], 0, 1e-9);
+
+/* ------------------------------------------------------- 50/200 cross */
+section("Golden and death crosses are not the same event");
+
+// A series that falls for a year then rises for a year: the 50 has to
+// cross UP through the 200 exactly once, and that is the golden cross.
+const vshape = [];
+for (let k = 0; k < 400; k++) vshape.push(300 - k * 0.5);
+for (let k = 0; k < 400; k++) vshape.push(100 + k * 0.5);
+const cv = crossovers(bars(vshape), 50, 200);
+yes("a V-shape crosses exactly once", cv.length === 1, `${cv.length} crossing(s)`);
+yes("and rising through is the GOLDEN cross",
+    cv[0] && cv[0].kind === "golden", cv[0] ? cv[0].kind : "none");
+
+// The mirror image. Falling through is the DEATH cross. This is the
+// pair most often held the wrong way round, so it is asserted in both
+// directions rather than assumed from one.
+const peak = [];
+for (let k = 0; k < 400; k++) peak.push(100 + k * 0.5);
+for (let k = 0; k < 400; k++) peak.push(300 - k * 0.5);
+const cp = crossovers(bars(peak), 50, 200);
+yes("an inverted V also crosses once", cp.length === 1, `${cp.length} crossing(s)`);
+yes("and falling through is the DEATH cross",
+    cp[0] && cp[0].kind === "death", cp[0] ? cp[0].kind : "none");
+
+if (cv[0]) {
+  yes("the averages meet where the cross is marked",
+      Math.abs(cv[0].fast - cv[0].slow) < 1,
+      `50 at ${cv[0].fast.toFixed(2)}, 200 at ${cv[0].slow.toFixed(2)}`);
+}
+
+const steady = crossovers(
+  bars(Array.from({ length: 600 }, (_, k) => 50 + k * 0.2)), 50, 200);
+yes("a one-way trend never crosses", steady.length === 0, `${steady.length} crossings`);
+
+yes("no crossings without enough history",
+    crossovers(bars(Array.from({ length: 150 }, (_, k) => 100 + k)), 50, 200).length === 0,
+    "150 bars, no 200-day average");
+
+// Crossings must alternate. Two goldens in a row would mean one was
+// counted on the way through without the pair ever returning.
+const wobble = [];
+for (let c = 0; c < 3; c++) {
+  for (let k = 0; k < 300; k++) wobble.push(200 + 60 * Math.sin(k / 48 + c));
+}
+const cw = crossovers(bars(wobble), 50, 200);
+yes("crossings alternate direction",
+    cw.length > 1 && cw.every((c, idx) => idx === 0 || c.kind !== cw[idx - 1].kind),
+    `${cw.length}: ` + cw.map((c) => c.kind[0]).join(""));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

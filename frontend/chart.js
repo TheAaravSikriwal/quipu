@@ -122,6 +122,44 @@ function rsi(points, period = 14) {
   return out;
 }
 
+/** Where the 50-day average crosses the 200-day one.
+ *
+ * Two names, and they are not interchangeable:
+ *
+ *   GOLDEN CROSS  the 50 rises through the 200. Read as a sign of
+ *                 strength -- the recent trend has pulled above the
+ *                 long one.
+ *   DEATH CROSS   the 50 falls through the 200. This is the one people
+ *                 worry about, and the one that gets written up.
+ *
+ * Both are lagging by construction: a 200-day average cannot tell you
+ * anything until the move is already 200 days old, so a cross confirms
+ * what has happened rather than forecasting what will. They are worth
+ * marking because a great many people watch them, which makes them
+ * self-fulfilling at the margin, not because the statistics are strong.
+ */
+function crossovers(points, fast = 50, slow = 200) {
+  const f = sma(points, fast), sl = sma(points, slow);
+  const out = [];
+  for (let i = 1; i < points.length; i++) {
+    if (f[i] == null || sl[i] == null || f[i - 1] == null || sl[i - 1] == null) continue;
+    const was = f[i - 1] - sl[i - 1];
+    const now = f[i] - sl[i];
+    // A touch is not a cross. The sign has to actually change, and a
+    // day where the two are exactly equal is skipped rather than
+    // counted twice on the way through.
+    if (was === 0 || now === 0) continue;
+    if ((was < 0) !== (now < 0)) {
+      out.push({
+        i, t: points[i].t, price: points[i].c,
+        kind: now > 0 ? "golden" : "death",
+        fast: f[i], slow: sl[i],
+      });
+    }
+  }
+  return out;
+}
+
 /** Exponential moving average, seeded on the simple average of the first
  *  window -- the seeding convention MACD is defined with. */
 function ema(values, period) {
@@ -203,6 +241,7 @@ function makeChart(host, opts) {
   // price a strip, and the price is what the panel is for.
   let osc = opts.osc || null;                    // "rsi" | "macd" | null
   let bands = !!opts.bands;
+  let crosses = !!opts.crosses;
 
   let range = opts.range && opts.range[1] > opts.range[0]
     ? [Math.max(0, opts.range[0]), Math.min(all.length - 1, opts.range[1])]
@@ -499,6 +538,30 @@ function makeChart(host, opts) {
       }
     }
 
+    // Where the two averages crossed. Marked on the price pane because
+    // that is where the lines being crossed are drawn.
+    if (crosses) {
+      for (const c of crossovers(all, 50, 200)) {
+        if (c.i < i0 || c.i > i1) continue;
+        const cx = X(c.i - i0), cy = Y(c.fast);
+        svg.appendChild(el("line", {
+          x1: cx, y1: y0, x2: cx, y2: y1, stroke: dim,
+          "stroke-width": 1, "stroke-dasharray": "1 3", opacity: 0.8,
+        }));
+        // Filled for the golden cross, hollow for the death cross --
+        // the same convention the rest of the app uses for direction,
+        // so it survives being printed or read without colour.
+        svg.appendChild(el("circle", {
+          cx, cy, r: 3.4,
+          fill: c.kind === "golden" ? stroke : ink("--black", "#0A0A0B"),
+          stroke: stroke, "stroke-width": 1.2,
+        }));
+        svg.appendChild(el("text", {
+          x: cx, y: y0 + 9, "text-anchor": "middle", class: "qc-axis",
+        })).textContent = c.kind === "golden" ? "golden" : "death";
+      }
+    }
+
     // date axis: first, middle, last
     [0, Math.floor((slice.length - 1) / 2), slice.length - 1].forEach((i, n) => {
       const t = el("text", {
@@ -683,16 +746,27 @@ function makeChart(host, opts) {
     setMa: (period, on) => { mas[period] = !!on; draw(); },
     setOsc: (name) => { osc = name || null; draw(); },
     setBands: (v) => { bands = !!v; draw(); },
+    setCrosses: (v) => { crosses = !!v; draw(); },
     /* The current indicator readings at the right-hand edge, so a panel
      * can say "RSI 71" in words without recomputing any of it. */
     readings: () => {
       const i = range[1];
       const r = rsi(all, 14), m = macd(all);
+      const xs = crossovers(all, 50, 200);
+      const last = xs.length ? xs[xs.length - 1] : null;
+      const f = sma(all, 50), sl = sma(all, 200);
       return {
         rsi: r[i] == null ? null : Math.round(r[i] * 10) / 10,
         macd: m.line[i] == null ? null : m.line[i],
         macd_signal: m.signal[i] == null ? null : m.signal[i],
         macd_hist: m.hist[i] == null ? null : m.hist[i],
+        cross: last && { ...last, bars_ago: all.length - 1 - last.i },
+        cross_count: xs.length,
+        ma50: f[i], ma200: sl[i],
+        // Which side the pair is on right now, which is the state a
+        // cross changed. Useful even when the cross itself is off the
+        // visible window or older than the series.
+        above: (f[i] != null && sl[i] != null) ? f[i] > sl[i] : null,
       };
     },
     canCandle: () => hasOHLC,
@@ -707,4 +781,4 @@ function makeChart(host, opts) {
   return api;
 }
 
-window.QUIPU_CHART = { makeChart, rsi, ema, macd, bollinger, sma };
+window.QUIPU_CHART = { makeChart, rsi, ema, macd, bollinger, sma, crossovers };
