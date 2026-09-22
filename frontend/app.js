@@ -681,6 +681,11 @@ function renderPosition(tab) {
         ${s.note ? `<p>${esc(s.note)}</p>` : ""}
       </div>
 
+      ${d.plain ? `<div class="plain">
+        <p>${d.plain.position}</p>
+        ${d.plain.behaviour ? `<p>${d.plain.behaviour}</p>` : ""}
+      </div>` : ""}
+
       <div class="pstats">
         ${chip("profit / loss", (d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), plCls)}
         ${chip("of what is at risk", d.pl_pct == null ? "--" : signed(d.pl_pct, 0), plCls)}
@@ -695,13 +700,13 @@ function renderPosition(tab) {
       <h4>Profit at expiry, against where it finishes</h4>
       <div class="qchart-host poschart" style="height:250px"></div>
 
-      <h4>What the position is, in shares and dollars</h4>
+      <h4>The same thing, as figures</h4>
       <div class="pstats">
-        ${chip("behaves like", nf(d.share_equivalent, 0) + " shares")}
-        ${chip("per $1 the stock moves", money(d.greeks.delta, 0))}
-        ${chip("that changes by", nf(d.greeks.gamma * 100, 1) + " shares")}
-        ${chip("time, per day", (d.greeks.theta >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.theta)), d.greeks.theta >= 0 ? "up" : "down")}
-        ${chip("per point of vol", (d.greeks.vega >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.vega)))}
+        ${chip("behaves like owning", nf(d.share_equivalent, 0) + " shares")}
+        ${chip("gain per $1 rise", money(d.greeks.delta, 0))}
+        ${chip("and that grows by", nf(d.greeks.gamma, 1) + " shares / $1")}
+        ${chip("time, each day", (d.greeks.theta >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.theta)), d.greeks.theta >= 0 ? "up" : "down")}
+        ${chip("if volatility rises 1pt", (d.greeks.vega >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.vega)))}
       </div>
 
       <h4>Each leg</h4>

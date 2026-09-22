@@ -551,3 +551,125 @@ def _price_for_pl(a: Dict[str, Any], target: float) -> Optional[float]:
             if dist is None or d < dist:
                 best, dist = p["s"], d
     return best
+
+
+# --------------------------------------------------------- in plain english
+def describe(a: Dict[str, Any], name: Optional[str] = None,
+             symbol: Optional[str] = None) -> Dict[str, str]:
+    """The position as two paragraphs a person would actually say.
+
+    The grid of figures above this is faster to scan once you know what the
+    labels mean, and useless before then. "Per point of vol: +$2.29" is not
+    a sentence anybody has said out loud. So the same numbers are written
+    out once, in order, with the units attached -- and then the grid is
+    just the short version of something you have already read.
+    """
+    # "Apple Inc." already ends in a full stop, and appending one gave
+    # "Apple Inc..". Repeating the legal name in every clause also reads
+    # like a contract, so the sentences after the first use the ticker.
+    who = (name or symbol or "the stock").rstrip(".")
+    short = symbol or who
+    s = a["strategy"]
+    pl, cost = a["pl"], a["net_cost"]
+    risk, mp, ml = a.get("risk"), a.get("max_profit"), a.get("max_loss")
+    bes = a.get("breakevens") or []
+    days = a.get("days_left")
+    g = a["greeks"]
+
+    # ---- what you hold, what it cost, where it stands
+    bits: List[str] = [f"You are in a <b>{s['name'].lower()}</b> on {who}."]
+
+    if cost > 0:
+        bits.append(f"It cost you <b>{_usd(cost)}</b> to put on and is worth "
+                    f"<b>{_usd(a['value_now'])}</b> now,")
+    else:
+        bits.append(f"You were paid <b>{_usd(abs(cost))}</b> to put it on and it "
+                    f"would cost <b>{_usd(abs(a['value_now']))}</b> to close,")
+
+    if abs(pl) < 1:
+        bits.append("so you are roughly level.")
+    else:
+        share = abs(pl) / risk * 100 if risk else None
+        # Below one percent, the percentage says less than the dollars do.
+        of_risk = (f" &mdash; about {share:.0f}% of what you have at risk"
+                   if share and share >= 1 else
+                   " &mdash; a fraction of what you have at risk" if share else "")
+        bits.append(f"so you are <b>{'up' if pl > 0 else 'down'} {_usd(abs(pl))}</b>{of_risk}.")
+
+    # ---- what has to happen for it to work
+    if bes:
+        if len(bes) == 1:
+            side = "above" if _rises(a) else "below"
+            bits.append(f"It starts making money {side} <b>${bes[0]:,.2f}</b>.")
+        else:
+            bits.append(f"It makes money {'outside' if _outside(a) else 'between'} "
+                        f"<b>${min(bes):,.2f}</b> and <b>${max(bes):,.2f}</b>.")
+
+    if mp is not None and mp > 0:
+        bits.append(f"The most it can make is <b>{_usd(mp)}</b>.")
+    elif a.get("max_profit_unbounded"):
+        bits.append("There is no cap on what it can make.")
+
+    if ml is not None:
+        bits.append(f"The most it can lose is <b>{_usd(abs(ml))}</b>.")
+    elif a.get("max_loss_unbounded"):
+        bits.append("<b>There is no limit on what it can lose</b> if the price keeps "
+                    "running against you.")
+
+    if days is not None:
+        bits.append(f"All of that is settled in <b>{days} trading "
+                    f"{'session' if days == 1 else 'sessions'}</b>.")
+
+    # ---- what it behaves like, day to day
+    shares = g["delta"]
+    gsent: List[str] = []
+    if abs(shares) >= 1:
+        gsent.append(f"Day to day this behaves like owning <b>{abs(shares):,.0f} "
+                     f"{'shares' if abs(shares) != 1 else 'share'}</b>"
+                     f"{' (short)' if shares < 0 else ''}: a $1 move in {short} "
+                     f"changes it by about <b>{_usd(abs(shares))}</b>"
+                     f"{' against you' if shares < 0 else ''}.")
+    # Position gamma is ALREADY the change in position delta, and position
+    # delta is already counted in shares -- the hundred is applied once when
+    # the leg is sized. Multiplying again turned a straddle's honest five
+    # shares per dollar into four hundred and seventy-five.
+    if abs(g["gamma"]) >= 0.05:
+        direction = "grows" if g["gamma"] > 0 else "shrinks"
+        gsent.append(f"That sensitivity is not fixed &mdash; it {direction} by about "
+                     f"<b>{abs(g['gamma']):,.1f} shares</b> for every dollar "
+                     f"{short} rises, so the position "
+                     f"{'speeds up as it works' if g['gamma'] > 0 else 'slows as it works and quickens as it fails'}.")
+    if abs(g["theta"]) >= 0.01:
+        gsent.append(f"Time {'costs you' if g['theta'] < 0 else 'pays you'} "
+                     f"<b>{_usd(abs(g['theta']))} a day</b> whether or not anything "
+                     f"happens.")
+    if abs(g["vega"]) >= 0.01:
+        gsent.append(f"If implied volatility rises by one point you "
+                     f"{'gain' if g['vega'] > 0 else 'lose'} about "
+                     f"<b>{_usd(abs(g['vega']))}</b>; if it falls a point, the reverse.")
+
+    return {"position": " ".join(bits), "behaviour": " ".join(gsent)}
+
+
+def _rises(a: Dict[str, Any]) -> bool:
+    """Does the payoff improve as the price goes up?"""
+    c = a.get("curve") or []
+    return bool(c) and c[-1]["pl"] > c[0]["pl"]
+
+
+def _outside(a: Dict[str, Any]) -> bool:
+    """With two break-evens, is the money made outside them or between?
+
+    Judged at the midpoint BETWEEN the break-evens, which is the only place
+    that answers the question. Taking the midpoint of the whole plotted
+    range instead landed wherever the chart happened to start and stop, and
+    told a long straddle it earned between its break-evens and a short
+    strangle that it earned outside them -- each exactly inverted.
+    """
+    c = a.get("curve") or []
+    bes = a.get("breakevens") or []
+    if not c or len(bes) < 2:
+        return False
+    target = (min(bes) + max(bes)) / 2
+    mid = min(c, key=lambda p: abs(p["s"] - target))
+    return mid["pl"] < 0

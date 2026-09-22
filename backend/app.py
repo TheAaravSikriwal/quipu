@@ -256,6 +256,8 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         pass
 
     analysis["guidance"] = position_engine.guidance(analysis, vol, rate, div, earnings)
+    analysis["plain"] = position_engine.describe(
+        analysis, quote.get("name") or symbol, symbol)
     analysis["symbol"] = symbol
     analysis["name"] = quote.get("name")
     analysis["change_pct"] = quote.get("change_pct")

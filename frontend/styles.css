@@ -321,6 +321,16 @@ body {
 }
 .phead p { font-size: 13px; color: var(--text2); margin-top: 5px; max-width: 70ch; }
 
+/* The position written out. Set at reading size and given the width of a
+   column of prose, because that is what it is -- the grid underneath is
+   the abbreviation, not the other way round. */
+.plain { margin-bottom: 18px; max-width: 78ch; }
+.plain p {
+  font-family: var(--ui); font-size: 14.5px; line-height: 1.68;
+  color: var(--text2); margin-bottom: 9px;
+}
+.plain p b { color: var(--text); font-weight: 600; }
+
 .pstats {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px; background: var(--rule); border: 1px solid var(--rule);
