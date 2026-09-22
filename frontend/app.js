@@ -2004,13 +2004,21 @@ function priceChartTile(d, tab) {
   const sel = ranges.includes(tab.ui.priceRange) ? tab.ui.priceRange
     : ranges.includes(series.default) ? series.default : ranges[ranges.length - 1];
   tab.ui.priceRange = sel;
-  const ui = (tab.ui.priceOpts ||= { candles: true, log: false, mas: { 20: false, 50: false, 200: false } });
+  const ui = (tab.ui.priceOpts ||= {
+    candles: true, log: false, mas: { 20: false, 50: false, 200: false },
+    bands: false, osc: null,
+  });
 
   const btn = (label, on, attr) => `<button ${attr} class="${on ? "on" : ""}">${label}</button>`;
   const frame = series[sel] || {};
 
+  // An oscillator needs its own pane, and a pane needs room. At the
+  // tile's usual height the chart host is 90px, which after axes leaves
+  // 60 -- a fifth of that is 13px of RSI, which is a smear rather than a
+  // reading. So turning one on makes the panel taller rather than
+  // quietly drawing nothing, which is what it did.
   return tile(
-    "price", "elastic e-priced", "w4 h3", "Price",
+    "price", "elastic e-priced", ui.osc ? "w4 h4" : "w4 h3", "Price",
     `<div class="cbar">
        <div class="cseg">${ranges.map((r) => btn(r, r === sel, `data-prange="${r}"`)).join("")}</div>
        <span class="grow"></span>
@@ -2019,8 +2027,14 @@ function priceChartTile(d, tab) {
          ${btn("log", ui.log, `data-ptool="log"`)}
          ${[20, 50, 200].map((p) => btn(String(p), ui.mas[p], `data-pma="${p}"`)).join("")}
        </div>
+       <div class="cseg">
+         ${btn("bands", ui.bands, `data-ptool="bands"`)}
+         ${btn("RSI", ui.osc === "rsi", `data-posc="rsi"`)}
+         ${btn("MACD", ui.osc === "macd", `data-posc="macd"`)}
+       </div>
      </div>
      <div class="qchart-host" data-chart="price"></div>
+     <div class="indnote" data-pind></div>
      <div class="cstats" data-pstats></div>
      <div class="qchart-hint">drag to zoom &middot; shift-drag to pan &middot; scroll to scale &middot; double-click to reset</div>`,
     signed(frame.change_pct, 2)
@@ -4046,11 +4060,18 @@ function mountPriceChart(tab, host, keyPrefix, statsSel, keepZoom = true) {
     candles: ui.candles,
     logScale: ui.log,
     mas: ui.mas,
+    bands: ui.bands,
+    osc: ui.osc,
     range: keepZoom ? tab.ui.chartRanges[key + ":" + sel] : null,
     onRange: (r) => { tab.ui.chartRanges[key + ":" + sel] = r; },
     onState: (s) => paintChartStats(s, sel, statsSel),
   });
   if (chart) liveCharts.push(Object.assign(chart, { key }));
+  // Repaint the reading whenever the chart is rebuilt, not only when a
+  // toggle is clicked: changing the range or a live refresh both mount a
+  // new chart, and a stale "RSI 71" under a different window is worse
+  // than none at all.
+  paintIndicatorNote(tab, chart);
   return chart;
 }
 
@@ -4078,6 +4099,7 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
       const on = !b.classList.contains("on");
       b.classList.toggle("on", on);
       if (t === "candles") { ui.candles = on; chart()?.setCandles(on); }
+      else if (t === "bands") { ui.bands = on; chart()?.setBands(on); }
       else { ui.log = on; chart()?.setLog(on); }
     };
   });
@@ -4091,6 +4113,74 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
       chart()?.setMa(p, on);
     };
   });
+
+  /* The oscillators are one-at-a-time. Two of them stacked under the
+   * price leaves the price a strip, and the price is what the panel is
+   * for -- so picking one turns the other off, and picking the one that
+   * is already on turns it off and gives the room back. */
+  if (attrs.osc) {
+    root.querySelectorAll(`[${attrs.osc}]`).forEach((b) => {
+      b.onclick = () => {
+        const name = b.getAttribute(attrs.osc);
+        const next = ui.osc === name ? null : name;
+        ui.osc = next;
+        root.querySelectorAll(`[${attrs.osc}]`).forEach((o) => {
+          o.classList.toggle("on", o.getAttribute(attrs.osc) === next);
+        });
+        // A full re-render, because the panel changes height to make
+        // room. Setting it on the chart alone left the pane trying to
+        // draw inside the old one and showing nothing.
+        if (keyPrefix === "grid") render();
+        else { chart()?.setOsc(next); paintIndicatorNote(tab, chart(), root); }
+      };
+    });
+  }
+}
+
+/* What the indicator currently reads, said in words under the chart.
+ *
+ * A line crossing 70 is only meaningful if you know what 70 means, and
+ * the whole argument of this app is that a number should arrive with its
+ * interpretation attached rather than assume the reader supplies one. */
+function paintIndicatorNote(tab, chart, root = document) {
+  const host = root.querySelector("[data-pind]");
+  if (!host) return;
+  const ui = tab.ui.priceOpts || {};
+  if (!ui.osc || !chart?.readings) { host.innerHTML = ""; return; }
+
+  const r = chart.readings();
+  if (ui.osc === "rsi") {
+    if (r.rsi == null) { host.innerHTML = ""; return; }
+    const v = r.rsi;
+    const verdict = v >= 70
+      ? `<b>${nf(v, 0)}</b> &mdash; above 70. It has risen hard enough for long
+         enough that buyers have had to pay up every day; often it keeps going,
+         and often it stalls. It is a description of the last fortnight, not a
+         signal about the next one.`
+      : v <= 30
+        ? `<b>${nf(v, 0)}</b> &mdash; below 30. Sellers have had it every day for
+           a fortnight. The same caution applies in reverse: cheap by this
+           measure has no obligation to stop being cheap.`
+        : `<b>${nf(v, 0)}</b> &mdash; in the middle. Gains and losses over the
+           last fortnight are roughly in balance, which is where it sits most
+           of the time.`;
+    host.innerHTML = `<span class="indname">RSI 14</span> ${verdict}
+      <span class="inddef">Compares the size of recent gains with recent losses
+      over fourteen sessions, on a scale of 0 to 100. Wilder&rsquo;s smoothing.</span>`;
+    return;
+  }
+
+  if (ui.osc === "macd") {
+    if (r.macd == null || r.macd_hist == null) { host.innerHTML = ""; return; }
+    const above = r.macd_hist >= 0;
+    host.innerHTML = `<span class="indname">MACD 12/26/9</span>
+      <b>${nf(r.macd, 2)}</b>, ${above ? "above" : "below"} its signal line by
+      ${nf(Math.abs(r.macd_hist), 2)}. The bars are that gap.
+      <span class="inddef">The distance between a 12-day and a 26-day
+      exponential average. Above zero the shorter average is higher, which
+      means the recent trend is upward; the crossing is what people watch,
+      and it lags by construction.</span>`;
+  }
 }
 
 /** Charts inside the open zoom panel, mounted after its HTML lands. */
@@ -4129,7 +4219,8 @@ function mountCharts(tab) {
     mountPriceChart(tab, pHost, "grid", "[data-pstats]");
     wirePriceControls(
       tab, document.querySelector('.tile[data-tile="price"]'),
-      { range: "data-prange", tool: "data-ptool", ma: "data-pma" },
+      { range: "data-prange", tool: "data-ptool", ma: "data-pma",
+        osc: "data-posc" },
       () => document.querySelector('.qchart-host[data-chart="price"]'), "[data-pstats]", "grid"
     );
   }

@@ -1582,3 +1582,20 @@ a { color: inherit; text-decoration: none; }
   font-style: normal; font-family: var(--mono); font-size: 9.5px;
   color: var(--rule2); margin-right: 2px;
 }
+
+/* ---- what the indicator reads ----
+   A line crossing 70 means nothing unless you know what 70 is, and the
+   argument of this whole app is that a number should arrive with its
+   interpretation attached rather than assume the reader brings one. */
+.indnote {
+  padding: 7px 2px 0; max-width: 92ch;
+  font-size: 11.5px; line-height: 1.6; color: var(--text2);
+}
+.indnote:empty { display: none; }
+.indnote b { color: var(--text); font-family: var(--mono); }
+.indname {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+  margin-right: 8px;
+}
+.inddef { display: block; margin-top: 3px; font-size: 10.5px; color: var(--faint); }

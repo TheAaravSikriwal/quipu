@@ -915,6 +915,27 @@ try:
 except Exception as exc:
     RESULTS.append((False, "control byte scan", f"could not run: {exc}"))
 
+section("Chart indicators, checked in their own runtime")
+
+# The indicators live in JavaScript, so they are checked by node rather
+# than reimplemented here -- a Python copy of the same arithmetic would
+# only prove the two copies agree. That suite tests RSI against Wilder's
+# published worked example, which is the outside source of truth for it.
+try:
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run(
+        ["node", str(root / "frontend" / "indicators.test.js")],
+        capture_output=True, text=True, timeout=60, cwd=str(root))
+    tail = (proc.stdout or "").strip().splitlines()
+    summary = tail[-1] if tail else (proc.stderr or "no output").strip()[:60]
+    RESULTS.append((proc.returncode == 0, "indicator suite passes", summary))
+except FileNotFoundError:
+    RESULTS.append((None, "  [SKIP] indicator suite -- node not on PATH", ""))
+except Exception as exc:
+    RESULTS.append((False, "indicator suite", f"could not run: {exc}"))
+
 # ------------------------------------------------------------------ report
 if __name__ == "__main__":
     passed = failed = 0

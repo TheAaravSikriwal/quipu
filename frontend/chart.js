@@ -79,6 +79,101 @@ function sma(points, period) {
   return out;
 }
 
+/* ---- indicators ------------------------------------------------------
+ *
+ * Written out rather than pulled in, for the same reason the option
+ * maths is: an indicator is four lines of arithmetic and a library is a
+ * dependency whose conventions you then have to verify anyway. The
+ * conventions used here are the ones every platform uses, so a number
+ * read off this chart matches the number read off a broker's.
+ */
+
+/** Relative strength index, with Wilder's smoothing.
+ *
+ * Wilder's own method, which is what RSI means -- a plain average of the
+ * last 14 gains gives a different and wrong number. The first value is a
+ * simple average of the first `period` changes; every value after that
+ * carries the previous average forward with weight (period-1)/period.
+ * That makes it recursive, so it depends on where the series starts, and
+ * it is therefore computed over ALL the data and sliced afterwards
+ * rather than over the visible window.
+ */
+function rsi(points, period = 14) {
+  const out = new Array(points.length).fill(null);
+  if (points.length <= period) return out;
+
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = points[i].c - points[i - 1].c;
+    if (d >= 0) gain += d; else loss -= d;
+  }
+  gain /= period;
+  loss /= period;
+  // All gains and no losses is RSI 100 by definition, not a division by
+  // zero -- it happens on a stock that has risen every day of a fortnight.
+  out[period] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+
+  for (let i = period + 1; i < points.length; i++) {
+    const d = points[i].c - points[i - 1].c;
+    gain = (gain * (period - 1) + (d > 0 ? d : 0)) / period;
+    loss = (loss * (period - 1) + (d < 0 ? -d : 0)) / period;
+    out[i] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+  }
+  return out;
+}
+
+/** Exponential moving average, seeded on the simple average of the first
+ *  window -- the seeding convention MACD is defined with. */
+function ema(values, period) {
+  const out = new Array(values.length).fill(null);
+  const k = 2 / (period + 1);
+  // Counted rather than indexed. The MACD signal line is an EMA of the
+  // MACD line, which is null until the slow average exists -- so the
+  // first real value can sit at index 25, and seeding on "index >=
+  // period - 1" then divided a single number by nine.
+  let seen = 0, sum = 0, prev = null;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v == null) continue;
+    seen += 1;
+    if (prev === null) {
+      sum += v;
+      if (seen === period) { prev = sum / period; out[i] = prev; }
+      continue;
+    }
+    prev = v * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+
+/** MACD: the gap between two exponential averages, and its own average. */
+function macd(points, fast = 12, slow = 26, signal = 9) {
+  const closes = points.map((p) => p.c);
+  const f = ema(closes, fast), sl = ema(closes, slow);
+  const line = closes.map((_, i) => (f[i] == null || sl[i] == null ? null : f[i] - sl[i]));
+  const sig = ema(line, signal);
+  const hist = line.map((v, i) => (v == null || sig[i] == null ? null : v - sig[i]));
+  return { line, signal: sig, hist };
+}
+
+/** Bollinger bands: a 20-day average with two standard deviations either
+ *  side, measured on the same window as the average. */
+function bollinger(points, period = 20, mult = 2) {
+  const mid = sma(points, period);
+  const up = new Array(points.length).fill(null);
+  const dn = new Array(points.length).fill(null);
+  for (let i = period - 1; i < points.length; i++) {
+    if (mid[i] == null) continue;
+    let acc = 0;
+    for (let j = i - period + 1; j <= i; j++) acc += (points[j].c - mid[i]) ** 2;
+    const sd = Math.sqrt(acc / period);
+    up[i] = mid[i] + mult * sd;
+    dn[i] = mid[i] - mult * sd;
+  }
+  return { mid, up, dn };
+}
+
 /* ResizeObserver and scroll events never fire in this shell -- verified by
  * instrumenting both -- so one shared poll watches every mounted chart for a
  * size change. One timer for the page beats one observer per panel. */
@@ -104,6 +199,10 @@ function makeChart(host, opts) {
   let candles = hasOHLC && opts.candles !== false;
   let logScale = !!opts.logScale;
   let mas = Object.assign({ 20: false, 50: false, 200: false }, opts.mas || {});
+  // One oscillator at a time. Two stacked under a price pane leaves the
+  // price a strip, and the price is what the panel is for.
+  let osc = opts.osc || null;                    // "rsi" | "macd" | null
+  let bands = !!opts.bands;
 
   let range = opts.range && opts.range[1] > opts.range[0]
     ? [Math.max(0, opts.range[0]), Math.min(all.length - 1, opts.range[1])]
@@ -152,10 +251,19 @@ function makeChart(host, opts) {
     // the chart falls back to the line it would otherwise be imitating.
     const showCandles = candles && slice.length <= 400;
     const hasVol = slice.some((p) => p.v);
-    const volH = hasVol ? Math.max(14, (H - PAD.top - PAD.bottom) * 0.2) : 0;
+    const inner = H - PAD.top - PAD.bottom;
+    // The oscillator takes its share before volume does, and both give way
+    // if the tile is short: below about 150px a third pane would leave the
+    // price unreadable, which defeats the point of drawing any of it.
+    const oscH = osc && inner > 90 ? Math.max(30, inner * 0.24) : 0;
+    // Volume yields to the oscillator rather than the other way round:
+    // one was asked for and the other is always on. Below the threshold
+    // both would be a few pixels of smear each.
+    const volH = hasVol && inner - oscH > 95
+      ? Math.max(14, (inner - oscH) * 0.2) : 0;
 
     const x0 = PAD.left, x1 = W - PAD.right;
-    const y0 = PAD.top, y1 = H - PAD.bottom - volH;
+    const y0 = PAD.top, y1 = H - PAD.bottom - volH - oscH;
     const pw = Math.max(x1 - x0, 1), ph = Math.max(y1 - y0, 1);
 
     // Candles are drawn to the wick, so the axis has to hold the wick.
@@ -269,6 +377,125 @@ function makeChart(host, opts) {
           points: pts.join(" "), fill: "none", stroke: dim,
           "stroke-width": 1.2, "stroke-dasharray": dashes[period],
         }));
+      }
+    }
+
+    // Bollinger bands, on the price scale because that is what they are.
+    // Drawn before the moving averages so the dashes sit on top of the fill.
+    if (bands) {
+      const b = bollinger(all, 20, 2);
+      const up = [], dn = [];
+      for (let i = i0; i <= i1; i++) {
+        if (b.up[i] == null) continue;
+        up.push(`${X(i - i0).toFixed(2)},${Y(b.up[i]).toFixed(2)}`);
+        dn.push(`${X(i - i0).toFixed(2)},${Y(b.dn[i]).toFixed(2)}`);
+      }
+      if (up.length > 1) {
+        svg.appendChild(el("polygon", {
+          points: up.concat(dn.reverse()).join(" "),
+          fill: stroke, opacity: 0.05,
+        }));
+        for (const line of [up, dn]) {
+          svg.appendChild(el("polyline", {
+            points: line.join(" "), fill: "none", stroke: ink("--rule2", "#3A3A3E"),
+            "stroke-width": 1,
+          }));
+        }
+      }
+    }
+
+    // ---- the oscillator pane
+    if (oscH > 0) {
+      const oy0 = H - PAD.bottom - oscH + 4;
+      const oy1 = H - PAD.bottom;
+      const oh = Math.max(oy1 - oy0, 1);
+
+      svg.appendChild(el("line", {
+        x1: x0, y1: oy0 - 3, x2: x1, y2: oy0 - 3,
+        stroke: ink("--rule", "#262629"), "stroke-width": 1,
+        "shape-rendering": "crispEdges",
+      }));
+
+      if (osc === "rsi") {
+        const r = rsi(all, 14);
+        const RY = (v) => oy1 - (v / 100) * oh;
+        // 30 and 70 are the conventional lines, and the band between them
+        // is shaded so "outside the band" reads without checking the axis.
+        svg.appendChild(el("rect", {
+          x: x0, y: RY(70), width: Math.max(x1 - x0, 1),
+          height: Math.max(RY(30) - RY(70), 1),
+          fill: stroke, opacity: 0.035,
+        }));
+        for (const lvl of [30, 70]) {
+          svg.appendChild(el("line", {
+            x1: x0, y1: RY(lvl), x2: x1, y2: RY(lvl),
+            stroke: ink("--rule2", "#3A3A3E"), "stroke-width": 1,
+            "stroke-dasharray": "2 3",
+          }));
+        }
+        const pts = [];
+        for (let i = i0; i <= i1; i++) {
+          if (r[i] == null) continue;
+          pts.push(`${X(i - i0).toFixed(2)},${RY(r[i]).toFixed(2)}`);
+        }
+        if (pts.length > 1) {
+          svg.appendChild(el("polyline", {
+            points: pts.join(" "), fill: "none", stroke: stroke,
+            "stroke-width": 1.3, "vector-effect": "non-scaling-stroke",
+          }));
+        }
+        const last = r[i1];
+        svg.appendChild(el("text", {
+          x: x1 + 5, y: oy0 + 9, class: "qc-axis",
+        })).textContent = last == null ? "RSI" : `RSI ${last.toFixed(0)}`;
+      }
+
+      if (osc === "macd") {
+        const m = macd(all);
+        let lo2 = Infinity, hi2 = -Infinity;
+        for (let i = i0; i <= i1; i++) {
+          for (const v of [m.line[i], m.signal[i], m.hist[i]]) {
+            if (v == null) continue;
+            lo2 = Math.min(lo2, v); hi2 = Math.max(hi2, v);
+          }
+        }
+        if (!isFinite(lo2)) { lo2 = -1; hi2 = 1; }
+        // Symmetric about zero, because MACD is a signed quantity and a
+        // pane that puts zero off-centre makes a small positive look big.
+        const mag = Math.max(Math.abs(lo2), Math.abs(hi2)) || 1;
+        const MY = (v) => oy0 + oh / 2 - (v / mag) * (oh / 2 - 2);
+
+        svg.appendChild(el("line", {
+          x1: x0, y1: MY(0), x2: x1, y2: MY(0),
+          stroke: ink("--rule2", "#3A3A3E"), "stroke-width": 1,
+        }));
+        const bwm = Math.max((pw / slice.length) * 0.6, 0.8);
+        for (let i = i0; i <= i1; i++) {
+          const v = m.hist[i];
+          if (v == null) continue;
+          const yv = MY(v), yz = MY(0);
+          svg.appendChild(el("rect", {
+            x: X(i - i0) - bwm / 2, y: Math.min(yv, yz),
+            width: bwm, height: Math.max(Math.abs(yz - yv), 0.6),
+            fill: stroke, opacity: v >= 0 ? 0.42 : 0.18,
+          }));
+        }
+        for (const [series, width, dash] of [[m.line, 1.3, null], [m.signal, 1, "3 2"]]) {
+          const pts = [];
+          for (let i = i0; i <= i1; i++) {
+            if (series[i] == null) continue;
+            pts.push(`${X(i - i0).toFixed(2)},${MY(series[i]).toFixed(2)}`);
+          }
+          if (pts.length > 1) {
+            const attrs = { points: pts.join(" "), fill: "none", stroke: stroke,
+                            "stroke-width": width };
+            if (dash) { attrs.stroke = dim; attrs["stroke-dasharray"] = dash; }
+            svg.appendChild(el("polyline", attrs));
+          }
+        }
+        svg.appendChild(el("text", {
+          x: x1 + 5, y: oy0 + 9, class: "qc-axis",
+        })).textContent = "MACD";
       }
     }
 
@@ -454,6 +681,20 @@ function makeChart(host, opts) {
     setCandles: (v) => { candles = !!v && hasOHLC; draw(); },
     setLog: (v) => { logScale = !!v; draw(); },
     setMa: (period, on) => { mas[period] = !!on; draw(); },
+    setOsc: (name) => { osc = name || null; draw(); },
+    setBands: (v) => { bands = !!v; draw(); },
+    /* The current indicator readings at the right-hand edge, so a panel
+     * can say "RSI 71" in words without recomputing any of it. */
+    readings: () => {
+      const i = range[1];
+      const r = rsi(all, 14), m = macd(all);
+      return {
+        rsi: r[i] == null ? null : Math.round(r[i] * 10) / 10,
+        macd: m.line[i] == null ? null : m.line[i],
+        macd_signal: m.signal[i] == null ? null : m.signal[i],
+        macd_hist: m.hist[i] == null ? null : m.hist[i],
+      };
+    },
     canCandle: () => hasOHLC,
     zoomed: () => range[0] !== 0 || range[1] !== all.length - 1,
     _checkSize: () => {
@@ -466,4 +707,4 @@ function makeChart(host, opts) {
   return api;
 }
 
-window.QUIPU_CHART = { makeChart };
+window.QUIPU_CHART = { makeChart, rsi, ema, macd, bollinger, sma };
