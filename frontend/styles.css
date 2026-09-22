@@ -169,6 +169,90 @@ body {
 }
 .quick span:hover { background: var(--panel); color: var(--text); }
 
+/* ================= positions =================
+   The editor is a form and looks like one: fields in a row, one leg per
+   line, no card around it. Everything below the editor is read-only and
+   uses the panel vocabulary the rest of the app already speaks. */
+
+.launchlinks { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+.posedit { border-bottom: 1px solid var(--rule); padding: 4px 0 8px; }
+.posrow {
+  display: grid; align-items: center; gap: 8px; padding: 4px 16px;
+  grid-template-columns: 74px 90px 90px 110px 130px 80px 110px 34px;
+}
+.poshead {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  padding-bottom: 6px;
+}
+.posrow input, .posrow select {
+  background: var(--sunk); border: none; border-radius: 999px;
+  color: var(--text); font-family: var(--mono); font-size: 12px;
+  padding: 6px 12px; outline: none; width: 100%;
+}
+.posrow input:focus, .posrow select:focus { background: var(--raised); }
+.posrow input:disabled { color: var(--rule2); }
+.posrow button {
+  background: none; border: none; color: var(--rule2); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 4px; border-radius: 999px;
+}
+.posrow button:hover { color: var(--text); background: var(--panel); }
+.posadd { grid-template-columns: 140px 1fr; padding-top: 8px; }
+.posadd button {
+  font-family: var(--ui); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--faint); padding: 6px 12px;
+}
+.posadd .dim, .posrow .dim { font-size: 10.5px; line-height: 1.45; }
+
+.posbody { padding: 16px 16px 30px; }
+.phead { margin-bottom: 14px; }
+.phead h2 {
+  font-family: var(--mast); font-weight: 700; font-size: 28px;
+  display: inline-block; margin-right: 12px;
+}
+.phead .fam {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
+}
+.phead p { font-size: 13px; color: var(--text2); margin-top: 5px; max-width: 70ch; }
+
+.pstats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+  margin-bottom: 16px;
+}
+.pstats .pstat { background: var(--panel); padding: 10px 13px; }
+.pstats .pstat span {
+  display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 4px;
+}
+.pstats .pstat b {
+  font-family: var(--mono); font-size: 19px; font-weight: 500; color: var(--text);
+}
+
+.plegs { margin-bottom: 8px; }
+.pleg {
+  display: grid; gap: 10px; align-items: baseline; padding: 6px 0;
+  grid-template-columns: minmax(150px, 1.4fr) 110px 78px 78px 78px 78px 96px;
+  border-bottom: 1px solid var(--hline);
+  font-family: var(--mono); font-size: 12px; color: var(--text2);
+}
+.pleg span:last-child, .pleg span:nth-child(5) { text-align: right; }
+.pleg b { color: var(--text); font-weight: 600; }
+.plhead {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  border-bottom: 1px solid var(--rule);
+}
+.poschart { border: 1px solid var(--rule); margin-bottom: 4px; }
+.tab-position .sym { letter-spacing: .06em; }
+
+@media (max-width: 1100px) {
+  .posrow { grid-template-columns: 60px 76px 76px 88px 108px 64px 88px 28px; gap: 6px; }
+  .pleg { grid-template-columns: minmax(120px,1.3fr) 92px 62px 62px 62px 62px 80px; gap: 7px; }
+}
+
 /* ================= the finder =================
    A table, because that is what a ranked list of two thousand things is.
    The reasons column is the point: a score of 94.4 is not an argument, and

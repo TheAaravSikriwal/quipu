@@ -120,6 +120,78 @@ async function loadScreen(tab) {
   }
 }
 
+/* ---- positions --------------------------------------------------------
+ *
+ * A trade you have already put on. You enter legs, not a strategy name --
+ * the app works out what you built and what that shape implies, which is
+ * the thing the reference workbooks cannot do (theirs asks the user to
+ * tick a box saying "is this a Collar?").
+ *
+ * Legs live in localStorage. This is a local instrument and a position is
+ * the one piece of state that is genuinely yours rather than fetched.
+ */
+const POS_KEY = "quipu.positions";
+
+function loadPositions() {
+  try { return JSON.parse(localStorage.getItem(POS_KEY)) || null; } catch { return null; }
+}
+function savePositions(tab) {
+  try {
+    localStorage.setItem(POS_KEY, JSON.stringify(
+      { symbol: tab.ui.symbol, legs: tab.ui.legs }));
+  } catch { /* private mode, or full -- not worth interrupting for */ }
+}
+
+const blankLeg = () => ({ kind: "call", side: "long", strike: "", qty: 1, entry: "", expiry: "" });
+
+function newPositionTab() {
+  const saved = loadPositions();
+  const tab = {
+    id: ++state.seq, symbol: null, kind: "position", status: "position",
+    data: null, error: null, live: true, loading: false,
+    ui: {
+      symbol: saved?.symbol || "",
+      legs: saved?.legs?.length ? saved.legs : [blankLeg()],
+      zoom: null,
+    },
+  };
+  state.tabs.push(tab);
+  state.active = tab.id;
+  render();
+  if (tab.ui.symbol && tab.ui.legs.some((l) => l.strike || l.kind === "stock")) analysePosition(tab);
+  return tab;
+}
+
+async function analysePosition(tab) {
+  const legs = tab.ui.legs.filter((l) =>
+    Number(l.qty) > 0 && (l.kind === "stock" ? l.entry !== "" : l.strike !== "" && l.expiry));
+  if (!tab.ui.symbol || !legs.length) { tab.data = null; render(); return; }
+  tab.loading = true;
+  renderPositionStatus(tab);
+  try {
+    const res = await fetch(`${API}/api/position`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol: tab.ui.symbol, legs }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    tab.data = body;
+    tab.error = null;
+  } catch (err) {
+    tab.error = String(err.message || err);
+    tab.data = null;
+  }
+  tab.loading = false;
+  savePositions(tab);
+  if (state.active === tab.id) render();
+}
+
+function renderPositionStatus(tab) {
+  const el = document.getElementById("pos-status");
+  if (el) el.textContent = tab.loading ? "pricing..." : "";
+}
+
 function closeTab(id, event) {
   if (event) event.stopPropagation();
   const i = state.tabs.findIndex((t) => t.id === id);
@@ -327,12 +399,16 @@ function renderTabs() {
   state.tabs.forEach((tab) => {
     const el = document.createElement("div");
     el.className = "tab" + (tab.id === state.active ? " active" : "")
-      + (tab.kind === "finder" ? " tab-finder" : "");
+      + (tab.kind === "finder" ? " tab-finder" : "")
+      + (tab.kind === "position" ? " tab-position" : "");
     const q = tab.data?.quote;
     const chg = q?.change_pct;
     el.innerHTML =
       (tab.status === "ready" ? `<span class="livedot ${tab.live ? "" : "off"}"></span>` : "") +
-      `<span class="sym">${esc(tab.symbol || (tab.kind === "finder" ? "Finder" : "New search"))}</span>` +
+      `<span class="sym">${esc(tab.symbol
+        || (tab.kind === "finder" ? "Finder"
+          : tab.kind === "position" ? (tab.ui.symbol ? tab.ui.symbol + " position" : "Position")
+          : "New search"))}</span>` +
       (tab.status === "loading" ? `<span class="chg dim">...</span>` : "") +
       (q?.price ? `<span class="px">${money(q.price)}</span>` : "") +
       (chg !== undefined && chg !== null ? `<span class="chg ${sign(chg)}">${signed(chg, 2)}</span>` : "") +
@@ -360,8 +436,188 @@ function renderLauncher() {
       <div class="quick">
         ${["NVDA", "AAPL", "TSLA", "AMD", "SPY", "MSFT"].map((s) => `<span data-s="${s}">${s}</span>`).join("")}
       </div>
-      <button class="findlink" id="findlink">I do not know what I am looking for</button>
+      <div class="launchlinks">
+        <button class="findlink" id="findlink">I do not know what I am looking for</button>
+        <button class="findlink" id="poslink">I am already in a trade</button>
+      </div>
     </div>`;
+}
+
+/* ---- positions, drawn ------------------------------------------------ */
+
+function renderPosition(tab) {
+  const u = tab.ui, d = tab.data;
+  const bar = `<div class="livebar">
+    <span class="lbsym">${esc(u.symbol || "Position")}</span>
+    ${d ? `<span class="lbprice"><b>${money(d.spot)}</b>
+      <span class="${sign(d.change_pct)}">${signed(d.change_pct, 2)}</span></span>` : ""}
+    <span class="grow"></span>
+    <span id="pos-status" class="dim"></span>
+    ${d ? `<span>${d.marks_live}/${d.legs.filter((l) => l.kind !== "stock").length} legs priced live</span>
+      <span>IV <b>${pct(d.vol_used, 1)}</b></span>` : ""}
+    <button id="pos-price">Reprice</button>
+  </div>`;
+
+  const editor = `<div class="posedit">
+    <div class="posrow poshead">
+      <span>leg</span><span>side</span><span>type</span><span>strike</span>
+      <span>expiry</span><span>qty</span><span>entry</span><span></span>
+    </div>
+    <div class="posrow">
+      <input id="pos-sym" value="${esc(u.symbol)}" placeholder="AAPL" spellcheck="false">
+      <span class="dim" style="grid-column:2/-1">the underlying every leg below is written on</span>
+    </div>
+    ${u.legs.map((l, i) => `
+      <div class="posrow" data-leg="${i}">
+        <span class="dim">leg ${i + 1}</span>
+        <select data-f="side">
+          <option ${l.side === "long" ? "selected" : ""}>long</option>
+          <option ${l.side === "short" ? "selected" : ""}>short</option>
+        </select>
+        <select data-f="kind">
+          ${["call", "put", "stock"].map((k) =>
+            `<option ${l.kind === k ? "selected" : ""}>${k}</option>`).join("")}
+        </select>
+        <input data-f="strike" value="${esc(l.strike)}" placeholder="${l.kind === "stock" ? "--" : "150"}" ${l.kind === "stock" ? "disabled" : ""}>
+        <input data-f="expiry" value="${esc(l.expiry)}" placeholder="${l.kind === "stock" ? "--" : "2026-10-09"}" ${l.kind === "stock" ? "disabled" : ""}>
+        <input data-f="qty" value="${esc(l.qty)}" placeholder="${l.kind === "stock" ? "100" : "1"}">
+        <input data-f="entry" value="${esc(l.entry)}" placeholder="4.20">
+        <button data-drop="${i}" title="Remove leg">&times;</button>
+      </div>`).join("")}
+    <div class="posrow posadd">
+      <button id="pos-add">+ add a leg</button>
+      <span class="dim" style="grid-column:2/-1">quantity is contracts for options and shares for stock; entry is the price per share, so a contract bought at $4.20 is 4.20 and never 420</span>
+    </div>
+  </div>`;
+
+  if (tab.error) {
+    return bar + editor + `<div class="empty"><div class="down">Could not price that</div>
+      <div class="stage">${esc(tab.error)}</div></div>`;
+  }
+  if (!d) {
+    return bar + editor + `<div class="loading" style="height:26%">
+      <div>Enter the legs you are holding</div>
+      <div class="stage">the strategy is worked out from them, not chosen</div></div>`;
+  }
+
+  const s = d.strategy;
+  const plCls = d.pl >= 0 ? "up" : "down";
+  const chip = (label, value, cls = "") =>
+    `<div class="pstat"><span>${label}</span><b class="${cls}">${value}</b></div>`;
+  const DASH = "−";
+  const optLegs = d.legs.filter((l) => l.kind !== "stock").length;
+
+  return bar + editor + `
+    <div class="posbody">
+      <div class="phead">
+        <h2>${esc(s.name)}</h2>
+        <span class="fam">${esc(s.family)}</span>
+        ${s.note ? `<p>${esc(s.note)}</p>` : ""}
+      </div>
+
+      <div class="pstats">
+        ${chip("profit / loss", (d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), plCls)}
+        ${chip("of what is at risk", d.pl_pct == null ? "--" : signed(d.pl_pct, 0), plCls)}
+        ${chip(d.debit ? "paid" : "received", money(Math.abs(d.net_cost), 0))}
+        ${chip("worth now", money(d.value_now, 0))}
+        ${chip("max profit", d.max_profit_unbounded ? "unlimited" : money(d.max_profit, 0))}
+        ${chip("max loss", d.max_loss_unbounded ? "unlimited" : money(Math.abs(d.max_loss || 0), 0))}
+        ${chip("break-even", (d.breakevens || []).map((b) => money(b)).join("  /  ") || "--")}
+        ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
+      </div>
+
+      <h4>What the position is, in shares and dollars</h4>
+      <div class="pstats">
+        ${chip("behaves like", nf(d.share_equivalent, 0) + " shares")}
+        ${chip("per $1 the stock moves", money(d.greeks.delta, 0))}
+        ${chip("that changes by", nf(d.greeks.gamma * 100, 1) + " shares")}
+        ${chip("time, per day", (d.greeks.theta >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.theta)), d.greeks.theta >= 0 ? "up" : "down")}
+        ${chip("per point of vol", (d.greeks.vega >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.vega)))}
+      </div>
+
+      <h4>Each leg</h4>
+      <div class="plegs">
+        <div class="pleg plhead"><span>leg</span><span>expiry</span><span>sessions</span>
+          <span>entry</span><span>mark</span><span>delta</span><span>profit</span></div>
+        ${d.legs.map((l) => `<div class="pleg">
+          <span><b>${l.side} ${nf(l.qty, 0)}</b> ${l.kind === "stock" ? "stock" : `${money(l.strike, 0)} ${l.kind}`}</span>
+          <span>${esc(l.expiry || "--")}</span>
+          <span>${l.days == null ? "--" : l.days}</span>
+          <span>${money(l.entry)}</span>
+          <span>${money(l.mark)}</span>
+          <span>${l.delta == null ? "--" : nf(l.delta, 3)}</span>
+          <span class="${l.pl >= 0 ? "up" : "down"}">${(l.pl >= 0 ? "+" : DASH) + money(Math.abs(l.pl), 0)}</span>
+        </div>`).join("")}
+      </div>
+
+      <h4>What to do with it</h4>
+      <div class="story-steps full">
+        ${(d.guidance || []).map((g, i) => `
+          <div class="sstep">
+            <span class="sn">${i + 1}</span>
+            <div class="sbody">
+              <h5>${esc(g.head)}</h5>
+              ${g.figure ? `<div class="sfig">${esc(g.figure)}</div>` : ""}
+              <p>${g.body}</p>
+            </div>
+          </div>`).join("")}
+      </div>
+
+      <h4>Profit at expiry, against where it finishes</h4>
+      <div class="qchart-host poschart" style="height:250px"></div>
+      <div class="fnote prose">
+        Marks come from the live chain where the contract is listed and from
+        Black-Scholes where it is not &mdash; ${d.marks_live} of ${optLegs} option
+        legs here are real quotes. Commissions are not included, and neither is
+        the spread you would pay to close. Volatility ${pct(d.vol_used, 1)},
+        rate ${pct(d.rate, 2)}, dividend yield ${pct(d.div_yield, 2)}.
+      </div>
+    </div>`;
+}
+
+function wirePosition(tab) {
+  const u = tab.ui;
+  const sym = document.getElementById("pos-sym");
+  if (sym) sym.onchange = () => {
+    u.symbol = sym.value.trim().toUpperCase();
+    analysePosition(tab);
+  };
+
+  document.querySelectorAll("[data-leg]").forEach((row) => {
+    const i = Number(row.dataset.leg);
+    row.querySelectorAll("[data-f]").forEach((inp) => {
+      inp.onchange = () => {
+        u.legs[i][inp.dataset.f] = inp.value.trim();
+        // Switching a leg to stock retires the fields that cannot apply to
+        // it, so the row has to be redrawn rather than just revalued.
+        if (inp.dataset.f === "kind") render();
+        analysePosition(tab);
+      };
+    });
+    const drop = row.querySelector("[data-drop]");
+    if (drop) drop.onclick = () => {
+      u.legs.splice(i, 1);
+      if (!u.legs.length) u.legs.push(blankLeg());
+      render();
+      analysePosition(tab);
+    };
+  });
+
+  const add = document.getElementById("pos-add");
+  if (add) add.onclick = () => { u.legs.push(blankLeg()); render(); };
+  const price = document.getElementById("pos-price");
+  if (price) price.onclick = () => analysePosition(tab);
+
+  const host = document.querySelector(".poschart");
+  if (host && tab.data?.curve?.length) {
+    // The payoff is a curve of profit against price, not a price series, so
+    // zero is the reference line rather than a previous close.
+    const c = window.QUIPU_CHART.makeChart(host, {
+      points: tab.data.curve.map((p) => ({ date: p.s.toFixed(2), close: p.pl })),
+      reference: 0,
+    });
+    if (c) liveCharts.push(Object.assign(c, { key: "position" }));
+  }
 }
 
 /* ---- the finder, drawn ----------------------------------------------- */
@@ -2645,6 +2901,14 @@ function render(keepScroll = false) {
 
   if (!tab || tab.status === "blank") { view.innerHTML = renderLauncher(); wireLauncher(); return; }
 
+  if (tab.kind === "position") {
+    view.innerHTML = renderPosition(tab);
+    gloss(view);
+    wirePosition(tab);
+    view.scrollTop = scroll;
+    return;
+  }
+
   if (tab.kind === "finder") {
     view.innerHTML = renderFinder(tab);
     gloss(view);
@@ -2708,6 +2972,8 @@ function wireLauncher() {
   document.querySelectorAll(".quick span").forEach((el) => { el.onclick = () => pick(el.dataset.s); });
   const fl = document.getElementById("findlink");
   if (fl) fl.onclick = async () => { if (!FINDER_RANKINGS.length) await loadRankings(); newFinderTab(); };
+  const pl = document.getElementById("poslink");
+  if (pl) pl.onclick = () => newPositionTab();
 }
 
 /* ---- charts ---------------------------------------------------------- */

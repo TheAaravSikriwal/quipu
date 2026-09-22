@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,6 +28,7 @@ from crossref.claims import cross_reference  # noqa: E402
 from crossref.cluster import cluster  # noqa: E402
 from extract.tiered import available_tiers, extract  # noqa: E402
 from fanout import bounded_map, fanout  # noqa: E402
+import position as position_engine  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
 from sources import deep, news_rss, options, quotes, sec_edgar, symbols  # noqa: E402
 
@@ -164,6 +165,74 @@ def screen(rank: str = "tradeable", limit: int = 40,
 def screen_refresh() -> Dict[str, Any]:
     screen_store.ensure(force=True)
     return screen_store.meta()
+
+
+@app.post("/api/position")
+def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Analyse a trade that is already on.
+
+    Marks come from the live chain where the exact contract is listed, and
+    fall back to Black-Scholes only when it is not -- a model price is a
+    reasonable stand-in for a missing quote but a poor substitute for a real
+    one, and the difference is the spread you would actually pay to close.
+    """
+    symbol = str(payload.get("symbol", "")).strip().upper()
+    legs = payload.get("legs") or []
+    if not symbol or not legs:
+        raise HTTPException(status_code=400, detail="symbol and legs required")
+
+    quote = quotes.fetch_quote(symbol) or {}
+    spot = float(payload.get("spot") or quote.get("price") or 0)
+    if not spot:
+        raise HTTPException(status_code=400, detail=f"no price for {symbol}")
+
+    div = _div_yield(symbol)
+    rate = options.risk_free_rate()
+
+    # Pull only the expiries this position actually uses.
+    wanted = sorted({(l.get("expiry") or "") for l in legs if l.get("expiry")})
+    marks: Dict[str, float] = {}
+    atm_iv = None
+    try:
+        chains = options.fetch_options(symbol, max_expiries=8, div_yield=div)
+        for exp in (chains.get("expiries") or []):
+            if exp["expiry"] not in wanted:
+                continue
+            if atm_iv is None:
+                atm_iv = (exp.get("stats") or {}).get("atm_iv")
+            for side, rows in (("call", exp["calls"]), ("put", exp["puts"])):
+                for r in rows:
+                    mk = r.get("mark") or r.get("last")
+                    if mk:
+                        marks[f"{side}:{float(r['strike'])}:{exp['expiry']}"] = float(mk)
+    except Exception:
+        pass
+
+    vol = (atm_iv / 100.0) if atm_iv else 0.30
+    analysis = position_engine.analyse(legs, spot, vol, rate, div, marks)
+    if not analysis.get("ok"):
+        raise HTTPException(status_code=400, detail=analysis.get("reason", "bad legs"))
+
+    earnings = None
+    try:
+        earnings = (deep.fetch_earnings(symbol) or {}).get("next_date")
+    except Exception:
+        pass
+
+    analysis["guidance"] = position_engine.guidance(analysis, vol, rate, div, earnings)
+    analysis["symbol"] = symbol
+    analysis["name"] = quote.get("name")
+    analysis["change_pct"] = quote.get("change_pct")
+    analysis["vol_used"] = round(vol * 100, 2)
+    analysis["rate"] = round(rate * 100, 3)
+    analysis["div_yield"] = round(div * 100, 3)
+    analysis["earnings"] = earnings
+    analysis["marks_live"] = sum(
+        1 for l in analysis["legs"]
+        if l["kind"] != "stock"
+        and f"{l['kind']}:{float(l['strike'])}:{l['expiry']}" in marks)
+    analysis["at"] = time.strftime("%H:%M:%S", time.localtime())
+    return analysis
 
 
 @app.get("/api/live/{symbol}")
