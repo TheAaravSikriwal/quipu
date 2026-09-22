@@ -1140,28 +1140,64 @@ function renderBook(tab) {
         setup &mdash; either way it ends up here</div></div>`;
   }
 
+  /* An open trade is marked to the market and the figure moves with it.
+   * A closed one is settled: the result is whatever you actually got,
+   * recorded once and never touched again. Showing a stale live mark on
+   * a trade you are out of would be the log quietly rewriting history. */
   const row = (t) => {
     const a = u.marks?.[t.id];
-    const pl = a?.pl;
+    const pl = t.closed ? t.realised : a?.pl;
+    const pct = t.closed ? t.realised_pct : a?.pl_pct;
     const cls = pl == null ? "" : pl >= 0 ? "up" : "down";
-    return `<button class="bookrow ${t.closed ? "shut" : ""}" data-open="${esc(t.id)}">
-      <span class="bsym">${esc(t.symbol)}</span>
-      <span class="bname">${esc(a?.strategy?.name || legSummary(t.legs))}
-        <i>${t.legs.length} leg${t.legs.length > 1 ? "s" : ""}
-          &middot; opened ${esc(t.opened)}${t.closed ? ` &middot; closed ${esc(t.closed)}` : ""}</i></span>
-      <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
-        : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
-      <span class="bpct ${cls}">${a?.pl_pct == null ? "" : signed(a.pl_pct, 0)}</span>
-      <span class="bdays">${a?.days_left == null ? ""
-        : `${a.days_left} session${a.days_left === 1 ? "" : "s"}`}</span>
-    </button>`;
+    const closing = u.closing === t.id;
+
+    return `<div class="bookitem${closing ? " closing" : ""}">
+      <button class="bookrow ${t.closed ? "shut" : ""}" data-open="${esc(t.id)}">
+        <span class="bsym">${esc(t.symbol)}</span>
+        <span class="bname">${esc(t.name || a?.strategy?.name || legSummary(t.legs))}
+          <i>${t.legs.length} leg${t.legs.length > 1 ? "s" : ""}
+            &middot; opened ${esc(t.opened)}${t.closed
+              ? ` &middot; closed ${esc(t.closed)}` : ""}</i></span>
+        <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
+          : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
+        <span class="bpct ${cls}">${pctOfRisk(pct)}</span>
+        <span class="bdays">${t.closed ? "settled"
+          : a?.days_left == null ? "" : `${a.days_left} session${a.days_left === 1 ? "" : "s"}`}</span>
+      </button>
+      ${t.closed
+        ? `<button class="brow-act" data-reopen="${esc(t.id)}"
+             title="Put it back in the open list">reopen</button>`
+        : `<button class="brow-act" data-closing="${esc(t.id)}"
+             title="Record what you closed it for">close</button>`}
+      ${closing ? closeForm(t, a) : ""}
+    </div>`;
   };
 
-  const total = live.reduce((acc, t) => {
-    const pl = u.marks?.[t.id]?.pl;
-    return pl == null ? acc : acc + pl;
-  }, 0);
-  const priced = live.filter((t) => u.marks?.[t.id]?.pl != null).length;
+  /* Two totals, because they are two different facts. What is still at
+   * risk moves every time the market does; what is banked does not. A
+   * single combined number hides which is which, so they are added
+   * together only underneath the pair. */
+  const T = window.QUIPU_LEDGER.bookTotals(
+    live.map((t) => u.marks?.[t.id]?.pl ?? null),
+    done.map((t) => t.realised ?? null));
+  const openPl = T.open, banked = T.banked, priced = T.priced, wins = T.wins;
+
+  const tot = (label, value, note, cls) => `<div class="btot ${cls}">
+    <span class="btl">${label}</span>
+    <b>${value >= 0 ? "+" : "&minus;"}${money(Math.abs(value), 0)}</b>
+    <span class="btn2">${note}</span>
+  </div>`;
+
+  const totals = (priced || done.length) ? `<div class="booktots">
+    ${priced ? tot("still open", openPl,
+        `${priced} trade${priced === 1 ? "" : "s"}, marked to the market`,
+        openPl >= 0 ? "up" : "down") : ""}
+    ${done.length ? tot("banked", banked,
+        `${done.length} closed &middot; ${wins} of ${done.length} made money`,
+        banked >= 0 ? "up" : "down") : ""}
+    ${priced && done.length ? tot("all in", openPl + banked, "open and closed together",
+        (openPl + banked) >= 0 ? "up" : "down") : ""}
+  </div>` : "";
 
   return head
     + (live.length ? `<div class="booklist">
@@ -1169,16 +1205,72 @@ function renderBook(tab) {
           <span>profit</span><span>of risk</span><span>left</span></div>
         ${live.map(row).join("")}
       </div>` : "")
-    + (priced ? `<div class="booktot ${total >= 0 ? "up" : "down"}">
-        <span>across ${priced} open trade${priced === 1 ? "" : "s"}</span>
-        <b>${total >= 0 ? "+" : "&minus;"}${money(Math.abs(total), 0)}</b>
-      </div>` : "")
+    + totals
     + (done.length ? `<div class="bookhead">closed</div>
         <div class="booklist">${done.map(row).join("")}</div>` : "")
-    + `<div class="fnote prose">Kept on this machine only. Profit is marked
-       against the entry prices on each leg, which default to the mark when
-       the leg was added &mdash; open a trade to correct them to what you
-       actually paid.</div>`;
+    + `<div class="fnote prose">Kept on this machine only. An open trade is
+       marked against the entry prices on each leg, which default to the mark
+       when the leg was added &mdash; open it to correct them to what you
+       actually paid. A closed one keeps whatever you recorded on the way out
+       and stops moving.</div>`;
+}
+
+/* Closing a trade asks one question, because there is only one thing
+ * the app cannot work out for itself: what you actually got for it.
+ * The live value is offered as the default, since most of the time
+ * that is close enough -- but a trade closed in a hurry rarely fills
+ * at the midpoint, and a log that quietly assumes it did will flatter
+ * every result in it. */
+function closeForm(t, a) {
+  const value = a?.value_now;
+  const cost = a?.net_cost;
+
+  /* Which way the money went, and therefore which question to ask.
+   *
+   * The engine carries the value of a position signed: a spread you
+   * are short is worth a negative amount, because closing it means
+   * paying. That is correct and it is also unaskable -- nobody types
+   * "-196" under a field marked "value received". So a short position
+   * is asked what it COST to close, in plain positive dollars, and the
+   * sign is put back on before the arithmetic sees it. */
+  const paying = (value != null && value < 0) || (value == null && cost != null && cost < 0);
+  const shown = value == null ? null : Math.abs(value);
+
+  return `<div class="closeform" data-paying="${paying ? "1" : "0"}">
+    <div class="cfq">${paying
+      ? "What did it cost you to close it?"
+      : "What did you get for closing it?"}</div>
+    <div class="cfrow">
+      <span class="cfl">${paying ? "paid to close" : "value received"}</span>
+      <input id="close-val" type="text" inputmode="decimal"
+        value="${shown == null ? "" : nf(shown, 2)}"
+        placeholder="0.00" autocomplete="off">
+      <span class="cfhint">${shown == null
+        ? "not priced &mdash; enter the amount"
+        : `today it would ${paying ? "cost" : "be worth"} ${money(shown)}`}</span>
+    </div>
+    ${cost != null ? `<div class="cfrow">
+      <span class="cfl">${cost >= 0 ? "you paid to open" : "you were paid to open"}</span>
+      <span class="cfv">${money(Math.abs(cost))}</span>
+      <span class="cfhint">the result is the difference between the two</span>
+    </div>` : ""}
+    <div class="cfrow cfact">
+      <span class="cfl"></span>
+      <button class="bookadd" data-confirm="${esc(t.id)}">close the trade</button>
+      <button class="bookclose" data-cancelclose="1">cancel</button>
+    </div>
+  </div>`;
+}
+
+/* A return against what was at risk, which for a cash-secured put is
+ * the whole strike. Twenty dollars on thirty-three thousand rounds to
+ * "+0%", which reads as nothing happening rather than as a small gain
+ * on a large commitment. */
+function pctOfRisk(v) {
+  if (v == null) return "";
+  if (v === 0) return "0%";
+  if (Math.abs(v) < 1) return (v > 0 ? "+" : "−") + "<1%";
+  return signed(v, 0);
 }
 
 /** A trade with no strategy name yet, described by its legs. */
@@ -1212,6 +1304,40 @@ async function markBook(tab) {
     }
   }));
   if (state.active === tab.id && tab.ui.view === "book") render(true);
+}
+
+/* Settle a trade: record what it was closed for, and stop marking it.
+ *
+ * The result is the same arithmetic as the live P&L -- what you got out
+ * less what you put in -- but computed once, from a number you supply,
+ * and then frozen. A closed trade whose figure keeps moving with the
+ * market is not a record of anything.
+ */
+function settleTrade(tab, id, received) {
+  const t = tab.ui.book.find((x) => x.id === id);
+  if (!t) return;
+  const a = tab.ui.marks?.[id];
+  const cost = a?.net_cost;
+
+  t.closed = new Date().toISOString().slice(0, 10);
+  t.exit_value = received;
+  // Keep the name and the cost with the trade. Both came from an
+  // analysis that will not be run again once it is closed, and a log
+  // that forgets what a settled trade WAS is not much of a log.
+  t.name = t.name || a?.strategy?.name || null;
+  t.net_cost = cost ?? t.net_cost ?? null;
+
+  if (received != null && t.net_cost != null) {
+    const r = window.QUIPU_LEDGER.realised(received, t.net_cost, a?.risk ?? null);
+    t.realised = r.pl;
+    t.realised_pct = r.pct;
+  } else {
+    // Nothing to work from: keep the last live mark rather than
+    // inventing a result, and say nothing more confident than that.
+    t.realised = a?.pl ?? null;
+    t.realised_pct = a?.pl_pct ?? null;
+  }
+  saveBook(tab.ui.book);
 }
 
 /** Write the working position into the book, new or existing. */
@@ -1517,16 +1643,68 @@ function wirePosition(tab) {
     };
   });
 
+  // Closing from inside an open trade. The live analysis is right
+  // there, so what it is worth now is the sensible default and there is
+  // nothing further to ask.
   document.querySelectorAll("[data-close]").forEach((b) => {
     b.onclick = (e) => {
       e.stopPropagation();
-      const t = u.book.find((x) => x.id === b.dataset.close);
-      if (!t) return;
-      t.closed = new Date().toISOString().slice(0, 10);
-      saveBook(u.book);
+      u.marks ||= {};
+      u.marks[b.dataset.close] = tab.data || u.marks[b.dataset.close];
+      settleTrade(tab, b.dataset.close, tab.data?.value_now ?? null);
       u.editing = null;
       u.view = "book";
       render();
+      markBook(tab);
+    };
+  });
+
+  // ---- closing from the log itself
+  document.querySelectorAll("[data-closing]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      u.closing = b.dataset.closing;
+      render(true);
+      document.getElementById("close-val")?.focus();
+    };
+  });
+
+  const cancelClose = document.querySelector("[data-cancelclose]");
+  if (cancelClose) {
+    cancelClose.onclick = (e) => { e.stopPropagation(); u.closing = null; render(true); };
+  }
+
+  document.querySelectorAll("[data-confirm]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const raw = document.getElementById("close-val")?.value;
+      const paying = document.querySelector(".closeform")?.dataset.paying === "1";
+      let got = raw == null || String(raw).trim() === "" ? null
+        : Number(String(raw).replace(/[^0-9.-]/g, ""));
+      // Asked as a positive cost, stored as a negative value: money out
+      // is a negative amount received, which is what the arithmetic
+      // downstream expects.
+      if (got != null && Number.isFinite(got) && paying) got = -Math.abs(got);
+      settleTrade(tab, b.dataset.confirm, Number.isFinite(got) ? got : null);
+      u.closing = null;
+      render(true);
+    };
+  });
+
+  document.querySelectorAll("[data-reopen]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const t = u.book.find((x) => x.id === b.dataset.reopen);
+      if (!t) return;
+      // Closing one by mistake should not be a dead end. The settlement
+      // figures go with it: it is live again, so it is marked again.
+      t.closed = null;
+      t.exit_value = null;
+      t.realised = null;
+      t.realised_pct = null;
+      saveBook(u.book);
+      render(true);
+      markBook(tab);
     };
   });
 

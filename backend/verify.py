@@ -955,7 +955,7 @@ try:
 except Exception as exc:                               # noqa: BLE001
     RESULTS.append((False, "glossary", f"could not run: {exc}"))
 
-section("Chart indicators, checked in their own runtime")
+section("The JavaScript, checked in its own runtime")
 
 # The indicators live in JavaScript, so they are checked by node rather
 # than reimplemented here -- a Python copy of the same arithmetic would
@@ -965,12 +965,14 @@ try:
     import subprocess
 
     root = Path(__file__).resolve().parent.parent
-    proc = subprocess.run(
-        ["node", str(root / "frontend" / "indicators.test.js")],
-        capture_output=True, text=True, timeout=60, cwd=str(root))
-    tail = (proc.stdout or "").strip().splitlines()
-    summary = tail[-1] if tail else (proc.stderr or "no output").strip()[:60]
-    RESULTS.append((proc.returncode == 0, "indicator suite passes", summary))
+    for name, label in (("indicators.test.js", "indicator suite passes"),
+                        ("ledger.test.js", "trade-log arithmetic passes")):
+        proc = subprocess.run(
+            ["node", str(root / "frontend" / name)],
+            capture_output=True, text=True, timeout=60, cwd=str(root))
+        tail = (proc.stdout or "").strip().splitlines()
+        summary = tail[-1] if tail else (proc.stderr or "no output").strip()[:60]
+        RESULTS.append((proc.returncode == 0, label, summary))
 except FileNotFoundError:
     RESULTS.append((None, "  [SKIP] indicator suite -- node not on PATH", ""))
 except Exception as exc:
