@@ -450,11 +450,11 @@ def market_events(horizon: int = 180) -> Dict[str, Any]:
     return events.upcoming(None, horizon=horizon)
 
 
-def _events(symbol, earnings, fundamentals):
+def _events(symbol, earnings, fundamentals, dividends=None):
     """The calendar, or nothing. Never enough to fail the whole page."""
     try:
         return events.upcoming(symbol, horizon=180, earnings=earnings,
-                               fundamentals=fundamentals)
+                               fundamentals=fundamentals, dividends=dividends)
     except Exception as exc:                       # noqa: BLE001
         return {"events": [], "error": str(exc)}
 
@@ -488,6 +488,7 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                 "profile": lambda: deep.fetch_profile(symbol),
                 "financials": lambda: deep.fetch_financials(symbol),
                 "earnings": lambda: deep.fetch_earnings(symbol),
+                "dividends": lambda: deep.fetch_dividends(symbol),
                 "ownership": lambda: deep.fetch_ownership(symbol),
                 "volume": lambda: deep.fetch_volume_profile(symbol),
                 "long_history": lambda: deep.fetch_price_history_long(symbol),
@@ -592,15 +593,12 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
             "failed": len(to_fetch) - len(usable),
             "articles": feed,
         },
+        "dividends": stage1["dividends"].data if stage1["dividends"].ok else None,
         "events": _events(
             symbol,
             stage1["earnings"].data if stage1["earnings"].ok else None,
             stage1["fundamentals"].data if stage1["fundamentals"].ok else None,
-        ),
-        "events": _events(
-            symbol,
-            stage1["earnings"].data if stage1["earnings"].ok else None,
-            stage1["fundamentals"].data if stage1["fundamentals"].ok else None,
+            stage1["dividends"].data if stage1["dividends"].ok else None,
         ),
         "crossref": crossref,
         "diagnostics": {

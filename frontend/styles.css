@@ -1343,3 +1343,30 @@ a { color: inherit; text-decoration: none; }
   font-size: 10.5px; line-height: 1.6; color: var(--faint);
 }
 .prenote b { color: var(--text2); }
+
+
+/* ---- citations ----
+   The source sits under every row rather than once at the bottom,
+   because the rows do not all come from the same place and the
+   difference matters: "the Fed published this" and "projected from four
+   previous payments" are not the same claim and should not look it. */
+.evrow { grid-template-columns: 76px 1fr auto; }
+.evc {
+  grid-column: 2 / -1; padding-top: 2px;
+  font-family: var(--ui); font-size: 9px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--rule2);
+}
+.evc a { color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
+.evc a:hover { color: var(--text); border-bottom-color: var(--text); }
+
+.evsrc { margin-top: 6px; }
+.evsrow {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 5px 0; border-bottom: 1px solid var(--hline);
+  font-size: 11px; color: var(--faint);
+}
+.evsrow a {
+  flex: 0 0 auto; min-width: 158px;
+  color: var(--text2); text-decoration: none; font-weight: 500;
+}
+.evsrow a:hover { color: var(--text); }

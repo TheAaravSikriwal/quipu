@@ -303,6 +303,11 @@ def _bea() -> List[Dict[str, Any]]:
 
 WEEK_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
+#: Not fetchable -- it 403s any automated request -- but it is the page
+#: that settles the question, so a reader who wants the confirmed date
+#: should be given the door even though the app cannot walk through it.
+BLS_URL = "https://www.bls.gov/schedule/news_release/"
+
 _WEEK_MAP = [
     (r"\bcpi\b", "Inflation report (CPI)", "inflation", 3,
      "The headline inflation number. Higher than forecast and rate cuts "
@@ -390,7 +395,7 @@ def _expected_bls(horizon: int) -> List[Dict[str, Any]]:
                 "longer. Usually the first Friday of the month — this date "
                 "is the usual timing, not a confirmed one.",
                 "Bureau of Labor Statistics", weight=3, confirmed=False,
-                time_et="8:30am ET"))
+                time_et="8:30am ET", url=BLS_URL))
 
         cpi = date(y, m, 12)
         # The 12th is the middle of the window, not a rule, and it lands on
@@ -410,7 +415,7 @@ def _expected_bls(horizon: int) -> List[Dict[str, Any]]:
                 "Lands mid-month, normally between the 10th and the 15th — "
                 "the exact day is not confirmed here.",
                 "Bureau of Labor Statistics", weight=3, confirmed=False,
-                approx=True, time_et="8:30am ET"))
+                approx=True, time_et="8:30am ET", url=BLS_URL))
     return out
 
 
@@ -419,16 +424,17 @@ def _expected_bls(horizon: int) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 def company(symbol: str, earnings: Optional[Dict] = None,
-            fundamentals: Optional[Dict] = None) -> List[Dict[str, Any]]:
+            fundamentals: Optional[Dict] = None,
+            dividends: Optional[Dict] = None) -> List[Dict[str, Any]]:
     """Earnings and dividend dates for one ticker.
 
     Takes what the ticker page already fetched rather than going back out
-    for it: the earnings date is in `fetch_earnings` and the ex-dividend
-    date is in `fetch_fundamentals`, and re-fetching both would double the
-    Yahoo traffic for one panel.
+    for it: going back to Yahoo for one panel would double the traffic
+    for data that is already in hand.
     """
     out: List[Dict[str, Any]] = []
     today = date.today()
+    yahoo = f"https://finance.yahoo.com/quote/{symbol}"
 
     nxt = (earnings or {}).get("next_date")
     if nxt:
@@ -440,28 +446,51 @@ def company(symbol: str, earnings: Optional[Dict] = None,
             "going into it, and lose that extra value the moment it passes, "
             "whichever way the shares go."
             + (f" It has beaten expectations {rate}% of the time recently."
-               if rate is not None else ""),
-            "Company", scope="company", weight=3))
+               if rate is not None else "")
+            + " Companies sometimes move the date; it is worth checking "
+              "against the investor relations page before trading around it.",
+            "Yahoo Finance", scope="company", weight=3,
+            url=f"{yahoo}/analysis"))
 
-    ex = ((fundamentals or {}).get("dividend") or {}).get("ex_date")
-    if ex:
-        try:
-            when = datetime.utcfromtimestamp(float(ex)).date()
-            rate = ((fundamentals or {}).get("dividend") or {}).get("rate")
-            if (when - today).days >= 0:
-                out.append(_ev(
-                    when.isoformat(),
-                    "Goes ex-dividend" + (f" (${rate:,.2f})" if rate else ""),
-                    "dividend",
-                    "On this morning the shares open lower by roughly the "
-                    "dividend, because a new buyer no longer receives it. "
-                    "That is not a fall to trade — it is already priced into "
-                    "the options. It does matter if you are short a call that "
-                    "is in the money, which can be exercised early to collect "
-                    "the dividend.",
-                    "Company", scope="company", weight=1))
-        except Exception:
-            pass
+    div = dividends or {}
+    amount = div.get("amount")
+    cadence = div.get("cadence")
+    ex = div.get("next_ex")
+
+    if ex and ex >= today.isoformat():
+        estimated = bool(div.get("next_ex_estimated"))
+        out.append(_ev(
+            ex,
+            "Goes ex-dividend" + (f" ({amount:,.2f} a share)" if amount else ""),
+            "dividend",
+            "To receive this payment you have to own the shares before this "
+            "morning. On the day the shares open lower by roughly the "
+            "dividend, because a new buyer no longer gets it \u2014 that is not a "
+            "fall to trade, and it is already inside the option prices. "
+            "Where it does matter: if you are short a call that is in the "
+            "money, the other side can exercise early to collect the "
+            "dividend and leave you short the stock."
+            + (f" Paid {cadence}; the last four went out about "
+               f"{div.get('gap_days')} days apart."
+               if estimated and cadence else "")
+            + (" The company has not announced this one \u2014 the date is "
+               "projected from that pattern."
+               if estimated else " This date is announced."),
+            "Projected from payment history" if estimated else "Yahoo Finance",
+            scope="company", weight=1, confirmed=not estimated,
+            approx=estimated, url=f"{yahoo}/history/?filter=div"))
+
+    pay = div.get("pay_date")
+    if pay and pay >= today.isoformat():
+        out.append(_ev(
+            pay, "Dividend paid" + (f" ({amount:,.2f} a share)" if amount else ""),
+            "dividend_pay",
+            "The cash actually lands, for anyone who held the shares before "
+            "the ex-dividend date. Nothing happens to the share price here "
+            "\u2014 that already happened when it went ex.",
+            "Yahoo Finance", scope="company", weight=1,
+            url=f"{yahoo}/history/?filter=div"))
+
     return out
 
 
@@ -481,7 +510,8 @@ def _key(row: Dict) -> tuple:
 
 def upcoming(symbol: Optional[str] = None, horizon: int = 120,
              earnings: Optional[Dict] = None,
-             fundamentals: Optional[Dict] = None) -> Dict[str, Any]:
+             fundamentals: Optional[Dict] = None,
+             dividends: Optional[Dict] = None) -> Dict[str, Any]:
     """Every known date between today and `horizon` days out."""
     today = date.today()
     limit = today + timedelta(days=horizon)
@@ -493,7 +523,7 @@ def upcoming(symbol: Optional[str] = None, horizon: int = 120,
     rows += week
     rows += _expected_bls(horizon)
     if symbol:
-        rows += company(symbol, earnings, fundamentals)
+        rows += company(symbol, earnings, fundamentals, dividends)
 
     # A confirmed date always beats an estimate of the same thing, and the
     # week-ahead feed confirms exactly the two the BLS will not serve.
@@ -524,8 +554,15 @@ def upcoming(symbol: Optional[str] = None, horizon: int = 120,
         "as_of": today.isoformat(),
         "horizon": horizon,
         "events": merged,
-        "sources": ["Federal Reserve", "Bureau of Economic Analysis",
-                    "Scheduled release feed", "Yahoo Finance"],
+        "sources": [
+            {"name": "Federal Reserve", "what": "FOMC meeting dates", "url": FOMC_URL},
+            {"name": "Bureau of Economic Analysis", "what": "GDP and PCE inflation",
+             "url": BEA_URL},
+            {"name": "Bureau of Labor Statistics",
+             "what": "inflation and jobs \u2014 dates projected, see below", "url": BLS_URL},
+            {"name": "Yahoo Finance", "what": "earnings and dividend dates",
+             "url": "https://finance.yahoo.com"},
+        ],
         "bls_note": ("The inflation and jobs reports come from the BLS, which "
                      "blocks automated requests. Those two are shown at their "
                      "usual timing and marked unconfirmed until the week-ahead "

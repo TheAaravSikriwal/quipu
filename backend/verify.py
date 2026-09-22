@@ -416,6 +416,44 @@ try:
 except Exception as exc:
     RESULTS.append((False, "setup descriptions", f"could not run: {exc}"))
 
+section("No dict literal quietly overwrites itself")
+
+# A patch once inserted a new "events" key next to the old one instead of
+# replacing it. Python keeps the last and says nothing, so the endpoint
+# went on calling the previous version of the function -- the payload
+# looked complete, the new field it was supposed to carry was simply
+# never there. Nothing else in the suite would have caught it.
+try:
+    import ast as _ast
+    import collections as _c
+    import os as _os
+
+    dupes = []
+    root = Path(__file__).resolve().parent.parent
+    for folder, dirs, files in _os.walk(root):
+        dirs[:] = [d for d in dirs
+                   if d not in (".venv", "__pycache__", ".git", "node_modules", "cache")]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = _os.path.join(folder, name)
+            try:
+                tree = _ast.parse(open(path, encoding="utf-8").read())
+            except (OSError, SyntaxError):
+                continue
+            for node in _ast.walk(tree):
+                if not isinstance(node, _ast.Dict):
+                    continue
+                keys = [k.value for k in node.keys
+                        if isinstance(k, _ast.Constant) and isinstance(k.value, str)]
+                for key, n in _c.Counter(keys).items():
+                    if n > 1:
+                        dupes.append(f"{name}:{node.lineno} {key!r}")
+    RESULTS.append((not dupes, "no repeated keys in a dict literal",
+                    "clean" if not dupes else ", ".join(dupes[:3])))
+except Exception as exc:
+    RESULTS.append((False, "duplicate key scan", f"could not run: {exc}"))
+
 section("Source files carry no corrupted escapes")
 
 # A patch once wrote literal backspace bytes where a regex word boundary

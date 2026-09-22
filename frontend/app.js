@@ -1266,7 +1266,7 @@ const SOURCES = {
   ownership: "13F filings via Yahoo Finance",
   short: "Exchange short-interest reports",
   filings: "SEC EDGAR &middot; official, unedited",
-  calendar: "Federal Reserve, BEA and company filings &middot; dates only, not forecasts",
+  calendar: "Each date cited on its own row &middot; dates only, never forecasts",
   news: "Yahoo, Google News and Finnhub, deduplicated",
   unique: "Cross-referenced across every article read",
   corroborated: "Claims matched across two or more outlets",
@@ -2082,6 +2082,17 @@ const EV_DATE = (iso) => {
 
 const EV_WHEN = (n) => (n === 0 ? "today" : n === 1 ? "tomorrow" : `in ${n} days`);
 
+/* The list past your expiry is cut short -- it is context, not the point
+ * of the panel. But the company's own dates are never cut: an earnings
+ * report or an ex-dividend is the reason someone opened this, and losing
+ * one off the bottom of a list of trade figures would be the worst
+ * possible thing to drop. */
+function evTrim(list, n) {
+  const mine = list.filter((e) => e.scope === "company");
+  const market = list.filter((e) => e.scope !== "company").slice(0, n);
+  return mine.concat(market).sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 function eventsTile(d, tab) {
   const ev = d.events?.events || [];
   if (!ev.length) return "";
@@ -2141,13 +2152,21 @@ function eventsTile(d, tab) {
          happens and a later expiry is the one you want.</div>`;
   }
 
+  /* Every row says where its date came from and links to the page that
+   * settles it. A calendar is only worth anything if you can check it,
+   * and the difference between "the Fed published this" and "Quipu
+   * guessed this from four previous payments" is the whole of how much
+   * you should lean on the row. */
   const row = (e) => `<div class="evrow ${e.confirmed ? "" : "est"} ${e.scope}">
       <span class="evd">${EV_DATE(e.date)}</span>
       <span class="evn">${esc(e.title)}${e.confirmed ? ""
-        : `<em title="${esc(e.why)}">${e.approx ? "around this date" : "usual timing"}</em>`}</span>
+        : `<em>${e.approx ? "estimated" : "usual timing"}</em>`}</span>
       <span class="evx">${EV_WHEN(e.days)}</span>
       ${e.weight === 3 || e.scope === "company"
         ? `<span class="evy">${esc(e.why)}</span>` : ""}
+      <span class="evc">${e.url
+        ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.source)}</a>`
+        : esc(e.source)}${e.time ? ` &middot; ${esc(e.time)}` : ""}</span>
     </div>`;
 
   return tile(
@@ -2160,11 +2179,18 @@ function eventsTile(d, tab) {
      ${after.length ? `<div class="evhead">${!expiry ? "later"
         : before.length ? "after it"
         : `all after your ${esc(expiry)} expiry`}</div>
-        ${after.slice(0, before.length ? 5 : 8).map(row).join("")}` : ""}
-     <div class="evfoot">Dates from the Federal Reserve and the BEA.
-       The inflation and jobs reports are marked where the exact day is not
-       confirmed &mdash; the agency that publishes them blocks automated
-       requests, so those two are shown at their usual timing.</div>`,
+        ${evTrim(after, before.length ? 5 : 8).map(row).join("")}` : ""}
+     <div class="evsrc">
+       <div class="evhead">where these dates come from</div>
+       ${(d.events.sources || []).map((s) => `<div class="evsrow">
+          <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a>
+          <span>${s.what}</span></div>`).join("")}
+       <div class="evfoot">Anything marked <b>estimated</b> is Quipu&rsquo;s
+         arithmetic, not a published date. Inflation and jobs come from the
+         BLS, which refuses automated requests, so those two are placed at
+         their usual timing. An upcoming ex-dividend date is projected from
+         the last few payments unless the company has announced it.</div>
+     </div>`,
     expiry && big.length ? `${big.length} before expiry` : ""
   );
 }

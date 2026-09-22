@@ -9,6 +9,7 @@ compares with a normal day.
 from __future__ import annotations
 
 import math
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 import yfinance as yf
@@ -171,6 +172,82 @@ def fetch_earnings(symbol: str) -> Dict[str, Any]:
         "total": len(history),
         "beat_rate": round((beats / len(history)) * 100) if history else None,
     }
+
+
+def fetch_dividends(symbol: str) -> Dict[str, Any]:
+    """The payment history, and when the next one is likely to go ex.
+
+    Yahoo exposes a single `exDividendDate`, and it is the date of the
+    LAST payment, not the next one -- so a panel built on it shows an
+    Apple dividend in August and nothing at all about the November one
+    that actually matters to anyone holding options into it.
+
+    The history is the better source. Four quarterly payments in a row
+    establish a cadence, and the next ex-date projected off the median
+    gap is right to within a few days for a company that has paid on
+    schedule for years. It is an estimate and is labelled as one.
+
+    The PAY date is different: Yahoo's `Dividend Date` is genuinely
+    forward-looking, so when it is in the future it is reported as fact.
+    """
+    ticker = yf.Ticker(symbol)
+    out: Dict[str, Any] = {
+        "history": [], "cadence": None, "gap_days": None,
+        "next_ex": None, "next_ex_estimated": True,
+        "pay_date": None, "amount": None,
+    }
+
+    try:
+        series = ticker.dividends
+    except Exception:
+        series = None
+    if series is None or len(series) == 0:
+        return out
+
+    rows = [{"date": k.date().isoformat(), "amount": round(float(v), 4)}
+            for k, v in series.tail(12).items()]
+    out["history"] = rows
+    out["amount"] = rows[-1]["amount"]
+
+    if len(rows) >= 3:
+        dates = [date.fromisoformat(r["date"]) for r in rows]
+        gaps = sorted((dates[i + 1] - dates[i]).days for i in range(len(dates) - 1))
+        gap = gaps[len(gaps) // 2]
+        out["gap_days"] = gap
+        out["cadence"] = ("monthly" if gap < 45 else "quarterly" if gap < 135
+                          else "twice a year" if gap < 250 else "once a year")
+
+        nxt = dates[-1] + timedelta(days=gap)
+        # Ex-dividend dates fall on trading days. A projection that lands
+        # on a Saturday is obviously wrong to a reader and undermines the
+        # ones that are right.
+        while nxt.weekday() > 4:
+            nxt += timedelta(days=1)
+        today = date.today()
+        # If the projection has already gone by, the company is late or
+        # the cadence changed; step forward rather than show a past date.
+        while nxt < today:
+            nxt += timedelta(days=gap or 91)
+            while nxt.weekday() > 4:
+                nxt += timedelta(days=1)
+        out["next_ex"] = nxt.isoformat()
+
+    try:
+        cal = ticker.calendar or {}
+        ex = cal.get("Ex-Dividend Date")
+        pay = cal.get("Dividend Date")
+        today = date.today()
+        # Yahoo's ex-date is usually the last one. On the rare occasion it
+        # is ahead of us it is the announced date, which beats a guess.
+        if ex and getattr(ex, "year", None) and ex >= today:
+            out["next_ex"] = ex.isoformat()
+            out["next_ex_estimated"] = False
+        if pay and getattr(pay, "year", None) and pay >= today:
+            out["pay_date"] = pay.isoformat()
+    except Exception:
+        pass
+
+    return out
 
 
 def fetch_ownership(symbol: str) -> Dict[str, Any]:
