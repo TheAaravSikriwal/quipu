@@ -8,7 +8,7 @@ delta/gamma/theta/vega are available without a paid data provider.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import yfinance as yf
@@ -86,21 +86,33 @@ def greeks(
 
 
 def bs_price(
-    spot: float, strike: float, years: float, vol: float, rate: float, is_call: bool
+    spot: float, strike: float, years: float, vol: float, rate: float,
+    is_call: bool, div_yield: float = 0.0
 ) -> float:
-    """Black-Scholes fair value -- the forward direction of the IV solver."""
+    """Black-Scholes fair value -- the forward direction of the IV solver.
+
+    Carries the dividend yield, and must: greeks() discounts the spot leg by
+    e^-qT, and this function is what implied_vol() inverts. Without q here
+    the solver returned the volatility of a DIFFERENT model from the one the
+    greeks then used -- the IV was solved as though the stock paid nothing,
+    and delta and gamma were computed as though it paid q. On a 4% yielder
+    that is a real disagreement, and it was invisible because each half
+    looked correct on its own.
+    """
     if vol <= 0 or years <= 0:
         intrinsic = (spot - strike) if is_call else (strike - spot)
         return max(intrinsic, 0.0)
 
+    q = div_yield or 0.0
     sqrt_t = math.sqrt(years)
-    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * years) / (vol * sqrt_t)
+    d1 = (math.log(spot / strike) + (rate - q + 0.5 * vol * vol) * years) / (vol * sqrt_t)
     d2 = d1 - vol * sqrt_t
     discount = math.exp(-rate * years)
+    carry = math.exp(-q * years)
 
     if is_call:
-        return spot * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
-    return strike * discount * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
+        return spot * carry * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
+    return strike * discount * _norm_cdf(-d2) - spot * carry * _norm_cdf(-d1)
 
 
 def implied_vol(
@@ -110,6 +122,7 @@ def implied_vol(
     years: float,
     rate: float,
     is_call: bool,
+    div_yield: float = 0.0,
 ) -> Optional[float]:
     """Back out volatility from the traded price by bisection.
 
@@ -121,17 +134,18 @@ def implied_vol(
     if not all(v and v > 0 for v in (price, spot, strike, years)):
         return None
 
+    q = div_yield or 0.0
     intrinsic = max((spot - strike) if is_call else (strike - spot), 0.0)
     if price < intrinsic - 0.01:
         return None  # price below intrinsic: quote is broken, not a vol signal
 
     low, high = 1e-4, 6.0  # 0.01% to 600% vol
-    if bs_price(spot, strike, years, high, rate, is_call) < price:
+    if bs_price(spot, strike, years, high, rate, is_call, q) < price:
         return None  # even 600% vol cannot reach this price
 
     for _ in range(60):
         mid = 0.5 * (low + high)
-        if bs_price(spot, strike, years, mid, rate, is_call) < price:
+        if bs_price(spot, strike, years, mid, rate, is_call, q) < price:
             low = mid
         else:
             high = mid
@@ -142,22 +156,86 @@ def implied_vol(
     return solved if 0.005 < solved < 5.99 else None
 
 
+def _easter(year: int) -> date:
+    """Anonymous Gregorian algorithm. Needed only to find Good Friday."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (2 * e + 2 * i - h - k + 32) % 7
+    m = (a + 11 * h + 19 * l) // 433
+    month, day = divmod(h + l - 7 * m + 90, 25)
+    day = (h + l - 7 * m + 33 * month + 19) % 32
+    return date(year, month, day)
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """The nth given weekday of a month; n = -1 means the last one."""
+    if n > 0:
+        d = date(year, month, 1)
+        d += timedelta(days=(weekday - d.weekday()) % 7)
+        return d + timedelta(weeks=n - 1)
+    nxt = date(year + (month == 12), (month % 12) + 1, 1)
+    d = nxt - timedelta(days=1)
+    return d - timedelta(days=(d.weekday() - weekday) % 7)
+
+
+def _observed(d: date) -> date:
+    """Saturday holidays move to Friday, Sunday holidays to Monday."""
+    if d.weekday() == 5:
+        return d - timedelta(days=1)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def market_holidays(year: int) -> set:
+    """The nine-and-a-half days a year the NYSE is shut.
+
+    Computed rather than listed, so it does not expire. Half-days are not
+    included: the market is open, and an option decays on an open day.
+    """
+    out = {
+        _observed(date(year, 1, 1)),                      # New Year's Day
+        _nth_weekday(year, 1, 0, 3),                      # MLK
+        _nth_weekday(year, 2, 0, 3),                      # Presidents
+        _easter(year) - timedelta(days=2),                # Good Friday
+        _nth_weekday(year, 5, 0, -1),                     # Memorial
+        _observed(date(year, 7, 4)),                      # Independence
+        _nth_weekday(year, 9, 0, 1),                      # Labor
+        _nth_weekday(year, 11, 3, 4),                     # Thanksgiving
+        _observed(date(year, 12, 25)),                    # Christmas
+    }
+    if year >= 2022:
+        out.add(_observed(date(year, 6, 19)))             # Juneteenth
+    return out
+
+
 def trading_days(start: datetime, end: datetime) -> int:
-    """Weekdays between two dates -- Excel's NETWORKDAYS, minus holidays.
+    """Sessions between two dates: weekdays, less the days the market shuts.
 
     The reference dashboards measure time as NETWORKDAYS/252 rather than
     calendar days/365, and on a short-dated option the two disagree enough to
     move theta noticeably: a Friday expiry three calendar days out is only one
     trading day of decay away.
+
+    Holidays are subtracted, which the first version claimed to do and did
+    not. Counting bare weekdays made a calendar year 261 sessions instead of
+    252, so T came out 3.6% too long, every option looked slightly too
+    valuable and theta slightly too slow -- small per day, and pure bias.
     """
     if end <= start:
         return 0
+    cur, last = start.date(), end.date()
+    shut = set()
+    for y in range(cur.year, last.year + 1):
+        shut |= market_holidays(y)
     days = 0
-    cur = start.date()
-    last = end.date()
     while cur < last:
         cur += timedelta(days=1)
-        if cur.weekday() < 5:
+        if cur.weekday() < 5 and cur not in shut:
             days += 1
     return days
 
@@ -218,7 +296,7 @@ def _rows(frame, spot: float, years: float, rate: float, is_call: bool,
         # Treat Yahoo's IV as a hint, not a fact. Anything outside a plausible
         # band is a placeholder, so solve from the price instead.
         vendor_iv = iv if iv and 0.01 < iv < 5.0 else None
-        solved_iv = implied_vol(mark, spot, strike, years, rate, is_call)
+        solved_iv = implied_vol(mark, spot, strike, years, rate, is_call, div_yield)
         use_iv = solved_iv or vendor_iv
         iv_source = "solved" if solved_iv else ("vendor" if vendor_iv else "none")
 

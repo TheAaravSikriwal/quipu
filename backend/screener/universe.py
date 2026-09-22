@@ -40,6 +40,12 @@ EXCHANGES = {
 JUNK_WORDS = (
     "warrant", "right", " unit", "units", "preferred", "depositary",
     "when issued", "when-issued", "notes due", "%", "convertible",
+    # The abbreviations this file actually uses. Spelling them out was not
+    # enough: Morgan Stanley's preferreds are published as "Dep Shs Rpstg
+    # 1/1000th Int Prd Ser F" and NextEra's debt as "Junior Subordinated
+    # Debentures due 2085", so neither "depositary" nor "notes due" caught
+    # them and both reached the universe as if they were ordinary shares.
+    "dep shs", "debenture", "subordinated", " pfd", "pfd ",
 )
 
 # Geared and inverse products. They are real listings and some are heavily
@@ -58,11 +64,17 @@ def _looks_tradeable(row: Dict[str, str]) -> bool:
 
     if not symbol or row.get("Test Issue") == "Y":
         return False
-    # '$' marks preferreds and similar; '.' marks warrant/unit classes in this
-    # file. Ordinary class shares (BRK.B) arrive as BRK-B already.
-    if "$" in symbol or "." in symbol:
+    # '$' marks preferreds and similar and is never wanted.
+    #
+    # '.' is NOT: it marks a share class, and this file writes Berkshire as
+    # BRK.A and BRK.B rather than the BRK-A/BRK-B that data providers use.
+    # Rejecting dotted symbols therefore threw away every dual-class listing
+    # in the country, Berkshire included. Warrants and units also carry dots,
+    # but they are already caught by name above, so the punctuation is not
+    # what has to decide it.
+    if "$" in symbol:
         return False
-    if len(symbol) > 5:
+    if len(symbol.replace(".", "-")) > 6:
         return False
     if any(word in name for word in JUNK_WORDS):
         return False
@@ -90,7 +102,8 @@ def fetch(force: bool = False) -> List[Dict[str, Any]]:
     for row in rows:
         if not _looks_tradeable(row):
             continue
-        symbol = (row.get("NASDAQ Symbol") or row["Symbol"]).strip()
+        # Class shares are published with a dot and consumed with a hyphen.
+        symbol = (row.get("NASDAQ Symbol") or row["Symbol"]).strip().replace(".", "-")
         name = (row.get("Security Name") or "").lower()
         out.append({
             "symbol": symbol,
