@@ -28,7 +28,7 @@ from crossref.claims import cross_reference  # noqa: E402
 from crossref.cluster import cluster  # noqa: E402
 from extract.tiered import available_tiers, extract  # noqa: E402
 from fanout import bounded_map, fanout  # noqa: E402
-from screener import rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
+from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
 from sources import deep, news_rss, options, quotes, sec_edgar, symbols  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -101,7 +101,19 @@ def symbol_search(q: str) -> Dict[str, Any]:
 def screen_rankings() -> Dict[str, Any]:
     """The rankings on offer, and how fresh the measurements behind them are."""
     screen_store.ensure()
-    return {"rankings": screen_rank.catalogue(), "meta": screen_store.meta()}
+    # Each ranking carries its own walk-forward result, so the interface can
+    # say what the thing actually did rather than only what it claims to do.
+    study = screen_backtest.report() or {}
+    by_rank = {r["rank"]: r for r in study.get("rows", [])}
+    cat = screen_rank.catalogue()
+    for r in cat:
+        r["study"] = by_rank.get(r["id"])
+    return {
+        "rankings": cat,
+        "meta": screen_store.meta(),
+        "study": {k: study.get(k) for k in ("ran_at", "windows", "top", "horizons")}
+                 if study else None,
+    }
 
 
 @app.get("/api/screen")

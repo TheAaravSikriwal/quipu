@@ -400,9 +400,13 @@ function renderFinder(tab) {
     <button id="fn-refresh">Rescan</button>
   </div>`;
 
+  /* Each card carries what the ranking DID, not only what it is for. A
+   * screener that cannot say whether its own lists went anywhere is asking
+   * to be taken on faith, and the walk-forward is cheap to quote. */
   const picker = `<div class="fpick">${cat.map((r) => `
     <button data-frank="${r.id}" class="${r.id === tab.ui.rank ? "on" : ""}">
       <span class="l">${esc(r.label)}</span><span class="n">${esc(r.note)}</span>
+      ${r.study ? `<span class="v">${esc(r.study.verdict)}</span>` : ""}
     </button>`).join("")}</div>`;
 
   if (tab.error) {
@@ -436,6 +440,17 @@ function renderFinder(tab) {
           ${FINDER_COLS.map(([k, , fmt]) => `<span class="fv">${r[k] == null ? "--" : fmt(r[k])}</span>`).join("")}
         </div>`).join("")}
     </div>
+    ${FINDER_STUDY ? `<div class="fstudy prose">
+      <b>Tested.</b> Every ranking above was replayed through
+      ${FINDER_STUDY.windows} fortnightly windows of the past year: metrics
+      computed from bars up to that date only, top ${FINDER_STUDY.top} taken,
+      then measured against what the whole eligible universe did over the
+      next ${(FINDER_STUDY.horizons || []).join(" and ")} sessions. Each is
+      graded on what it claims &mdash; the three directional lists on return,
+      the volatility lists on whether volatility moved the way they said.
+      Overlapping windows, one market regime, no costs, and the panel only
+      holds names liquid enough to be in it today, which flatters returns.
+    </div>` : ""}
     <div class="fnote prose">
       ${esc(d.note || "")} Scored as
       ${(d.parts || []).map((p) => `${Math.round(p.weight * 100)}% ${esc(p.metric.replace(/_/g, " "))}${p.invert ? " (low)" : ""}`).join(", ")}.
@@ -446,12 +461,15 @@ function renderFinder(tab) {
 }
 
 let FINDER_RANKINGS = [];
+let FINDER_STUDY = null;
 
 async function loadRankings() {
   try {
     const res = await fetch(`${API}/api/screen/rankings`);
-    FINDER_RANKINGS = (await res.json()).rankings || [];
-  } catch { FINDER_RANKINGS = []; }
+    const d = await res.json();
+    FINDER_RANKINGS = d.rankings || [];
+    FINDER_STUDY = d.study && d.study.windows ? d.study : null;
+  } catch { FINDER_RANKINGS = []; FINDER_STUDY = null; }
 }
 
 function wireFinder(tab) {
