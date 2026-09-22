@@ -302,8 +302,17 @@ body {
 .lcell b, .lcell em, .lcell .acts, .lcell .mine { position: relative; z-index: 1; }
 .lcell b { font-family: var(--mono); font-size: 13.5px; font-weight: 500; color: var(--text2); }
 .lcell em {
-  font-family: var(--mono); font-style: normal; font-size: 9.5px; color: var(--rule2);
+  font-family: var(--mono); font-style: normal; font-size: 10px; color: var(--rule2);
 }
+/* Dear or cheap against the reference volatility.
+   Weight rather than colour, as everywhere else on this page: a contract
+   trading above its reference value is set in full ink, one below it is
+   set back, and anything within two cents of fair is left grey because at
+   that distance the bid-ask spread decides it, not the model. */
+.lcell em.dear { color: var(--text); }
+.lcell em.cheap { color: var(--text2); }
+.lcell em.flat { color: var(--rule2); }
+.lcell em.dear::after { content: ""; }
 /* In the money: the price brightens. No background wash -- tinting every
    cell on one side of the spot turned half the board into a grey slab. */
 .lcell.itm b { color: var(--text); }

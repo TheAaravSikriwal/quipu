@@ -154,6 +154,7 @@ function newPositionTab() {
       // Legs start empty: they are picked off the board, not typed in.
       legs: saved?.legs || [],
       chain: null, expiry: null, chainLoading: false, chainError: null,
+      basis: "atm", unit: "cash",
       suggest: [],
       zoom: null,
     },
@@ -488,8 +489,10 @@ async function loadChain(tab, expiry) {
   u.chainLoading = true;
   render();
   try {
-    const q = expiry ? `?expiry=${encodeURIComponent(expiry)}` : "";
-    const res = await fetch(`${API}/api/chain/${encodeURIComponent(u.symbol)}${q}`);
+    const p = new URLSearchParams();
+    if (expiry) p.set("expiry", expiry);
+    p.set("basis", u.basis || "atm");
+    const res = await fetch(`${API}/api/chain/${encodeURIComponent(u.symbol)}?${p}`);
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || res.statusText);
     u.chain = body;
@@ -600,11 +603,37 @@ function renderLadder(tab) {
       const px = r.mark || r.last;
       const oi = Math.max(2, (r.open_interest || 0) / maxOI * 100);
       const itm = kind === "call" ? row.strike < spot : row.strike > spot;
-      return `<span class="lcell ${itm ? "itm" : ""} ${h && h.qty ? "held" : ""}">
-        <i class="oi" style="width:${oi.toFixed(1)}%" title="${big(r.open_interest)} open"></i>
+      /* The edge, not the implied vol. "22%" beside a price tells you
+       * nothing without holding the rest of the board in your head;
+       * "+0.44" says you are paying forty-four cents over what this
+       * contract is worth at the reference volatility, which is the
+       * comparison you actually came to make. IV moves to the tooltip. */
+      /* Two ways to read the same gap, and both are needed.
+       *
+       * Dollars are what leaves your account. Volatility points are the
+       * only unit comparable ACROSS strikes: a far out-of-the-money
+       * contract has almost no vega, so four points of extra volatility
+       * costs a cent there and half a dollar at the money. Judging the
+       * board on dollars alone makes the wings look harmless. */
+      const inVol = u.unit === "vol";
+      const ed = inVol ? r.edge_vol : r.edge;
+      const edCls = ed == null ? ""
+        : (ed > (inVol ? 0.2 : 0.02) ? "dear" : ed < (inVol ? -0.2 : -0.02) ? "cheap" : "flat");
+      const edTxt = ed == null ? ""
+        : (ed > 0 ? "+" : "−") + (inVol ? nf(Math.abs(ed), 1) : nf(Math.abs(ed), 2));
+      const tip = [
+        r.iv == null ? null : `${nf(r.iv, 1)}% implied`,
+        r.fair == null ? null : `worth ${money(r.fair)} at the reference`,
+        r.edge == null ? null : `${r.edge > 0 ? "dear by" : "cheap by"} ${money(Math.abs(r.edge))}`,
+        r.edge_vol == null ? null : `${nf(Math.abs(r.edge_vol), 1)} vol points`,
+        `${big(r.open_interest)} open`,
+        r.spread_pct == null ? null : `${nf(r.spread_pct, 0)}% spread`,
+      ].filter(Boolean).join(" · ");
+      return `<span class="lcell ${itm ? "itm" : ""} ${h && h.qty ? "held" : ""}" title="${tip}">
+        <i class="oi" style="width:${oi.toFixed(1)}%"></i>
         ${mine}
         <b>${nf(px, 2)}</b>
-        <em class="iv">${r.iv == null ? "" : nf(r.iv, 0) + "%"}</em>
+        <em class="edge ${edCls}">${edTxt}</em>
         <span class="acts">
           <button data-add="long|${kind}|${row.strike}|${px}" title="Buy one">buy</button>
           <button data-add="short|${kind}|${row.strike}|${px}" title="Sell one">sell</button>
@@ -625,6 +654,22 @@ function renderLadder(tab) {
       <span class="explab">expiry</span>${pills}
       <span class="exphint">${c.days == null ? "" : `${c.trading_days} sessions away`}</span>
     </div>
+    <div class="expbar">
+      <span class="explab">price against</span>
+      <div class="cseg">
+        <button data-basis="atm" class="${(u.basis || "atm") === "atm" ? "on" : ""}">
+          at-the-money${c.atm_iv ? ` ${nf(c.atm_iv, 0)}%` : ""}</button>
+        <button data-basis="realised" class="${u.basis === "realised" ? "on" : ""}">
+          realised${c.realised?.rv20 ? ` ${nf(c.realised.rv20, 0)}%` : ""}</button>
+      </div>
+      <div class="cseg">
+        <button data-unit="cash" class="${(u.unit || "cash") === "cash" ? "on" : ""}">in $</button>
+        <button data-unit="vol" class="${u.unit === "vol" ? "on" : ""}">in vol pts</button>
+      </div>
+      <span class="exphint">${(u.basis || "atm") === "atm"
+        ? "difference is the skew"
+        : "difference is what you pay over what the stock does"}</span>
+    </div>
     <div class="ladder">
       <div class="lcols">
         <span class="lc">calls</span>
@@ -632,8 +677,18 @@ function renderLadder(tab) {
         <span class="lp">puts</span>
       </div>
       ${body}
-      <div class="lfoot">price and implied vol, with the bar showing open interest
-        &mdash; click any price to buy or sell one</div>
+      <div class="lfoot">Each price is followed by what it costs
+        <b>over or under</b> the same contract valued at ${esc(c.fair_label || "the reference")}
+        volatility, ${(u.unit || "cash") === "vol"
+          ? "in points of volatility &mdash; the unit that compares across strikes, since a far "
+            + "out-of-the-money contract has almost no vega"
+          : "in dollars"}. <b>+</b> is dear, <b>&minus;</b> is cheap. The bar is open interest.
+        Hover any price for the full read; click to buy or sell one.
+        ${c.spot_source && c.spot_source !== "quote"
+          ? `<br>Priced off <b>${money(c.spot)}</b>, taken from ${esc(c.spot_source)} rather than
+             the quoted ${money(c.spot_quoted)} &mdash; the quote lags the options tape, and
+             using it put the calls and puts on one strike three points of volatility apart.`
+          : ""}</div>
     </div>
   </div>`;
 }
@@ -798,6 +853,22 @@ function wirePosition(tab) {
 
   document.querySelectorAll("[data-pexp]").forEach((b) => {
     b.onclick = () => loadChain(tab, b.dataset.pexp);
+  });
+
+  document.querySelectorAll("[data-unit]").forEach((b) => {
+    b.onclick = () => {
+      if ((u.unit || "cash") === b.dataset.unit) return;
+      u.unit = b.dataset.unit;
+      render();        // no refetch: both numbers are already on every row
+    };
+  });
+
+  document.querySelectorAll("[data-basis]").forEach((b) => {
+    b.onclick = () => {
+      if ((u.basis || "atm") === b.dataset.basis) return;
+      u.basis = b.dataset.basis;
+      loadChain(tab, u.expiry);
+    };
   });
 
   // Click a price: that contract, that side, one lot, at today's mark.

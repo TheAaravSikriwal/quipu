@@ -11,6 +11,7 @@ Pipeline for a single search:
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -167,8 +168,28 @@ def screen_refresh() -> Dict[str, Any]:
     return screen_store.meta()
 
 
+def _realised_vol(symbol: str) -> Dict[str, Any]:
+    """What the stock has actually been doing, annualised."""
+    import math as _m
+    out: Dict[str, Any] = {}
+    try:
+        frame = quotes.yf.Ticker(symbol).history(period="6mo", interval="1d")
+        closes = [float(c) for c in frame["Close"].tolist() if c == c]
+        rets = [_m.log(b / a) for a, b in zip(closes, closes[1:]) if a > 0]
+        for label, n in (("rv20", 20), ("rv60", 60)):
+            tail = rets[-n:]
+            if len(tail) >= max(10, n // 2):
+                mean = sum(tail) / len(tail)
+                var = sum((r - mean) ** 2 for r in tail) / (len(tail) - 1)
+                out[label] = round(_m.sqrt(var) * _m.sqrt(252) * 100, 2)
+    except Exception:
+        pass
+    return out
+
+
 @app.get("/api/chain/{symbol}")
-def chain(symbol: str, expiry: str = None) -> Dict[str, Any]:
+def chain(symbol: str, expiry: str = None, vol: float = None,
+          basis: str = "atm") -> Dict[str, Any]:
     """One board of contracts, for building a position against.
 
     Deliberately light. The full ticker route pulls news, filings and five
@@ -188,10 +209,106 @@ def chain(symbol: str, expiry: str = None) -> Dict[str, Any]:
 
     board = (data.get("expiries") or [{}])[0]
     quote = quotes.fetch_quote(symbol) or {}
+
+    # ---- what the options themselves say the stock is worth -------------
+    #
+    # The quoted spot lags the options tape. Put-call parity is an identity,
+    # not a model -- C - P = S*e^-qT - K*e^-rT must hold or there is free
+    # money -- so the board can be asked directly what spot it is pricing
+    # off, and it disagreed with the quote by about a dollar.
+    #
+    # That one dollar was not cosmetic. Solving each contract's implied vol
+    # against a stale spot pushed every call's IV up and every put's IV
+    # down by three to four points AT THE SAME STRIKE, which cannot happen:
+    # a call and a put on one strike and one expiry share a volatility.
+    # The whole put side then read as systematically cheap, which looked
+    # like an opportunity and was an arithmetic error.
+    spot_quoted = data.get("spot") or quote.get("price") or 0
+    rate = options.risk_free_rate()
+    years = max((board.get("trading_days") or 0) / 252.0, 1 / 252.0)
+
+    calls = board.get("calls") or []
+    puts = board.get("puts") or []
+    put_at = {p["strike"]: p for p in puts}
+
+    def _two_sided(r):
+        return r.get("bid") and r.get("ask") and r["ask"] > r["bid"]
+
+    spot = spot_quoted
+    spot_source = "quote"
+    pairs = [(c, put_at[c["strike"]]) for c in calls
+             if c["strike"] in put_at and _two_sided(c) and _two_sided(put_at[c["strike"]])]
+    if pairs and spot_quoted:
+        # The nearest-the-money pair, where the spread is tightest and the
+        # parity read is therefore cleanest.
+        c, p = min(pairs, key=lambda cp: abs(cp[0]["strike"] - spot_quoted))
+        implied = ((c["mark"] - p["mark"]) + c["strike"] * math.exp(-rate * years))             / math.exp(-div * years)
+        # Only trust it if it is close; a wild number means a broken quote,
+        # not a stale one.
+        if abs(implied / spot_quoted - 1) < 0.03:
+            spot, spot_source = implied, f"put-call parity at {c['strike']:g}"
+
+    # Re-solve every implied vol against that spot, because the ones on the
+    # rows were solved against the stale one.
+    if abs(spot - spot_quoted) > 0.005:
+        for side, rows in (("call", calls), ("put", puts)):
+            for r in rows:
+                mk = r.get("mark") or r.get("last")
+                if not mk:
+                    continue
+                iv = options.implied_vol(mk, spot, float(r["strike"]), years,
+                                         rate, side == "call", div)
+                if iv:
+                    r["iv"] = round(iv * 100, 2)
+                    r["iv_source"] = "solved"
+        atm_call = min((c for c in calls if c.get("iv")),
+                       key=lambda c: abs(c["strike"] - spot), default=None)
+        if atm_call:
+            board.setdefault("stats", {})["atm_iv"] = atm_call["iv"]
+
+    # ---- a fair value for every strike ---------------------------------
+    #
+    # The reference volatility must not come from the contract being judged:
+    # each row's IV was solved backwards out of its own price, so pricing a
+    # strike with it returns that price and compares a number with itself.
+    #
+    #   atm       the at-the-money vol for this expiry. Differences are then
+    #             the SKEW -- what the market charges for this strike over
+    #             the money. Expected, not irrational.
+    #   realised  what the stock has actually done over 20 sessions.
+    #             Differences are the variance risk premium.
+    rv = _realised_vol(symbol)
+    atm_iv = (board.get("stats") or {}).get("atm_iv")
+    if vol and vol > 0:
+        ref, ref_label = float(vol), f"your {float(vol):.0f}%"
+    elif basis == "realised" and rv.get("rv20"):
+        ref, ref_label = rv["rv20"], f"realised {rv['rv20']:.0f}%"
+    elif atm_iv:
+        ref, ref_label = float(atm_iv), f"at-the-money {float(atm_iv):.0f}%"
+    else:
+        ref, ref_label = (rv.get("rv20") or 30.0), "realised"
+
+    for side, rows in (("call", calls), ("put", puts)):
+        for r in rows:
+            mark = r.get("mark") or r.get("last")
+            if not (mark and spot and r.get("strike")):
+                r["fair"] = r["edge"] = r["edge_vol"] = None
+                continue
+            fair = options.bs_price(spot, float(r["strike"]), years,
+                                    ref / 100.0, rate, side == "call", div)
+            r["fair"] = round(fair, 4)
+            r["edge"] = round(mark - fair, 4)
+            # The same mispricing in volatility terms. Dollars alone cannot
+            # be compared across strikes: a far out-of-the-money contract has
+            # almost no vega, so four points of extra vol shows up as a cent,
+            # while at the money it is worth half a dollar. Points are the
+            # comparable unit; dollars are what you actually pay.
+            r["edge_vol"] = round(r["iv"] - ref, 2) if r.get("iv") else None
+
     return {
         "symbol": symbol,
         "name": quote.get("name"),
-        "spot": data.get("spot") or quote.get("price"),
+        "spot": round(spot, 4) if spot else None,
         "change_pct": quote.get("change_pct"),
         "all_expiries": data.get("all_expiries") or [],
         "expiry": board.get("expiry"),
@@ -200,6 +317,13 @@ def chain(symbol: str, expiry: str = None) -> Dict[str, Any]:
         "stats": board.get("stats"),
         "calls": board.get("calls") or [],
         "puts": board.get("puts") or [],
+        "spot_quoted": round(spot_quoted, 4) if spot_quoted else None,
+        "spot_source": spot_source,
+        "fair_basis": basis if not vol else "custom",
+        "fair_vol": round(ref, 2),
+        "fair_label": ref_label,
+        "atm_iv": atm_iv,
+        "realised": rv,
     }
 
 
