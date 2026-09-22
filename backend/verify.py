@@ -474,6 +474,8 @@ except Exception as exc:
 section("Filed accounts agree with the filings")
 
 try:
+    from datetime import timedelta as _td
+
     from sources import sec_edgar as SE, sec_xbrl as SX
 
     facts = SX.fetch("AAPL", SE.lookup_cik)
@@ -498,6 +500,31 @@ try:
     RESULTS.append((not bad, "assets = liabilities + equity",
                     f"{len(rows)} years balance" if not bad else f"off in {bad}"))
 
+    # The balance sheet must be filled in for every year shown, not just
+    # the recent ones. Instant concepts are filed every quarter as well
+    # as every year, so taking a tail slice of them returned the last
+    # nine QUARTERS and left four years of assets and equity blank under
+    # five full years of revenue.
+    holes = [r["end"] for r in facts.get("annual", [])
+             if r.get("revenue") and (r.get("assets") is None or r.get("equity") is None)]
+    RESULTS.append((not holes, "every year has its balance sheet",
+                    "complete" if not holes else f"missing in {holes}"))
+
+    # Plenty of filers never tag `Liabilities`, only its components.
+    # Coca-Cola is one, and the row was empty for every year until the
+    # total was derived from the identity.
+    ko = SX.fetch("KO", SE.lookup_cik)
+    krows = ko.get("annual") or []
+    missing = [r["end"] for r in krows if r.get("liabilities") is None]
+    RESULTS.append((krows and not missing,
+                    "a filer that omits total liabilities still shows them",
+                    f"{len(krows)} years" if not missing else f"blank in {missing}"))
+    off = [r["end"] for r in krows
+           if r.get("assets") and r.get("liabilities") is not None and r.get("equity")
+           and abs(r["assets"] - (r["liabilities"] + r["equity"])) / r["assets"] > 0.005]
+    RESULTS.append((not off, "and the derived total still balances",
+                    "balances" if not off else f"off in {off}"))
+
     # Margins are computed here, so they must reproduce by hand.
     r = rows.get("2024-09-28", {})
     if r.get("revenue") and r.get("net_income"):
@@ -515,6 +542,48 @@ try:
     ends = [r["end"] for r in facts.get("annual", [])]
     RESULTS.append((len(ends) == len(set(ends)), "one row per fiscal year",
                     f"{len(ends)} years, no repeats"))
+
+    # The quarter nobody files must add up. Q1+Q2+Q3+derived Q4 has to
+    # reconstruct the year it was backed out of, exactly.
+    qs = {r["end"]: r for r in facts.get("quarterly", [])}
+    checked = 0
+    broken = []
+    for yr in facts.get("annual", []):
+        q4 = qs.get(yr["end"])
+        if not (q4 and q4.get("derived_q4") and q4.get("revenue")):
+            continue
+        y0 = _d.fromisoformat(yr["end"]) - _td(days=360)
+        three = [q for q in qs.values()
+                 if not q.get("derived_q4")
+                 and y0 <= _d.fromisoformat(q["end"]) < _d.fromisoformat(yr["end"])
+                 and q.get("revenue") is not None]
+        if len(three) != 3:
+            continue
+        checked += 1
+        total = q4["revenue"] + sum(q["revenue"] for q in three)
+        if abs(total - yr["revenue"]) > 1:
+            broken.append(yr["end"])
+    RESULTS.append((checked > 0 and not broken,
+                    "the four quarters add back to the year",
+                    f"{checked} years reconstruct" if not broken else f"off in {broken}"))
+
+    # Growth must compare the same season. Counting rows back assumed a
+    # gapless series, and the series has a hole every fourth quarter.
+    slipped = []
+    for r in facts.get("quarterly", []):
+        if not r.get("prior_end"):
+            continue
+        gap = (_d.fromisoformat(r["end"]) - _d.fromisoformat(r["prior_end"])).days
+        if not 320 <= gap <= 410:
+            slipped.append(f'{r["end"]}<-{r["prior_end"]} ({gap}d)')
+    RESULTS.append((not slipped, "growth compares a year earlier, not four rows",
+                    "aligned" if not slipped else ", ".join(slipped[:2])))
+
+    # And no six-month hole left in the series.
+    ends = sorted(_d.fromisoformat(r["end"]) for r in facts.get("quarterly", []))
+    holes = [str(b) for a, b in zip(ends, ends[1:]) if (b - a).days > 130]
+    RESULTS.append((not holes, "no quarter missing from the series",
+                    f"{len(ends)} quarters, contiguous" if not holes else f"gap before {holes}"))
 
     # A REIT stops tagging rent as contract revenue when the lease
     # standard changes. Preferring the tag by list order alone gave

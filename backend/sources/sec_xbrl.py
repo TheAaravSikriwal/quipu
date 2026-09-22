@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -250,6 +250,81 @@ def _div(a: Optional[float], b: Optional[float]) -> Optional[float]:
     return a / b
 
 
+def _a_year_before(end: str, by_end: Dict[str, Dict]) -> Optional[Dict]:
+    """The row closest to exactly a year before `end`, or nothing.
+
+    Fiscal calendars drift by a few days -- a 52/53-week filer's Q1 can
+    land anywhere in a fortnight -- so this looks for the nearest match
+    inside a window rather than an exact date, and refuses rather than
+    reaching for something six months out.
+    """
+    try:
+        target = date.fromisoformat(end).replace(
+            year=date.fromisoformat(end).year - 1)
+    except ValueError:                      # 29 February
+        target = date.fromisoformat(end) - timedelta(days=365)
+
+    best, gap = None, timedelta(days=46)
+    for other, row in by_end.items():
+        try:
+            diff = abs(date.fromisoformat(other) - target)
+        except ValueError:
+            continue
+        if diff < gap:
+            best, gap = row, diff
+    return best
+
+
+def _add_missing_q4(annual: List[Dict], quarters: List[Dict]) -> List[Dict]:
+    """The fourth quarter, which no company files.
+
+    A 10-Q covers the first three quarters; the fourth is only ever
+    reported inside the annual figure. Left alone the series jumps from
+    September to the following April, which reads as a company that
+    stopped trading for six months.
+
+    So it is backed out: the year less the three quarters inside it.
+    That is arithmetic on filed numbers rather than a filed number, and
+    is flagged as such.
+    """
+    have = {r["end"] for r in quarters}
+    made = []
+
+    for yr in annual:
+        end = yr.get("end")
+        if not end or end in have:
+            continue
+        try:
+            y_end = date.fromisoformat(end)
+        except ValueError:
+            continue
+        y_start = y_end - timedelta(days=360)
+
+        inside = [q for q in quarters
+                  if y_start <= date.fromisoformat(q["end"]) < y_end]
+        if len(inside) != 3:
+            continue                        # cannot subtract what is not there
+
+        row: Dict[str, Any] = {"end": end, "cite": yr.get("cite"),
+                               "derived_q4": True}
+        for k in ("revenue", "net_income", "operating_income", "gross_profit",
+                  "operating_cash_flow", "capex"):
+            whole = yr.get(k)
+            parts = [q.get(k) for q in inside]
+            if whole is None or any(v is None for v in parts):
+                continue
+            row[k] = whole - sum(parts)
+        # Balance-sheet figures at the year end ARE the quarter end, so
+        # they carry across untouched rather than being differenced.
+        for k in ("assets", "liabilities", "equity", "cash"):
+            if yr.get(k) is not None:
+                row[k] = yr[k]
+        if row.get("revenue") is not None:
+            made.append(row)
+
+    return sorted(quarters + made, key=lambda r: r["end"])
+
+
 def statements(symbol: str, cik: int, years: int = 5,
                quarters: int = 8) -> Dict[str, Any]:
     """Income, balance sheet and cash flow, with a citation on every line."""
@@ -261,14 +336,23 @@ def statements(symbol: str, cik: int, years: int = 5,
     tags: Dict[str, str] = {}
 
     def grab(period: str, n: int) -> Dict[str, Dict[str, Dict]]:
-        """metric -> {period_end: row}, for the last n periods."""
+        """metric -> {period_end: row}, keyed for lookup.
+
+        Deliberately keeps every period rather than a tail slice. A
+        balance sheet is filed at every quarter end as well as every
+        year end, so the last nine entries of `Assets` are the last nine
+        QUARTERS -- and the year-end dates the income statement is lined
+        up against fall off the back of that window. The table came back
+        with four empty years of assets and equity under five full years
+        of revenue.
+        """
         table: Dict[str, Dict[str, Dict]] = {}
         for metric in CONCEPTS:
             tag, rows = _series(gaap, metric, period)
             if not rows:
                 continue
             tags.setdefault(metric, tag)
-            table[metric] = {r["end"]: r for r in rows[-(n + 4):]}
+            table[metric] = {r["end"]: r for r in rows}
         return table
 
     annual = grab("annual", years)
@@ -298,6 +382,17 @@ def statements(symbol: str, cik: int, years: int = 5,
                         "accn": hit["accn"], "fy": hit["fy"],
                         "url": _accn_url(cik, hit["accn"]),
                     }
+            # Plenty of filers never tag `Liabilities` -- they tag the
+            # components and let the total fall out of the balance
+            # sheet. Coca-Cola is one, and the row was empty for every
+            # year. The identity that defines a balance sheet supplies
+            # it, and is marked as arithmetic rather than a filed line.
+            if row.get("liabilities") is None:
+                a_, e_ = row.get("assets"), row.get("equity")
+                if a_ is not None and e_ is not None:
+                    row["liabilities"] = a_ - e_
+                    row["liabilities_derived"] = True
+
             # Derived figures, computed here rather than taken on trust.
             rev = row.get("revenue")
             row["gross_margin"] = _div(row.get("gross_profit"), rev)
@@ -313,19 +408,25 @@ def statements(symbol: str, cik: int, years: int = 5,
         return out
 
     rows_a = assemble(annual, years)
-    rows_q = assemble(quarter, quarters)
+    rows_q = assemble(quarter, quarters + 6)
+    rows_q = _add_missing_q4(rows_a, rows_q)[-quarters:]
 
-    # Year-on-year growth, against the same period a year earlier rather
-    # than the one before it -- quarterly figures are seasonal and a
-    # sequential comparison would call every retailer's January a crisis.
-    for series, back in ((rows_a, 1), (rows_q, 4)):
-        for i, row in enumerate(series):
-            prior = series[i - back] if i >= back else None
+    # Year-on-year growth, matched on the DATE a year earlier rather
+    # than on four rows back. Quarterly figures are seasonal so the
+    # comparison has to be against the same season -- and counting rows
+    # assumes the series has no gaps, which it does: nobody files a
+    # fourth-quarter 10-Q, so four rows back was five calendar quarters
+    # and every growth figure on the page was against the wrong period.
+    for series in (rows_a, rows_q):
+        by_end = {r["end"]: r for r in series}
+        for row in series:
+            prior = _a_year_before(row["end"], by_end)
             for k in ("revenue", "net_income", "operating_income"):
                 was = (prior or {}).get(k)
                 now = row.get(k)
                 row[f"{k}_growth"] = ((now / was - 1) if was and now is not None
                                       and was > 0 else None)
+            row["prior_end"] = (prior or {}).get("end")
 
     # A company that has reorganised files under a NEW CIK, and the new
     # registrant starts with no history: Exxon's ticker resolves to a

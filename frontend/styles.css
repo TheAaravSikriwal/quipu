@@ -1466,3 +1466,12 @@ a { color: inherit; text-decoration: none; }
   font-size: 10.5px; line-height: 1.55; color: var(--faint);
 }
 .fnote b { color: var(--text2); font-family: var(--mono); font-size: 10px; }
+
+/* A figure the app worked out because the filer did not tag it. Marked
+   in the label rather than the number, so the column of figures stays a
+   clean column of figures. */
+.fdrv {
+  font-style: normal; font-family: var(--ui); font-size: 8px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  margin-left: 7px; border-bottom: 1px dashed var(--rule2); cursor: help;
+}

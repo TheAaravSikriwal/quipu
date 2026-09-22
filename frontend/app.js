@@ -1381,7 +1381,8 @@ const SOURCES = {
   ownership: "13F filings via Yahoo Finance",
   short: "Exchange short-interest reports",
   filings: "SEC EDGAR &middot; official, unedited",
-  calendar: "Each date cited on its own row &middot; dates only, never forecasts",
+  calendar: "Company filings and announcements &middot; each date cited on its row",
+  macro: "Federal Reserve and BEA &middot; each date cited on its row",
   news: "Yahoo, Google News and Finnhub, deduplicated",
   unique: "Cross-referenced across every article read",
   corroborated: "Claims matched across two or more outlets",
@@ -1451,8 +1452,9 @@ const REGIONS = [
   { id: "business", label: "Business", keys: ["profile", "secfin", "secmargins", "financials",
                                               "valuation", "earnings", "analysts", "ownership",
                                               "short", "filings"] },
-  { id: "news",     label: "News",     keys: ["calendar", "news", "unique", "corroborated",
-                                              "stories", "social", "pipeline"] },
+  { id: "news",     label: "News",     keys: ["calendar", "macro", "news", "unique",
+                                              "corroborated", "stories", "social",
+                                              "pipeline"] },
 ];
 
 /* Which region a panel belongs to, by reading order. The packer uses this to
@@ -2209,71 +2211,10 @@ function evTrim(list, n) {
   return mine.concat(market).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-function eventsTile(d, tab) {
-  const ev = d.events?.events || [];
-  if (!ev.length) return "";
-
-  const o = d.options;
-  const exp = o?.available
-    ? o.expiries[Math.min(tab.ui.expiryIdx, o.expiries.length - 1)] : null;
-  const expiry = exp?.expiry || null;
-
-  const before = expiry ? ev.filter((e) => e.date <= expiry) : ev;
-  const after = expiry ? ev.filter((e) => e.date > expiry) : [];
-  const big = before.filter((e) => e.weight === 3);
-  const earn = ev.find((e) => e.kind === "earnings");
-
-  /* The verdict. Written as a sentence because the answer to "should I
-   * wait" is a sentence, and a reader who has to assemble it from a list
-   * of dates has been handed the work the panel was supposed to do. */
-  let verdict;
-  if (!expiry) {
-    verdict = `The next thing on the calendar is <b>${esc(ev[0].title)}</b>,
-      ${EV_WHEN(ev[0].days)}.`;
-  } else if (!big.length) {
-    // The useful half of "nothing is coming" is what comes next, and
-    // whether one more week of expiry would reach it. That is the actual
-    // decision -- wait or not -- so the panel makes it rather than
-    // leaving the reader to compare two dates by eye.
-    const next = after.find((e) => e.weight === 3);
-    verdict = `Nothing major is scheduled before your <b>${esc(expiry)}</b> option expires.
-      Whatever moves it will be news, not the calendar.`
-      + (next ? ` The next one is <b>${esc(next.title)}</b>,
-          ${EV_WHEN(next.days)} &mdash; an expiry after <b>${EV_DATE(next.date)}</b>
-          would cover it.` : "");
-  } else {
-    // Titles stay as written. Lower-casing them to fit the sentence turned
-    // "(PCE)" into "(pce)", which is a different thing entirely.
-    const names = big.map((e) => e.title);
-    const list = names.length === 1 ? names[0]
-      : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
-    verdict = `Your <b>${esc(expiry)}</b> option has to get through
-      <b>${big.length}</b> scheduled event${big.length > 1 ? "s" : ""} first &mdash;
-      ${esc(list)}. Each one can move the price on the day, so the option is
-      carrying that risk whether you wanted it or not.`;
-  }
-
-  /* Earnings is the one date that dominates a single stock, so it gets
-   * said outright in both directions. Missing it by three days is a
-   * mistake people make once and remember, and it is entirely avoidable
-   * -- the next expiry out costs a little more and contains the event. */
-  let note = "";
-  if (earn && expiry) {
-    note = earn.date <= expiry
-      ? `<div class="evflag">Earnings land <b>${EV_WHEN(earn.days)}</b>, before this expiry.
-         Options are priced up for it, and that extra value disappears the morning
-         after &mdash; being right about the direction may still lose money.</div>`
-      : `<div class="evflag">Earnings are <b>${EV_DATE(earn.date)}</b>, <b>after</b> this
-         expiry. If the report is what you are trading, this option expires before it
-         happens and a later expiry is the one you want.</div>`;
-  }
-
-  /* Every row says where its date came from and links to the page that
-   * settles it. A calendar is only worth anything if you can check it,
-   * and the difference between "the Fed published this" and "Quipu
-   * guessed this from four previous payments" is the whole of how much
-   * you should lean on the row. */
-  const row = (e) => `<div class="evrow ${e.confirmed ? "" : "est"} ${e.scope}">
+/* The rows. Shared by both calendars, because a date is a date and the
+ * only thing that differs is whose it is. */
+function evRow(e) {
+  return `<div class="evrow ${e.confirmed ? "" : "est"} ${e.scope}">
       <span class="evd">${EV_DATE(e.date)}</span>
       <span class="evn">${esc(e.title)}${e.confirmed ? ""
         : `<em>${e.approx ? "estimated" : "usual timing"}</em>`}</span>
@@ -2284,28 +2225,123 @@ function eventsTile(d, tab) {
         ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.source)}</a>`
         : esc(e.source)}${e.time ? ` &middot; ${esc(e.time)}` : ""}</span>
     </div>`;
+}
+
+function evExpiry(d, tab) {
+  const o = d.options;
+  const exp = o?.available
+    ? o.expiries[Math.min(tab.ui.expiryIdx, o.expiries.length - 1)] : null;
+  return exp?.expiry || null;
+}
+
+/* ---- this company's own dates ---------------------------------------
+ *
+ * Split out from the market calendar because they are different kinds
+ * of fact and get acted on differently. A Fed meeting moves everything
+ * you could possibly own and there is nothing to decide about it; an
+ * earnings date is about THIS company, is the single largest scheduled
+ * move it will make, and is the thing that decides which expiry to buy.
+ *
+ * Mixed into one list the company's two or three dates were a minority
+ * among trade figures and GDP revisions, which is exactly backwards for
+ * someone who came here to look at one stock.
+ */
+function eventsTile(d, tab) {
+  const all = d.events?.events || [];
+  const mine = all.filter((e) => e.scope === "company");
+  const expiry = evExpiry(d, tab);
+  const earn = mine.find((e) => e.kind === "earnings");
+  const name = d.profile?.name || tab.ui.symbol || "This company";
+
+  if (!mine.length) {
+    return tile("calendar", "e-filed", "w2 h1", "This company's calendar",
+      `<div class="dim">Nothing scheduled that we can see. No earnings date has
+        been published and the company pays no dividend.</div>`);
+  }
+
+  /* The earnings verdict, which is the reason to read this panel. */
+  let lead;
+  if (!earn) {
+    lead = `No earnings date has been published for ${esc(name)} yet.`;
+  } else if (!expiry) {
+    lead = `${esc(name)} reports on <b>${EV_DATE(earn.date)}</b>, ${EV_WHEN(earn.days)}.`;
+  } else if (earn.date <= expiry) {
+    lead = `${esc(name)} reports <b>${EV_WHEN(earn.days)}</b> &mdash; <b>before</b> your
+      ${esc(expiry)} options expire. Options are priced up for the report and
+      lose that extra value the morning after, so being right about the
+      direction can still lose money.`;
+  } else {
+    lead = `${esc(name)} reports on <b>${EV_DATE(earn.date)}</b>, <b>after</b> your
+      ${esc(expiry)} options expire. If the report is what you are trading, this
+      expiry ends before it happens and a later one is the one you want.`;
+  }
 
   return tile(
-    "calendar", "elastic e-filed", "w2 h3", "What is coming",
+    "calendar", "elastic e-filed", "w2 h2", "This company's calendar",
+    `<div class="prose">${lead}</div>
+     <div class="evhead">${esc(tab.ui.symbol || "company")} dates</div>
+     ${mine.map(evRow).join("")}
+     <div class="evfoot">Earnings dates come from the data provider and companies
+       do move them. An ex-dividend date is projected from the last few payments
+       unless the company has announced it &mdash; those are marked.</div>`,
+    earn && expiry ? (earn.date <= expiry ? "earnings before expiry"
+                                          : "earnings after expiry") : ""
+  );
+}
+
+/* ---- everything else that moves the market --------------------------
+ *
+ * The same panel as before minus the company's own dates: the releases
+ * that move every stock at once. Still split at your expiry, because
+ * "there is a Fed meeting on the 28th" is trivia and "there is a Fed
+ * meeting eight days before your option expires" is the trade.
+ */
+function macroTile(d, tab) {
+  const all = d.events?.events || [];
+  const ev = all.filter((e) => e.scope !== "company");
+  if (!ev.length) return "";
+
+  const expiry = evExpiry(d, tab);
+  const before = expiry ? ev.filter((e) => e.date <= expiry) : ev;
+  const after = expiry ? ev.filter((e) => e.date > expiry) : [];
+  const big = before.filter((e) => e.weight === 3);
+
+  let verdict;
+  if (!expiry) {
+    verdict = `Next up is <b>${esc(ev[0].title)}</b>, ${EV_WHEN(ev[0].days)}.`;
+  } else if (!big.length) {
+    const next = after.find((e) => e.weight === 3);
+    verdict = `No major economic release lands before your <b>${esc(expiry)}</b>
+      options expire.`
+      + (next ? ` The next one is <b>${esc(next.title)}</b>, ${EV_WHEN(next.days)}
+          &mdash; an expiry after <b>${EV_DATE(next.date)}</b> would cover it.` : "");
+  } else {
+    const names = big.map((e) => e.title);
+    const list = names.length === 1 ? names[0]
+      : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+    verdict = `Your <b>${esc(expiry)}</b> options have to get through
+      <b>${big.length}</b> scheduled release${big.length > 1 ? "s" : ""} first &mdash;
+      ${esc(list)}. Each can move the whole market on the day.`;
+  }
+
+  return tile(
+    "macro", "elastic e-filed", "w2 h3", "What the market has coming",
     `<div class="prose">${verdict}</div>
-     ${note}
      ${before.length ? `<div class="evhead">${expiry
         ? `before your ${esc(expiry)} expiry` : "next up"}</div>
-        ${before.map(row).join("")}` : ""}
+        ${before.map(evRow).join("")}` : ""}
      ${after.length ? `<div class="evhead">${!expiry ? "later"
-        : before.length ? "after it"
-        : `all after your ${esc(expiry)} expiry`}</div>
-        ${evTrim(after, before.length ? 5 : 8).map(row).join("")}` : ""}
+        : before.length ? "after it" : `all after your ${esc(expiry)} expiry`}</div>
+        ${after.slice(0, before.length ? 5 : 8).map(evRow).join("")}` : ""}
      <div class="evsrc">
        <div class="evhead">where these dates come from</div>
-       ${(d.events.sources || []).map((s) => `<div class="evsrow">
-          <a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a>
-          <span>${s.what}</span></div>`).join("")}
-       <div class="evfoot">Anything marked <b>estimated</b> is Quipu&rsquo;s
-         arithmetic, not a published date. Inflation and jobs come from the
-         BLS, which refuses automated requests, so those two are placed at
-         their usual timing. An upcoming ex-dividend date is projected from
-         the last few payments unless the company has announced it.</div>
+       ${(d.events.sources || []).filter((x) => !/yahoo/i.test(x.name)).map((x) =>
+         `<div class="evsrow">
+            <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>
+            <span>${x.what}</span></div>`).join("")}
+       <div class="evfoot">Anything marked <b>estimated</b> is Quipu&rsquo;s arithmetic,
+         not a published date. Inflation and jobs come from the BLS, which refuses
+         automated requests, so those two sit at their usual timing.</div>
      </div>`,
     expiry && big.length ? `${big.length} before expiry` : ""
   );
@@ -2492,7 +2528,11 @@ function secFinTile(d) {
        <div class="fr fgap"></div>
        ${line("cash on hand", "cash")}
        ${line("total assets", "assets")}
-       ${line("total liabilities", "liabilities")}
+       <div class="fr">
+         <span class="fl">total liabilities${rows.some((r) => r.liabilities_derived)
+           ? `<i class="fdrv" title="Not tagged separately in the filing. Assets less equity, which is what the balance sheet says it must be.">worked out</i>` : ""}</span>
+         ${rows.map((r) => `<span class="fv">${BIG(r.liabilities)}</span>`).join("")}
+       </div>
        ${line("shareholders equity", "equity")}
      </div>` : ""}
 
@@ -2500,7 +2540,8 @@ function secFinTile(d) {
      <div class="ftab">
        <div class="fr fhead">
          <span class="fl">quarter to</span>
-         ${qs.map((r) => `<span class="fv">${esc(r.end.slice(2))}</span>`).join("")}
+         ${qs.map((r) => `<span class="fv">${esc(r.end.slice(2))}${
+           r.derived_q4 ? "*" : ""}</span>`).join("")}
        </div>
        <div class="fr"><span class="fl">revenue</span>
          ${qs.map((r) => `<span class="fv">${BIG(r.revenue)}</span>`).join("")}</div>
@@ -2513,9 +2554,12 @@ function secFinTile(d) {
 
      <div class="fcite">
        ${rows.slice(-3).reverse().map((r) => r.cite ? `<a href="${esc(r.cite.url || x.source_url)}"
-          target="_blank" rel="noopener">${FYLAB(r.end)} ${esc(r.cite.form || "")}
-          &middot; filed ${esc(r.cite.filed || "")}</a>` : "").join("")}
+          target="_blank" rel="noopener">${FYLAB(r.end)} figures &middot; from the
+          ${esc(r.cite.form || "filing")} of ${esc(r.cite.filed || "")}</a>` : "").join("")}
      </div>
+     ${qs.some((r) => r.derived_q4) ? `<div class="fnote">*&thinsp;No company files a
+       fourth-quarter report &mdash; it only ever appears inside the annual figure.
+       That column is the year less the three quarters inside it.</div>` : ""}
      <div class="fnote">Figures are taken from the company&rsquo;s own XBRL filings.
        Where a year has been restated in a later report, the later version is
        shown. Revenue is read from
@@ -3464,6 +3508,7 @@ function renderDashboard(d, tab) {
     filingsTile(d.filings),
 
     eventsTile(d, tab),
+    macroTile(d, tab),
     newsTile(d.news),
     uniqueTile(d.crossref),
     corroboratedTile(d.crossref),
