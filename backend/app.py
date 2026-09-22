@@ -28,6 +28,7 @@ from crossref.claims import cross_reference  # noqa: E402
 from crossref.cluster import cluster  # noqa: E402
 from extract.tiered import available_tiers, extract  # noqa: E402
 from fanout import bounded_map, fanout  # noqa: E402
+from screener import rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
 from sources import deep, news_rss, options, quotes, sec_edgar, symbols  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -94,6 +95,63 @@ def symbol_search(q: str) -> Dict[str, Any]:
         return {"query": q, "results": symbols.search(q)}
     except Exception as exc:
         return {"query": q, "results": [], "error": str(exc)}
+
+
+@app.get("/api/screen/rankings")
+def screen_rankings() -> Dict[str, Any]:
+    """The rankings on offer, and how fresh the measurements behind them are."""
+    screen_store.ensure()
+    return {"rankings": screen_rank.catalogue(), "meta": screen_store.meta()}
+
+
+@app.get("/api/screen")
+def screen(rank: str = "tradeable", limit: int = 40,
+           min_price: float = None, min_dollar_vol: float = None) -> Dict[str, Any]:
+    """One ranking over the whole US universe.
+
+    The scan behind this takes about three minutes and runs in a thread, so
+    the first call after a cold start answers `scanning` with a count rather
+    than blocking. Once it is warm every ranking is instant, because they are
+    all sort orders over the same measured table.
+    """
+    screen_store.ensure()
+    df = screen_store.frame()
+    meta = screen_store.meta()
+    if df is None:
+        return {"rank": rank, "rows": [], "meta": meta}
+
+    try:
+        rows = screen_rank.rank(df, rank, limit=limit,
+                                min_price=min_price, min_dollar_vol=min_dollar_vol)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"unknown ranking: {rank}")
+
+    # Names come from the listing file, not from a per-symbol lookup: at forty
+    # rows that would be forty more requests for something already on disk.
+    names = screen_universe.index()
+    for r in rows:
+        info = names.get(r["symbol"], {})
+        r["name"] = info.get("name")
+        r["exchange"] = info.get("exchange")
+        r["etf"] = info.get("etf", False)
+
+    spec = screen_rank.RANKINGS[rank]
+    meta["eligible"] = int(len(screen_rank.eligible(
+        df, min_price=min_price, min_dollar_vol=min_dollar_vol)))
+    return {
+        "rank": rank,
+        "label": spec["label"],
+        "note": spec["note"],
+        "parts": [{"metric": m, "weight": w, "invert": inv} for m, w, inv in spec["parts"]],
+        "rows": rows,
+        "meta": meta,
+    }
+
+
+@app.post("/api/screen/refresh")
+def screen_refresh() -> Dict[str, Any]:
+    screen_store.ensure(force=True)
+    return screen_store.meta()
 
 
 @app.get("/api/live/{symbol}")

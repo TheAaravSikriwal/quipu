@@ -169,6 +169,86 @@ body {
 }
 .quick span:hover { background: var(--panel); color: var(--text); }
 
+/* ================= the finder =================
+   A table, because that is what a ranked list of two thousand things is.
+   The reasons column is the point: a score of 94.4 is not an argument, and
+   "+422% over the year to last month / 0.93 trend fit" is. */
+
+.findlink {
+  background: none; border: none; cursor: pointer;
+  color: var(--faint); font-family: var(--ui); font-size: 11px;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 6px 14px; border-radius: 999px;
+  transition: color .12s ease, background .12s ease;
+}
+.findlink:hover { color: var(--text); background: var(--panel); }
+
+/* One button per ranking, each carrying its own one-line purpose. A bare
+   label would make these seven synonyms for "sort"; the sentence is what
+   tells you which one answers your question. */
+.fpick {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1px; background: var(--rule); border-bottom: 1px solid var(--rule);
+}
+.fpick button {
+  background: var(--panel); border: none; cursor: pointer;
+  text-align: left; padding: 11px 14px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+  transition: background .12s ease;
+}
+.fpick button:hover { background: var(--raised); }
+.fpick button.on { background: var(--text); }
+.fpick .l {
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--text);
+}
+.fpick .n { font-size: 11px; line-height: 1.4; color: var(--text2); }
+.fpick button.on .l, .fpick button.on .n { color: var(--black); }
+
+.finder { padding: 0 0 4px; }
+.frow {
+  display: grid;
+  grid-template-columns: 34px 175px minmax(230px, 1fr) repeat(5, 92px);
+  gap: 12px; align-items: baseline;
+  padding: 9px 16px; border-bottom: 1px solid var(--hline);
+  cursor: pointer; transition: background .1s ease;
+}
+.frow:hover { background: var(--raised); }
+.fhead {
+  cursor: default; background: none; border-bottom: 1px solid var(--rule);
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+}
+.fhead:hover { background: none; }
+.frow .fn { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.frow .fsym b {
+  font-family: var(--mono); font-size: 14px; font-weight: 600;
+  color: var(--text); display: block;
+}
+.frow .fsym i {
+  font-style: normal; font-size: 10.5px; color: var(--faint);
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.frow .fwhy { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.frow .fwhy em {
+  font-style: normal; font-size: 11px; color: var(--text2);
+}
+/* The strongest reason first, and it reads as the strongest. */
+.frow .fwhy em:first-child { color: var(--text); }
+.frow .fv {
+  font-family: var(--mono); font-size: 12.5px; color: var(--text);
+  text-align: right;
+}
+.fhead .fv { font-family: var(--ui); text-align: right; }
+
+.fnote { padding: 14px 16px 22px; max-width: 78ch; font-size: 11.5px; }
+
+.tab-finder .sym { letter-spacing: .1em; }
+
+@media (max-width: 1100px) {
+  .frow { grid-template-columns: 26px 130px minmax(140px, 1fr) repeat(5, 70px); gap: 7px; }
+}
+
 /* ================= the grid =================
  * 1px gaps over a rule-coloured ground: the gap IS the rule. Panels sit
  * flush in one ruled table instead of floating as separate cards. */

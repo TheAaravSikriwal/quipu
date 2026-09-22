@@ -76,6 +76,50 @@ function newTab(symbol = null) {
   return tab;
 }
 
+/* ---- the finder -------------------------------------------------------
+ *
+ * Search answers "tell me about NVDA". This answers the question you have
+ * before that one: out of every listed US stock, which handful is even
+ * worth opening a tab on today.
+ *
+ * It opens as its own tab rather than a panel because it is a place you go
+ * and come back to, and because the tab strip already is the app's history
+ * of what you were looking at.
+ */
+function newFinderTab() {
+  const tab = {
+    id: ++state.seq, symbol: null, kind: "finder", status: "finder",
+    data: null, error: null, live: false, loading: true,
+    ui: { rank: "tradeable", limit: 40, zoom: null },
+  };
+  state.tabs.push(tab);
+  state.active = tab.id;
+  render();
+  loadScreen(tab);
+  return tab;
+}
+
+async function loadScreen(tab) {
+  tab.loading = true;
+  try {
+    const res = await fetch(
+      `${API}/api/screen?rank=${encodeURIComponent(tab.ui.rank)}&limit=${tab.ui.limit}`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    tab.data = await res.json();
+    tab.error = null;
+  } catch (err) {
+    tab.error = String(err.message || err);
+  }
+  tab.loading = false;
+  if (state.active === tab.id) render();
+
+  // The first scan of ten thousand stocks takes about three minutes. Rather
+  // than block on it, the tab shows its progress and asks again.
+  if (tab.data?.meta?.status === "scanning") {
+    setTimeout(() => { if (state.tabs.includes(tab)) loadScreen(tab); }, 4000);
+  }
+}
+
 function closeTab(id, event) {
   if (event) event.stopPropagation();
   const i = state.tabs.findIndex((t) => t.id === id);
@@ -282,12 +326,13 @@ function renderTabs() {
 
   state.tabs.forEach((tab) => {
     const el = document.createElement("div");
-    el.className = "tab" + (tab.id === state.active ? " active" : "");
+    el.className = "tab" + (tab.id === state.active ? " active" : "")
+      + (tab.kind === "finder" ? " tab-finder" : "");
     const q = tab.data?.quote;
     const chg = q?.change_pct;
     el.innerHTML =
       (tab.status === "ready" ? `<span class="livedot ${tab.live ? "" : "off"}"></span>` : "") +
-      `<span class="sym">${esc(tab.symbol || "New search")}</span>` +
+      `<span class="sym">${esc(tab.symbol || (tab.kind === "finder" ? "Finder" : "New search"))}</span>` +
       (tab.status === "loading" ? `<span class="chg dim">...</span>` : "") +
       (q?.price ? `<span class="px">${money(q.price)}</span>` : "") +
       (chg !== undefined && chg !== null ? `<span class="chg ${sign(chg)}">${signed(chg, 2)}</span>` : "") +
@@ -315,7 +360,118 @@ function renderLauncher() {
       <div class="quick">
         ${["NVDA", "AAPL", "TSLA", "AMD", "SPY", "MSFT"].map((s) => `<span data-s="${s}">${s}</span>`).join("")}
       </div>
+      <button class="findlink" id="findlink">I do not know what I am looking for</button>
     </div>`;
+}
+
+/* ---- the finder, drawn ----------------------------------------------- */
+
+/* The same five columns whatever the ranking, and deliberately NOT the
+ * metrics the ranking is built from -- those are already spelled out in the
+ * reasons beside them, and printing "155% volatility" as a sentence and
+ * "155%" as a number on the same line says one thing twice.
+ *
+ * These are the constants you want in order to compare a name from one list
+ * against a name from another: what it costs, whether you can get out, how
+ * much it moves, and what it has done lately. */
+const FINDER_COLS = [
+  ["price", "price", money],
+  ["dollar_vol", "a day", big],
+  ["vol20", "volatility", (v) => pct(v, 0)],
+  ["ret_1m", "1 month", (v) => signed(v, 0)],
+  ["ret_12m", "12 months", (v) => signed(v, 0)],
+];
+
+function renderFinder(tab) {
+  const d = tab.data || {};
+  const meta = d.meta || {};
+  const scanning = meta.status === "scanning";
+  const cat = FINDER_RANKINGS;
+
+  const bar = `<div class="livebar">
+    <span class="lbsym">Finder</span>
+    <span class="grow"></span>
+    <span>${scanning
+      ? `Measuring <b>${meta.done || 0}</b> of <b>${meta.total || "--"}</b>`
+      : `<b>${big(meta.measured)}</b> stocks measured${
+          meta.eligible ? `, <b>${big(meta.eligible)}</b> liquid enough` : ""}`}</span>
+    <span>${meta.age_s != null ? `scanned <b>${meta.age_s < 90
+      ? meta.age_s + "s" : Math.round(meta.age_s / 60) + " min"}</b> ago` : ""}</span>
+    <button id="fn-refresh">Rescan</button>
+  </div>`;
+
+  const picker = `<div class="fpick">${cat.map((r) => `
+    <button data-frank="${r.id}" class="${r.id === tab.ui.rank ? "on" : ""}">
+      <span class="l">${esc(r.label)}</span><span class="n">${esc(r.note)}</span>
+    </button>`).join("")}</div>`;
+
+  if (tab.error) {
+    return bar + picker + `<div class="empty"><div class="down">The screen failed</div>
+      <div class="stage">${esc(tab.error)}</div></div>`;
+  }
+
+  const rows = d.rows || [];
+  if (!rows.length) {
+    return bar + picker + `<div class="loading">
+      ${scanning ? `<div class="spinner"></div>
+        <div>Measuring every listed US stock</div>
+        <div class="stage">${meta.done || 0} of ${meta.total || "--"} &middot;
+          this happens once, then every ranking is instant</div>`
+        : `<div>Nothing passed the filters</div>`}</div>`;
+  }
+
+  return bar + picker + `
+    <div class="finder">
+      <div class="frow fhead">
+        <span class="fn">#</span><span class="fsym">symbol</span>
+        <span class="fwhy">why it is here</span>
+        ${FINDER_COLS.map(([, label]) => `<span class="fv">${esc(label)}</span>`).join("")}
+      </div>
+      ${rows.map((r, i) => `
+        <div class="frow" data-fsym="${esc(r.symbol)}">
+          <span class="fn">${i + 1}</span>
+          <span class="fsym"><b>${esc(r.symbol)}</b>
+            <i>${esc((r.name || "").replace(/ (Common Stock|Class A Common Stock|Ordinary Shares).*$/i, ""))}</i></span>
+          <span class="fwhy">${r.why.map((w) => `<em>${esc(w)}</em>`).join("")}</span>
+          ${FINDER_COLS.map(([k, , fmt]) => `<span class="fv">${r[k] == null ? "--" : fmt(r[k])}</span>`).join("")}
+        </div>`).join("")}
+    </div>
+    <div class="fnote prose">
+      ${esc(d.note || "")} Scored as
+      ${(d.parts || []).map((p) => `${Math.round(p.weight * 100)}% ${esc(p.metric.replace(/_/g, " "))}${p.invert ? " (low)" : ""}`).join(", ")}.
+      Percentiles are taken within the liquid universe, not against fixed
+      thresholds. None of this predicts anything &mdash; it is a sort order over
+      public measurements. Click any row to open it.
+    </div>`;
+}
+
+let FINDER_RANKINGS = [];
+
+async function loadRankings() {
+  try {
+    const res = await fetch(`${API}/api/screen/rankings`);
+    FINDER_RANKINGS = (await res.json()).rankings || [];
+  } catch { FINDER_RANKINGS = []; }
+}
+
+function wireFinder(tab) {
+  document.querySelectorAll("[data-frank]").forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.frank === tab.ui.rank) return;
+      tab.ui.rank = b.dataset.frank;
+      render();
+      loadScreen(tab);
+    };
+  });
+  document.querySelectorAll("[data-fsym]").forEach((el) => {
+    el.onclick = () => newTab(el.dataset.fsym);
+  });
+  const rs = document.getElementById("fn-refresh");
+  if (rs) rs.onclick = async () => {
+    rs.textContent = "Rescanning";
+    await fetch(`${API}/api/screen/refresh`, { method: "POST" });
+    loadScreen(tab);
+  };
 }
 
 /* ---- tile helper ----------------------------------------------------- */
@@ -2471,6 +2627,14 @@ function render(keepScroll = false) {
 
   if (!tab || tab.status === "blank") { view.innerHTML = renderLauncher(); wireLauncher(); return; }
 
+  if (tab.kind === "finder") {
+    view.innerHTML = renderFinder(tab);
+    gloss(view);
+    wireFinder(tab);
+    view.scrollTop = scroll;
+    return;
+  }
+
   if (tab.status === "loading") {
     view.innerHTML = `<div class="loading"><div class="spinner"></div>
       <div>Gathering everything on <b>${esc(tab.symbol)}</b></div>
@@ -2524,6 +2688,8 @@ function wireLauncher() {
     else if (e.key === "Escape") { suggestions = []; paintSuggestions(); }
   };
   document.querySelectorAll(".quick span").forEach((el) => { el.onclick = () => pick(el.dataset.s); });
+  const fl = document.getElementById("findlink");
+  if (fl) fl.onclick = async () => { if (!FINDER_RANKINGS.length) await loadRankings(); newFinderTab(); };
 }
 
 /* ---- charts ---------------------------------------------------------- */
