@@ -132,34 +132,61 @@ async function loadScreen(tab) {
  */
 const POS_KEY = "quipu.positions";
 
-function loadPositions() {
-  try { return JSON.parse(localStorage.getItem(POS_KEY)) || null; } catch { return null; }
-}
-function savePositions(tab) {
+/* ---- the logbook ----------------------------------------------------
+ *
+ * Trades are kept, not just the one you happen to have open. A position
+ * is a thing you hold for weeks and check on; the app was storing
+ * exactly one of them and overwriting it the moment you looked at
+ * another, which made it a calculator rather than a record.
+ *
+ * Local storage, because this is a local tool and a trade log is
+ * nobody's business but the person keeping it.
+ */
+function loadBook() {
   try {
-    localStorage.setItem(POS_KEY, JSON.stringify(
-      { symbol: tab.ui.symbol, legs: tab.ui.legs }));
-  } catch { /* private mode, or full -- not worth interrupting for */ }
+    const raw = JSON.parse(localStorage.getItem(POS_KEY));
+    if (Array.isArray(raw)) return raw;
+    // The old single-position format, carried over rather than dropped.
+    if (raw && raw.legs?.length) {
+      return [{ id: "t" + Date.now(), symbol: raw.symbol, legs: raw.legs,
+                opened: new Date().toISOString().slice(0, 10), closed: null }];
+    }
+  } catch { /* unreadable or absent -- an empty book is the right answer */ }
+  return [];
 }
+
+function saveBook(book) {
+  try { localStorage.setItem(POS_KEY, JSON.stringify(book)); }
+  catch { /* private mode, or full -- not worth interrupting for */ }
+}
+
+const bookOpen = (book) => book.filter((t) => !t.closed);
 
 const blankLeg = () => ({ kind: "call", side: "long", strike: "", qty: 1, entry: "", expiry: "" });
 
 function newPositionTab() {
-  const saved = loadPositions();
+  const book = loadBook();
   const tab = {
     id: ++state.seq, symbol: null, kind: "position", status: "position",
     data: null, error: null, live: true, loading: false,
     ui: {
-      symbol: saved?.symbol || "",
+      symbol: "",
       // Legs start empty: they are picked off the board, not typed in.
-      legs: saved?.legs || [],
+      legs: [],
+      book,
+      // Where you are. The logbook is the home of this tab -- the two
+      // route cards are a way IN to building something, not the front
+      // door, and once a trade exists the record of it is what you came
+      // back for.
+      view: bookOpen(book).length ? "book" : "new",
+      editing: null,
       chain: null, expiry: null, chainLoading: false, chainError: null,
       basis: "atm", unit: "cash",
       // Which way in. A position restored from a previous session goes
       // straight to the custom workspace -- it already exists, and
       // hiding it behind a question about how to build it would be
       // asking someone to choose a door they are already through.
-      route: (saved?.legs || []).length ? "custom" : null,
+      route: null,
       leaving: null,
       suggest: [],
       zoom: null,
@@ -168,11 +195,9 @@ function newPositionTab() {
   state.tabs.push(tab);
   state.active = tab.id;
   render();
-  // Open on the board the position already lives in, not the nearest one:
-  // coming back to a trade you hold, the expiry you care about is yours.
-  if (tab.ui.symbol) {
-    loadChain(tab, tab.ui.legs.find((l) => l.expiry)?.expiry);
-  }
+  // Price what is already held, so the log shows where each trade
+  // stands rather than being a list of names.
+  if (tab.ui.view === "book") markBook(tab);
   return tab;
 }
 
@@ -210,7 +235,10 @@ async function analysePosition(tab) {
   tab.data = data;
   tab.error = error;
   tab.loading = false;
-  savePositions(tab);
+  // A trade already in the book keeps up to date as it is edited. One
+  // being built is not written until it is added, so abandoning a
+  // half-assembled spread leaves no trace of it.
+  if (tab.ui.editing) commitTrade(tab, tab.ui.editing);
   if (state.active === tab.id) render();
 }
 
@@ -989,6 +1017,130 @@ function renderReady(tab) {
   </div>`;
 }
 
+/* ---- the logbook ---------------------------------------------------
+ *
+ * Where this tab lives. Both ways of building a trade -- picking
+ * contracts off the board and taking a ready-made structure -- end
+ * here, because they are two routes to the same destination: a trade
+ * you now hold and will want to look at again next week.
+ */
+function renderBook(tab) {
+  const u = tab.ui;
+  const live = bookOpen(u.book);
+  const done = u.book.filter((t) => t.closed);
+
+  const head = `<div class="bookbar">
+    <h2>Trade log</h2>
+    <span class="bookn">${live.length} open${done.length ? ` &middot; ${done.length} closed` : ""}</span>
+    <span class="grow"></span>
+    <button class="bookadd" id="book-new">+ new trade</button>
+  </div>`;
+
+  if (!live.length && !done.length) {
+    return head + `<div class="loading" style="height:44%">
+      <div>Nothing in the log yet</div>
+      <div class="stage">build a position yourself, or start from a ready-made
+        setup &mdash; either way it ends up here</div></div>`;
+  }
+
+  const row = (t) => {
+    const a = u.marks?.[t.id];
+    const pl = a?.pl;
+    const cls = pl == null ? "" : pl >= 0 ? "up" : "down";
+    return `<button class="bookrow ${t.closed ? "shut" : ""}" data-open="${esc(t.id)}">
+      <span class="bsym">${esc(t.symbol)}</span>
+      <span class="bname">${esc(a?.strategy?.name || legSummary(t.legs))}
+        <i>${t.legs.length} leg${t.legs.length > 1 ? "s" : ""}
+          &middot; opened ${esc(t.opened)}${t.closed ? ` &middot; closed ${esc(t.closed)}` : ""}</i></span>
+      <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
+        : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
+      <span class="bpct ${cls}">${a?.pl_pct == null ? "" : signed(a.pl_pct, 0)}</span>
+      <span class="bdays">${a?.days_left == null ? ""
+        : `${a.days_left} session${a.days_left === 1 ? "" : "s"}`}</span>
+    </button>`;
+  };
+
+  const total = live.reduce((acc, t) => {
+    const pl = u.marks?.[t.id]?.pl;
+    return pl == null ? acc : acc + pl;
+  }, 0);
+  const priced = live.filter((t) => u.marks?.[t.id]?.pl != null).length;
+
+  return head
+    + (live.length ? `<div class="booklist">
+        <div class="bookrow bhead"><span>ticker</span><span>position</span>
+          <span>profit</span><span>of risk</span><span>left</span></div>
+        ${live.map(row).join("")}
+      </div>` : "")
+    + (priced ? `<div class="booktot ${total >= 0 ? "up" : "down"}">
+        <span>across ${priced} open trade${priced === 1 ? "" : "s"}</span>
+        <b>${total >= 0 ? "+" : "&minus;"}${money(Math.abs(total), 0)}</b>
+      </div>` : "")
+    + (done.length ? `<div class="bookhead">closed</div>
+        <div class="booklist">${done.map(row).join("")}</div>` : "")
+    + `<div class="fnote prose">Kept on this machine only. Profit is marked
+       against the entry prices on each leg, which default to the mark when
+       the leg was added &mdash; open a trade to correct them to what you
+       actually paid.</div>`;
+}
+
+/** A trade with no strategy name yet, described by its legs. */
+function legSummary(legs) {
+  return legs.slice(0, 3).map((l) =>
+    `${l.side === "long" ? "+" : "-"}${l.qty} ${l.kind === "stock" ? "shares"
+      : `${nf(Number(l.strike), Number(l.strike) % 1 ? 1 : 0)}${l.kind[0]}`}`
+  ).join(" ") + (legs.length > 3 ? ` +${legs.length - 3}` : "");
+}
+
+/* Price every open trade so the log shows where they stand. One request
+ * each, fired together rather than in turn -- a log of six trades
+ * should not take six round trips end to end. */
+async function markBook(tab) {
+  const live = bookOpen(tab.ui.book);
+  if (!live.length) return;
+  tab.ui.marks ||= {};
+  live.forEach((t) => { if (!(t.id in tab.ui.marks)) tab.ui.marks[t.id] = null; });
+
+  await Promise.all(live.map(async (t) => {
+    try {
+      const res = await fetch(`${API}/api/position`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: t.symbol, legs: t.legs }),
+      });
+      const body = await res.json();
+      tab.ui.marks[t.id] = res.ok ? body : undefined;
+    } catch {
+      tab.ui.marks[t.id] = undefined;
+    }
+  }));
+  if (state.active === tab.id && tab.ui.view === "book") render(true);
+}
+
+/** Write the working position into the book, new or existing. */
+function commitTrade(tab, id = null) {
+  const u = tab.ui;
+  const legs = u.legs.filter((l) =>
+    Number(l.qty) > 0 && (l.kind === "stock" ? l.entry !== "" : l.strike !== "" && l.expiry));
+  if (!u.symbol || !legs.length) return null;
+
+  const at = id ? u.book.findIndex((t) => t.id === id) : -1;
+  if (at >= 0) {
+    u.book[at] = { ...u.book[at], symbol: u.symbol, legs };
+    saveBook(u.book);
+    return u.book[at].id;
+  }
+  const trade = {
+    id: "t" + Date.now() + Math.random().toString(36).slice(2, 6),
+    symbol: u.symbol, legs,
+    opened: new Date().toISOString().slice(0, 10),
+    closed: null,
+  };
+  u.book.unshift(trade);
+  saveBook(u.book);
+  return trade.id;
+}
+
 function renderPosition(tab) {
   const u = tab.ui, d = tab.data, c = u.chain;
 
@@ -1028,6 +1180,13 @@ function renderPosition(tab) {
     </div>`).join("")}
   </div>` : `<div class="chips empty-chips">Nothing yet &mdash; click a price on the board below</div>`;
 
+  // ---- where this tab is ----------------------------------------
+  //
+  // The logbook is home. The two route cards are a way in to building
+  // something, not the front door: once a trade exists, the record of
+  // it is what you came back for.
+  if (u.view === "book") return bar + renderBook(tab);
+
   // ---- the fork -------------------------------------------------
   //
   // Two entirely different jobs were sharing one screen. Building a
@@ -1036,7 +1195,11 @@ function renderPosition(tab) {
   // chips, the second wants to be left alone with eleven cards. Shown
   // together, the board pushed the setups below the fold and the
   // setups made the board look like something you had to read first.
-  if (!u.route) return bar + renderRoutes(tab);
+  if (!u.route) {
+    return bar + `<div class="bookbar">
+        <button class="plink" id="book-back">&larr; trade log</button>
+      </div>` + renderRoutes(tab);
+  }
 
   let out = bar + renderRouteBar(tab) + picker;
   if (u.route === "ready") {
@@ -1067,6 +1230,31 @@ function renderPosition(tab) {
  * the money, the payoff, each leg, and what to do with it. Two different
  * presentations of one position would only invite the question of which
  * one to believe. */
+/* The last thing on both routes.
+ *
+ * Whichever way the position was assembled, it ends the same way: into
+ * the log. The route was a path, and this is where both paths arrive. */
+function renderCommit(tab) {
+  const u = tab.ui;
+  if (u.editing) {
+    const t = u.book.find((x) => x.id === u.editing);
+    return `<div class="commitbar">
+      <span class="cmsg">In your log since ${esc(t?.opened || "")}. Changes here
+        are saved as you make them.</span>
+      <span class="grow"></span>
+      <button class="bookclose" data-close="${esc(u.editing)}">mark as closed</button>
+      <button class="bookadd" id="book-done">done &rarr;</button>
+    </div>`;
+  }
+  return `<div class="commitbar">
+    <span class="cmsg">Nothing is saved until you add it. Entry prices default
+      to today&rsquo;s mark &mdash; correct them above to what you actually paid
+      before adding, or edit them later from the log.</span>
+    <span class="grow"></span>
+    <button class="bookadd" id="book-save">add to the trade log &rarr;</button>
+  </div>`;
+}
+
 function renderAnalysis(tab) {
   const u = tab.ui, d = tab.data;
   if (tab.error) {
@@ -1150,6 +1338,8 @@ function renderAnalysis(tab) {
           </div>`).join("")}
       </div>
 
+      ${renderCommit(tab)}
+
       <div class="fnote prose">
         Marks come from the live chain where the contract is listed and from
         Black-Scholes where it is not &mdash; ${d.marks_live} of ${optLegs} option
@@ -1186,6 +1376,63 @@ function wirePosition(tab) {
     b.onclick = () => loadChain(tab, b.dataset.pexp);
   });
 
+  const bnew = document.getElementById("book-new");
+  if (bnew) bnew.onclick = () => {
+    u.view = "new"; u.route = null; u.editing = null;
+    u.legs = []; tab.data = null; u.preset = null;
+    render();
+  };
+
+  const bback = document.getElementById("book-back");
+  if (bback) bback.onclick = () => { u.view = "book"; render(); markBook(tab); };
+
+  const bsave = document.getElementById("book-save");
+  if (bsave) bsave.onclick = () => {
+    const id = commitTrade(tab);
+    if (!id) return;
+    u.editing = null;
+    u.view = "book";
+    u.marks = { ...(u.marks || {}), [id]: tab.data };
+    render();
+    markBook(tab);
+  };
+
+  const bdone = document.getElementById("book-done");
+  if (bdone) bdone.onclick = () => { u.view = "book"; render(); markBook(tab); };
+
+  document.querySelectorAll("[data-open]").forEach((b) => {
+    b.onclick = () => {
+      const t = u.book.find((x) => x.id === b.dataset.open);
+      if (!t) return;
+      // Opening one from the log drops you into the workspace with its
+      // legs loaded, which is the same place the custom route ends --
+      // so editing a held trade and building a new one are one screen.
+      u.editing = t.id;
+      u.symbol = t.symbol;
+      u.legs = t.legs.map((l) => ({ ...l }));
+      u.view = "work";
+      u.route = "custom";
+      u.chain = null;
+      u.preset = null;
+      render();
+      loadChain(tab);
+      analysePosition(tab);
+    };
+  });
+
+  document.querySelectorAll("[data-close]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const t = u.book.find((x) => x.id === b.dataset.close);
+      if (!t) return;
+      t.closed = new Date().toISOString().slice(0, 10);
+      saveBook(u.book);
+      u.editing = null;
+      u.view = "book";
+      render();
+    };
+  });
+
   document.querySelectorAll("[data-route]").forEach((b) => {
     b.onclick = () => {
       const pick = b.dataset.route;
@@ -1196,6 +1443,7 @@ function wirePosition(tab) {
       render();
       setTimeout(() => {
         u.route = pick;
+        u.view = "work";
         u.leaving = null;
         render();
         if (u.symbol && !u.chain) loadChain(tab);
@@ -1291,7 +1539,11 @@ function wirePosition(tab) {
   };
 
   const clear = document.getElementById("pos-clear");
-  if (clear) clear.onclick = () => { u.legs = []; tab.data = null; render(); savePositions(tab); };
+  if (clear) clear.onclick = () => {
+    u.legs = []; tab.data = null;
+    if (u.editing) commitTrade(tab, u.editing);
+    render(true);
+  };
 
   document.querySelectorAll(".chip[data-leg]").forEach((row) => {
     const i = Number(row.dataset.leg);

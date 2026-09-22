@@ -77,6 +77,25 @@
   --ma50:   #5C9EAD;   /* teal */
   --ma200:  #9C87C4;   /* mauve */
 
+  /* Profit and loss. The one other place a hue carries a fact rather
+   * than a mood: money gained and money lost are opposite things and
+   * every trader already reads them this way. Heavily desaturated --
+   * a full green on black is a traffic light, and a page of them
+   * stops meaning anything. Direction of PRICE is still filled and
+   * hollow triangles, not colour: a stock being down is not bad news,
+   * and a red tick would say it was. */
+  --pos:    #6E9E78;
+  --neg:    #B5706B;
+
+  /* The four evidence classes. Barely there on purpose -- the class is
+   * already named in words on every panel and drawn in the weight of
+   * its top rule, so this is a third quiet echo of a fact you can
+   * already read, not a new code to learn. */
+  --c-filed:   #7E93B8;
+  --c-priced:  #6E9E78;
+  --c-derived: #9C87C4;
+  --c-claimed: #A8845E;
+
   --mast:   "Bodoni Moda", Georgia, serif;
   /* GFS Didot, from the Greek Font Society -- a Greek Didone that also cuts
      Latin. Used for the name alone, nowhere else. */
@@ -634,10 +653,19 @@ span.q.px { color: var(--rule2); }
   content: ""; position: absolute; left: 0; right: 0; top: 0;
   border-top: 1px solid var(--rule2);
 }
-.e-filed::before   { border-top: 2px solid var(--text); }
-.e-priced::before  { border-top: 1px solid var(--text2); }
-.e-derived::before { border-top: 1px dashed var(--text2); }
-.e-claimed::before { border-top: 1px dotted var(--faint); }
+/* The top rule carries the class, in weight and now faintly in hue.
+   The word is printed in the masthead of every panel and the line
+   weight already says it, so this is a third quiet echo of something
+   readable two other ways -- which is the only reason colour is safe
+   on a page this dense. */
+.e-filed::before   { border-top: 2px solid var(--c-filed); }
+.e-priced::before  { border-top: 1px solid var(--c-priced); }
+.e-derived::before { border-top: 1px dashed var(--c-derived); }
+.e-claimed::before { border-top: 1px dotted var(--c-claimed); }
+.tile.e-filed   > h3 .cls { color: var(--c-filed); }
+.tile.e-priced  > h3 .cls { color: var(--c-priced); }
+.tile.e-derived > h3 .cls { color: var(--c-derived); }
+.tile.e-claimed > h3 .cls { color: var(--c-claimed); }
 .e-filed   { background: var(--raised); }
 .e-claimed { background: var(--sunk); }
 
@@ -716,12 +744,19 @@ span.q.px { color: var(--rule2); }
 .dim { color: var(--faint); }
 .warn { color: var(--text); }
 
-/* Direction, the old newspaper stock-table way: filled triangle up, hollow
-   down. Same ink and same weight, so it survives monochrome and colour
-   blindness alike. Colour never encodes direction, because there is none. */
-.up::before { content: "\25B2"; font-size: .72em; margin-right: .35em; }
-.down::before { content: "\25BD"; font-size: .72em; margin-right: .35em; }
-.up, .down { color: var(--text); }
+/* Direction, the old newspaper stock-table way: filled triangle up,
+   hollow down. The triangles stay and stay load-bearing -- they are why
+   this survives being printed, or read by someone who cannot separate
+   the two hues. The colour is a second, quieter copy of the same fact,
+   for scanning a page of numbers rather than reading one.
+
+   Deliberately washed out. A full green on black is a traffic light and
+   a page of traffic lights stops meaning anything; more to the point, a
+   stock being down is not bad news, and a warning red would say it was. */
+.up::before { content: "B2"; font-size: .72em; margin-right: .35em; }
+.down::before { content: "BD"; font-size: .72em; margin-right: .35em; }
+.up { color: var(--pos); }
+.down { color: var(--neg); }
 
 /* ---- the quote panel ---- */
 .coname { font-family: var(--mast); font-weight: 700; font-size: 21px; line-height: 1.1; }
@@ -1634,3 +1669,142 @@ a { color: inherit; text-decoration: none; }
   margin-right: 5px; vertical-align: 1px;
 }
 .cseg button.off-range { opacity: .45; }
+
+
+/* ---- the trade log ----
+   Where both routes end. A table because a log is a table: ticker,
+   what it is, what it is doing, how long is left. Sorted by nothing
+   clever -- newest first, which is the order they were opened in. */
+.bookbar {
+  display: flex; align-items: baseline; gap: 14px;
+  max-width: 1100px; margin: 0 auto; padding: 22px 16px 12px;
+}
+.bookbar h2 {
+  font-family: var(--ui); font-size: 19px; font-weight: 600; color: var(--text);
+}
+.bookn {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.bookadd {
+  background: var(--text); color: var(--black); border: none; cursor: pointer;
+  border-radius: 3px; padding: 9px 16px;
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  transition: opacity .12s ease;
+}
+.bookadd:hover { opacity: .86; }
+
+.booklist {
+  max-width: 1100px; margin: 0 auto; padding: 0 16px;
+  border-top: 1px solid var(--rule);
+}
+.bookrow {
+  display: grid; width: 100%; text-align: left; align-items: baseline;
+  grid-template-columns: 76px 1fr 110px 74px 96px;
+  gap: 12px; padding: 13px 4px;
+  background: none; border: none; border-bottom: 1px solid var(--hline);
+  cursor: pointer; font-family: var(--ui); color: var(--text2);
+  transition: background .12s ease;
+}
+.bookrow:hover { background: var(--panel); }
+.bookrow.bhead {
+  cursor: default; padding: 7px 4px; border-bottom: 1px solid var(--rule);
+  font-size: 8.5px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--faint);
+}
+.bookrow.bhead:hover { background: none; }
+.bookrow.shut { opacity: .5; }
+
+.bsym {
+  font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--text);
+}
+.bname { font-size: 13px; color: var(--text); }
+.bname i {
+  display: block; margin-top: 3px; font-style: normal;
+  font-size: 10.5px; color: var(--faint);
+}
+.bpl, .bpct, .bdays {
+  font-family: var(--mono); font-size: 13.5px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bpct { font-size: 12px; }
+.bdays { font-size: 11px; color: var(--faint); text-align: right; }
+.bpl.up, .bpct.up { color: var(--pos); }
+.bpl.down, .bpct.down { color: var(--neg); }
+
+.booktot {
+  max-width: 1100px; margin: 0 auto; padding: 13px 20px;
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.booktot b {
+  font-family: var(--mono); font-size: 18px; font-weight: 400;
+  letter-spacing: 0; text-transform: none;
+}
+.booktot.up b { color: var(--pos); }
+.booktot.down b { color: var(--neg); }
+
+.bookhead {
+  max-width: 1100px; margin: 0 auto; padding: 26px 20px 6px;
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+}
+
+/* The end of both routes. */
+.commitbar {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  margin-top: 22px; padding: 16px 0 0; border-top: 1px solid var(--rule);
+}
+.cmsg { flex: 1 1 320px; font-size: 11px; line-height: 1.55; color: var(--faint); }
+.bookclose {
+  background: none; border: none; cursor: pointer; padding: 9px 14px;
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+  box-shadow: inset 0 0 0 1px var(--rule); border-radius: 3px;
+}
+.bookclose:hover { color: var(--text); box-shadow: inset 0 0 0 1px var(--rule2); }
+
+
+/* ---- the rest of the hints ----
+   Each one names a fact that is already stated in words somewhere
+   nearby. None of them is the only way to read anything. */
+
+/* The two ends of a trade. Best and worst are opposite outcomes and the
+   panel exists to make that obvious -- but only the rule is tinted, not
+   the figure, so the column of numbers stays one colour to read down. */
+.mnycol.best  { box-shadow: inset 0 2px 0 var(--pos); }
+.mnycol.worst { box-shadow: inset 0 2px 0 var(--neg); }
+
+/* A scheduled event that can move the whole market, against one that
+   cannot. The weight is in the panel text either way. */
+.evrow.company .evd { color: var(--c-filed); }
+.evrow.est .evd { color: var(--c-derived); }
+.evrow.filed.w3 .evform { color: var(--c-claimed); }
+
+/* Cheap or dear against the reference, on the option board. The sign is
+   already printed in front of the number. */
+.q.edge.dear  { color: var(--neg); }
+.q.edge.cheap { color: var(--pos); }
+
+/* A leg you hold, on the board and in the chips. */
+.pos.l { background: var(--pos); color: var(--black); }
+.pos.s { box-shadow: inset 0 0 0 1px var(--neg); color: var(--neg); }
+
+/* The odds on a ready-made setup: the number is right there, this is
+   only so a row of eleven cards can be scanned rather than read. */
+.pcard .odds b { color: var(--text); }
+.pdodds b { color: var(--text); }
+
+/* Profit and loss wherever it is stated as a figure. */
+.pstat b.up { color: var(--pos); }
+.pstat b.down { color: var(--neg); }
+.pleg span.up { color: var(--pos); }
+.pleg span.down { color: var(--neg); }
+.pdsrow.win .pdsv { color: var(--pos); }
+.pdsrow:not(.win) .pdsv { color: var(--neg); }
+
+/* The payoff curve's break-even line, and the profitable side of it. */
+.pdline { stroke: var(--text); }
+.pdzero { stroke: var(--rule2); }
