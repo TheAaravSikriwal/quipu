@@ -71,7 +71,7 @@ def _years(expiry: Optional[str], now: Optional[datetime] = None) -> Optional[fl
 
 
 # ------------------------------------------------------------- what is it
-def identify(legs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def identify(legs: List[Dict[str, Any]], spot: Optional[float] = None) -> Dict[str, Any]:
     """Name the strategy from its legs.
 
     The taxonomy is the one the reference course teaches across Sections 3.1
@@ -172,7 +172,16 @@ def identify(legs: List[Dict[str, Any]]) -> Dict[str, Any]:
                 return _named("Calendar spread", "volatility",
                               "Selling the near month against the far one. Time is the trade.")
             if near["side"] < 0 and far["side"] > 0:
-                if len(calls) == 2 and (S(far) or 0) < (S(near) or 0):
+                # A fig leaf is a long-dated call DEEP in the money
+                # standing in for the shares, with a near call sold
+                # against it. Testing only that the long strike is the
+                # lower of the two caught every ordinary bullish call
+                # diagonal as well, which is a different trade with a
+                # different risk: the fig leaf behaves like stock, the
+                # diagonal does not.
+                deep = (spot and S(far) and S(far) <= spot * 0.90)
+                dated = (_years(far["expiry"]) or 0) > 0.75
+                if len(calls) == 2 and deep and dated:
                     return _named("Fig leaf", "income",
                                   "A deep long-dated call standing in for the shares, "
                                   "with a near call sold against it.")
@@ -192,18 +201,28 @@ def identify(legs: List[Dict[str, Any]]) -> Dict[str, Any]:
         kinds = [l["kind"] for l in s]
         sides = [l["side"] for l in s]
         if kinds == ["put", "put", "call", "call"]:
+            strikes = [S(l) for l in s]
+            # The butterfly is the special case and has to be tested
+            # first: its two short strikes sit on top of each other,
+            # and a condor's do not. Checked the other way round, every
+            # iron butterfly came back as a condor -- which reads as a
+            # range trade when it is really a bet on one price.
+            pinched = strikes[1] == strikes[2]
             if sides == [1, -1, -1, 1]:
+                if pinched:
+                    return _named("Iron butterfly (sold)", "income",
+                                  "Paid most if it finishes on the middle strike, "
+                                  "with both tails bought back.")
                 return _named("Iron condor (sold)", "income",
                               "Paid for a range, with both tails bought back.")
             if sides == [-1, 1, 1, -1]:
+                if pinched:
+                    return _named("Iron butterfly (bought)", "volatility",
+                                  "Pays if it finishes away from the middle strike.")
                 return _named("Iron condor (bought)", "volatility")
         if len(set(kinds)) == 1:
             if sides == [1, -1, -1, 1]:
                 return _named(f"Long condor with {kinds[0]}s", "volatility")
-        if kinds.count("put") == 2 and kinds.count("call") == 2:
-            strikes = [S(l) for l in s]
-            if strikes[1] == strikes[2] and sides == [1, -1, -1, 1]:
-                return _named("Iron butterfly (sold)", "income")
 
     return _named(f"{n}-leg position" if n else "Stock position", "custom")
 
@@ -237,7 +256,62 @@ def net_cost(legs: List[Dict[str, Any]]) -> float:
     return sum(l["side"] * l["qty"] * l["mult"] * l["entry"] for l in legs)
 
 
-def _breakevens(legs, lo: float, hi: float, steps: int = 4000) -> List[float]:
+def value_at(legs: List[Dict[str, Any]], price: float, horizon: float,
+             vol: float, rate: float, div_yield: float = 0.0) -> float:
+    """Profit at `price`, `horizon` years from now, with the survivors valued.
+
+    payoff_at assumes every leg expires, which is true of most positions
+    and false of exactly the ones where it matters. A calendar spread is
+    two options on the same strike: let them both expire and they cancel
+    to the penny, so the app reported a calendar's MAXIMUM PROFIT as a
+    $300 loss and said it could never make money. It makes money by the
+    near leg expiring worthless while the far leg is still alive.
+
+    So anything still running at the horizon is valued with
+    Black-Scholes on its remaining life instead of being collapsed to
+    intrinsic.
+    """
+    total = 0.0
+    for l in legs:
+        if l["kind"] == "stock":
+            value = price
+        else:
+            left = (_years(l["expiry"]) or 0.0) - horizon
+            if left <= 1e-9:
+                value = (max(price - l["strike"], 0.0) if l["kind"] == "call"
+                         else max(l["strike"] - price, 0.0))
+            elif price <= 0:
+                # Zero is absorbing in the model this is all built on: a
+                # share at nothing stays at nothing, so the call is worth
+                # nothing and the put is worth its strike, discounted.
+                # Black-Scholes cannot be asked -- it takes log(price).
+                value = (0.0 if l["kind"] == "call"
+                         else l["strike"] * math.exp(-rate * left))
+            else:
+                value = O.bs_price(price, l["strike"], left, vol, rate,
+                                   l["kind"] == "call", div_yield)
+        total += l["side"] * l["qty"] * l["mult"] * (value - l["entry"])
+    return total
+
+
+def _payoff_fn(legs: List[Dict[str, Any]], vol: float, rate: float,
+               div_yield: float):
+    """The right profit function for this position, and when it applies.
+
+    One expiry: the plain intrinsic payoff. More than one: valued at the
+    NEAREST expiry, because that is the first date the position changes
+    character, and it is the date a calendar is actually judged on.
+    """
+    expiries = sorted({l["expiry"] for l in legs if l["expiry"]})
+    if len(expiries) <= 1:
+        return (lambda price: payoff_at(legs, price)), None
+
+    horizon = _years(expiries[0]) or 0.0
+    return ((lambda price: value_at(legs, price, horizon, vol, rate, div_yield)),
+            expiries[0])
+
+
+def _breakevens(pay, lo: float, hi: float, steps: int = 4000) -> List[float]:
     """Where the payoff crosses zero, found by scanning and bisecting.
 
     Solved numerically rather than per strategy: the closed forms differ for
@@ -246,17 +320,17 @@ def _breakevens(legs, lo: float, hi: float, steps: int = 4000) -> List[float]:
     """
     out: List[float] = []
     prev_x = lo
-    prev_y = payoff_at(legs, lo)
+    prev_y = pay(lo)
     for i in range(1, steps + 1):
         x = lo + (hi - lo) * i / steps
-        y = payoff_at(legs, x)
+        y = pay(x)
         if prev_y == 0:
             out.append(round(prev_x, 2))
         elif (prev_y < 0) != (y < 0):
             a, b = prev_x, x
             for _ in range(60):
                 m = 0.5 * (a + b)
-                if (payoff_at(legs, a) < 0) != (payoff_at(legs, m) < 0):
+                if (pay(a) < 0) != (pay(m) < 0):
                     b = m
                 else:
                     a = m
@@ -270,14 +344,14 @@ def _breakevens(legs, lo: float, hi: float, steps: int = 4000) -> List[float]:
     return tidy
 
 
-def _extremes(legs, spot: float) -> Dict[str, Any]:
+def _extremes(pay, strikes: List[float], spot: float) -> Dict[str, Any]:
     """Max profit and max loss, and whether either is unbounded.
 
     Checked by walking the payoff far past every strike in both directions
     and looking at the slope at the ends: a payoff still rising at four
     times spot is not going to turn around.
     """
-    strikes = [l["strike"] for l in legs if l["strike"]] or [spot]
+    strikes = list(strikes) or [spot]
     lo, hi = 0.0, max(max(strikes), spot) * 4
     # The grid must contain every strike and zero exactly. A payoff is
     # piecewise linear with a corner at each strike, so its maximum and
@@ -286,7 +360,7 @@ def _extremes(legs, spot: float) -> Dict[str, Any]:
     # as -1099.25 instead of the -1100 it actually is.
     xs = sorted(set([lo, hi, spot] + strikes
                     + [lo + (hi - lo) * i / 2000 for i in range(2001)]))
-    ys = [payoff_at(legs, x) for x in xs]
+    ys = [pay(x) for x in xs]
 
     # Both questions are decided at the TOP end, because a share price
     # cannot go below zero: the payoff at S=0 is always a finite number, so
@@ -306,7 +380,7 @@ def _extremes(legs, spot: float) -> Dict[str, Any]:
         "max_loss": None if loss_unbounded else round(min(ys), 2),
         "max_profit_unbounded": profit_unbounded,
         "max_loss_unbounded": loss_unbounded,
-        "at_zero": round(payoff_at(legs, 0.0), 2),
+        "at_zero": round(pay(0.0), 2),
     }
 
 
@@ -319,7 +393,7 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
     if not legs or not spot:
         return {"ok": False, "reason": "no legs"}
 
-    strategy = identify(legs)
+    strategy = identify(legs, spot)
     cost = net_cost(legs)
 
     out_legs: List[Dict[str, Any]] = []
@@ -363,11 +437,16 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         })
 
     pl = value_now - cost
-    ext = _extremes(legs, spot)
     strikes = [l["strike"] for l in legs if l["strike"]] or [spot]
+
+    # One payoff function for the whole analysis, so the curve, the
+    # break-evens, the extremes and the odds all describe the same thing.
+    pay, at_expiry = _payoff_fn(legs, vol, rate, div_yield)
+
+    ext = _extremes(pay, strikes, spot)
     lo = max(0.01, min(min(strikes), spot) * 0.4)
     hi = max(max(strikes), spot) * 1.8
-    bes = _breakevens(legs, lo, hi)
+    bes = _breakevens(pay, lo, hi)
 
     # What is actually at risk. For a debit that is what you paid; for a
     # credit spread it is the width less the credit, which is what max_loss
@@ -379,9 +458,9 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
     curve = []
     for i in range(61):
         x = lo + (hi - lo) * i / 60
-        curve.append({"s": round(x, 2), "pl": round(payoff_at(legs, x), 2)})
+        curve.append({"s": round(x, 2), "pl": round(pay(x), 2)})
 
-    pop = _chance_of_profit(legs, spot, vol, rate, div_yield, bes)
+    pop = _chance_of_profit(pay, legs, spot, vol, rate, div_yield, bes)
 
     nearest = min((l for l in legs if l["expiry"]), key=lambda l: l["expiry"], default=None)
     days_left = None
@@ -405,8 +484,9 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "share_equivalent": round(greeks["delta"], 1),
         "breakevens": bes,
         "chance": pop,
-        "needs": _needs(legs, spot, bes, curve),
-        **_where_extreme(legs, spot),
+        "needs": _needs(pay, spot, bes, curve),
+        "valued_at": at_expiry,
+        **_where_extreme(pay, strikes, spot),
         "days_left": days_left,
         "curve": curve,
         **ext,
@@ -682,7 +762,7 @@ def _outside(a: Dict[str, Any]) -> bool:
     return mid["pl"] < 0
 
 
-def _where_extreme(legs: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:
+def _where_extreme(pay, strikes: List[float], spot: float) -> Dict[str, Any]:
     """Where the best and worst cases happen -- as a range, not a point.
 
     "The most you can lose is $300" is a true sentence that tells you
@@ -701,12 +781,19 @@ def _where_extreme(legs: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:
     checking zero, every strike and one point far out finds both the
     extreme and the full span it holds over.
     """
-    strikes = sorted({l["strike"] for l in legs if l["strike"]})
+    strikes = sorted(set(strikes))
     if not strikes:
         return {"best_at": None, "worst_at": None}
 
     far = max(max(strikes), spot) * 4
-    pts = [(x, payoff_at(legs, x)) for x in [0.0] + strikes + [far]]
+    # A calendar's profit peaks BETWEEN the strikes rather than on one,
+    # because the surviving leg's value is a curve and not a straight
+    # line. Corners alone are enough for a piecewise-linear payoff and
+    # are not enough here, so the grid is filled in either way.
+    grid = [0.0] + strikes + [far] + [
+        spot * (0.2 + 1.8 * i / 160) for i in range(161)]
+    pts = sorted({round(x, 4) for x in grid if x >= 0})
+    pts = [(x, pay(x)) for x in pts]
 
     def span(target: float):
         """Every stretch of price over which `target` is reached.
@@ -738,7 +825,7 @@ def _where_extreme(legs: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:
     }
 
 
-def _needs(legs: List[Dict[str, Any]], spot: float, bes: List[float],
+def _needs(pay, spot: float, bes: List[float],
            curve: List[Dict]) -> Dict[str, Any]:
     """What has to happen for this to work, as a direction and a level.
 
@@ -752,7 +839,7 @@ def _needs(legs: List[Dict[str, Any]], spot: float, bes: List[float],
                 "move_pct": None, "winning_now": False}
 
     low, high = curve[0]["pl"], curve[-1]["pl"]
-    mid = payoff_at(legs, spot)
+    mid = pay(spot)
     below = [b for b in bes if b < spot]
     above = [b for b in bes if b >= spot]
 
@@ -808,7 +895,7 @@ def _dollars(v: Optional[float]) -> str:
     return "--" if v is None else f"${v:,.2f}"
 
 
-def _chance_of_profit(legs: List[Dict[str, Any]], spot: float, vol: float,
+def _chance_of_profit(pay, legs: List[Dict[str, Any]], spot: float, vol: float,
                       rate: float, div_yield: float,
                       bes: List[float]) -> Optional[float]:
     """The odds this finishes profitable, under the same lognormal the
@@ -848,7 +935,7 @@ def _chance_of_profit(legs: List[Dict[str, Any]], spot: float, vol: float,
     total = 0.0
     for lo, hi in zip(edges, edges[1:]):
         mid = (lo + hi) / 2 if hi != float("inf") else lo * 1.5 + 1.0
-        if payoff_at(legs, mid) <= 0:
+        if pay(mid) <= 0:
             continue
         total += (1.0 if lo <= 0 else above(lo)) - (0.0 if hi == float("inf") else above(hi))
     return round(max(0.0, min(1.0, total)) * 100, 1)

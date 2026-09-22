@@ -416,6 +416,195 @@ try:
 except Exception as exc:
     RESULTS.append((False, "setup descriptions", f"could not run: {exc}"))
 
+section("Ready-made setups are built from real, distinct contracts")
+
+try:
+    import presets as PS
+
+    # A chain shaped like a one-day expiry: deltas collapse towards 0 and
+    # 1 within a couple of strikes, so nearest-delta on its own put the
+    # 0.20 and the 0.10 call on the SAME strike. An iron condor whose two
+    # call legs share a strike has no call side -- it is a put spread
+    # wearing the wrong name, and it was being labelled a condor.
+    def _chain(spot, lo, hi, step, is_call):
+        out, k = [], lo
+        while k <= hi:
+            # A deliberately brutal delta profile, near 0/1 either side.
+            m = (k - spot) / max(spot * 0.01, 0.01)
+            d = 1.0 / (1.0 + math.exp(m)) if is_call else -(1.0 - 1.0 / (1.0 + math.exp(m)))
+            out.append({"strike": round(k, 2), "delta": round(d, 4),
+                        "bid": 0.10, "ask": 0.12, "mark": 0.11, "iv": 22.0})
+            k += step
+        return out
+
+    SPOT = 340.0
+    calls = _chain(SPOT, 320, 360, 2.5, True)
+    puts = _chain(SPOT, 320, 360, 2.5, False)
+    built = PS.build(calls, puts, "2026-09-23", SPOT, 0.22, 0.04, 0.0)
+    RESULTS.append((len(built) > 0, "setups build on a steep chain",
+                    f"{len(built)} of {len(PS.CATALOGUE)}"))
+
+    # No setup may put two legs of the same kind on one strike.
+    collided = []
+    for b in built:
+        seen = {}
+        for l in b["legs"]:
+            if l["kind"] == "stock":
+                continue
+            key = (l["kind"], l["strike"])
+            if key in seen:
+                collided.append(f'{b["name"]} doubles {l["kind"]} {l["strike"]}')
+            seen[key] = True
+    RESULTS.append((not collided, "no setup stacks two legs on one strike",
+                    f"{len(built)} setups clean" if not collided else collided[0]))
+
+    # And a spread must have width: a zero-width spread is not a spread.
+    flat = []
+    for b in built:
+        for kind in ("call", "put"):
+            ks = sorted({l["strike"] for l in b["legs"] if l["kind"] == kind})
+            n = len([l for l in b["legs"] if l["kind"] == kind])
+            if n >= 2 and len(ks) < 2:
+                flat.append(f'{b["name"]} {kind}s all at {ks}')
+    RESULTS.append((not flat, "every spread leg pair has width",
+                    "all have width" if not flat else flat[0]))
+
+    # Whatever a setup calls itself, the detector must agree when handed
+    # the legs back. A disagreement means the catalogue is mislabelling.
+    import position as PZ
+    lied = []
+    for b in built:
+        got = (PZ.analyse(b["legs"], SPOT, 0.22, 0.04).get("strategy") or {}).get("name", "")
+        want = b.get("detected") or ""
+        if want and got != want:
+            lied.append(f'{b["name"]}: {want} then {got}')
+    RESULTS.append((not lied, "a setup is what the detector calls it",
+                    f"{len(built)} agree" if not lied else lied[0]))
+except Exception as exc:
+    RESULTS.append((False, "ready-made setups", f"could not run: {exc}"))
+
+section("The strategy detector names what it was handed")
+
+try:
+    import position as PZ
+
+    _E, _F, _L = "2026-12-18", "2027-03-19", "2028-01-21"
+    _S = 100.0
+
+    def _c(k, side, strike, entry, exp=_E, qty=1):
+        return {"kind": k, "side": side, "strike": strike, "qty": qty,
+                "entry": entry, "expiry": exp}
+
+    def _st(side, qty=100, entry=_S):
+        return {"kind": "stock", "side": side, "strike": None, "qty": qty,
+                "entry": entry, "expiry": None}
+
+    BUILT = [
+        ("Long call", [_c("call", "long", 100, 5)]),
+        ("Long put", [_c("put", "long", 100, 5)]),
+        ("Naked short call", [_c("call", "short", 105, 3)]),
+        ("Cash-secured put", [_c("put", "short", 95, 3)]),
+        ("LEAPS call", [_c("call", "long", 100, 20, _L)]),
+        ("LEAPS put", [_c("put", "long", 100, 20, _L)]),
+        ("Long stock", [_st("long")]),
+        ("Short stock", [_st("short")]),
+        ("Covered call", [_st("long"), _c("call", "short", 105, 3)]),
+        ("Married put", [_st("long"), _c("put", "long", 95, 3)]),
+        ("Protective call", [_st("short"), _c("call", "long", 105, 3)]),
+        ("Collar", [_st("long"), _c("call", "short", 105, 3), _c("put", "long", 95, 3)]),
+        ("Bull call spread", [_c("call", "long", 100, 5), _c("call", "short", 110, 2)]),
+        ("Bear call spread", [_c("call", "short", 100, 5), _c("call", "long", 110, 2)]),
+        ("Bear put spread", [_c("put", "long", 100, 5), _c("put", "short", 90, 2)]),
+        ("Bull put spread", [_c("put", "short", 100, 5), _c("put", "long", 90, 2)]),
+        ("Long straddle", [_c("call", "long", 100, 5), _c("put", "long", 100, 5)]),
+        ("Short straddle", [_c("call", "short", 100, 5), _c("put", "short", 100, 5)]),
+        ("Long strangle", [_c("call", "long", 105, 3), _c("put", "long", 95, 3)]),
+        ("Short strangle", [_c("call", "short", 105, 3), _c("put", "short", 95, 3)]),
+        ("Synthetic long stock", [_c("call", "long", 100, 5), _c("put", "short", 100, 5)]),
+        ("Synthetic short stock", [_c("call", "short", 100, 5), _c("put", "long", 100, 5)]),
+        ("Calendar spread", [_c("call", "short", 100, 4), _c("call", "long", 100, 7, _F)]),
+        ("Diagonal spread", [_c("call", "short", 105, 3), _c("call", "long", 100, 8, _F)]),
+        ("Fig leaf", [_c("call", "long", 80, 22, _L), _c("call", "short", 105, 3)]),
+        ("Iron condor (sold)", [_c("put", "long", 85, 1), _c("put", "short", 90, 2),
+                                _c("call", "short", 110, 2), _c("call", "long", 115, 1)]),
+        ("Iron condor (bought)", [_c("put", "short", 85, 1), _c("put", "long", 90, 2),
+                                  _c("call", "long", 110, 2), _c("call", "short", 115, 1)]),
+        ("Iron butterfly (sold)", [_c("put", "long", 90, 1), _c("put", "short", 100, 4),
+                                   _c("call", "short", 100, 4), _c("call", "long", 110, 1)]),
+    ]
+
+    wrong = []
+    for want, legs in BUILT:
+        got = (PZ.analyse(legs, _S, 0.30, 0.04).get("strategy") or {}).get("name")
+        if got != want:
+            wrong.append(f"{want} read as {got}")
+    RESULTS.append((not wrong, "every structure is named correctly",
+                    f"{len(BUILT)} structures" if not wrong else "; ".join(wrong[:2])))
+
+    # A fig leaf is a DEEP long-dated call standing in for shares. Testing
+    # only that its strike was the lower of the two caught every ordinary
+    # bullish call diagonal, which is a different trade with a different
+    # risk -- the fig leaf behaves like stock and the diagonal does not.
+    diag = (PZ.analyse([_c("call", "short", 105, 3), _c("call", "long", 100, 8, _F)],
+                       _S, 0.30, 0.04).get("strategy") or {}).get("name")
+    RESULTS.append((diag == "Diagonal spread",
+                    "a shallow diagonal is not a fig leaf", diag))
+
+    # An iron butterfly's short strikes sit on top of each other and a
+    # condor's do not. Tested the wrong way round, every butterfly came
+    # back as a condor -- a range trade instead of a bet on one price.
+    fly = (PZ.analyse([_c("put", "long", 90, 1), _c("put", "short", 100, 4),
+                       _c("call", "short", 100, 4), _c("call", "long", 110, 1)],
+                      _S, 0.30, 0.04).get("strategy") or {}).get("name")
+    RESULTS.append((fly == "Iron butterfly (sold)",
+                    "pinched short strikes make a butterfly", fly))
+
+    # Every structure must produce usable exit guidance, not an empty list.
+    bare = []
+    for want, legs in BUILT:
+        a = PZ.analyse(legs, _S, 0.30, 0.04)
+        g = PZ.guidance(a, 0.30, 0.04)
+        if not g or any(not (x.get("body") or "").strip() for x in g):
+            bare.append(want)
+    RESULTS.append((not bare, "every structure gets exit guidance",
+                    f"{len(BUILT)} structures" if not bare else str(bare[:3])))
+
+    # ---- the calendar, which was flatly wrong
+    #
+    # payoff_at collapses every leg to intrinsic. Two calls on the same
+    # strike then cancel to the penny, so a calendar reported a MAXIMUM
+    # PROFIT of minus the debit -- the app said it could never make money.
+    cal = PZ.analyse([_c("call", "short", 100, 4), _c("call", "long", 100, 7, _F)],
+                     _S, 0.30, 0.04)
+    RESULTS.append((cal["max_profit"] is not None and cal["max_profit"] > 0,
+                    "a calendar spread can make money",
+                    f'max profit {cal["max_profit"]}'))
+    check("a calendar's worst case is the debit paid",
+          cal["max_loss"], -cal["net_cost"], 0.01)
+    RESULTS.append((len(cal.get("breakevens") or []) == 2,
+                    "a calendar has two break-evens",
+                    str(cal.get("breakevens"))))
+    RESULTS.append((cal.get("valued_at") == "2026-12-18",
+                    "a calendar is judged at the NEAR expiry",
+                    str(cal.get("valued_at"))))
+
+    # And the near leg's value peaks at the strike, which is the whole
+    # shape of the trade.
+    norm = [PZ._norm(l) for l in
+            [_c("call", "short", 100, 4), _c("call", "long", 100, 7, _F)]]
+    h = PZ._years("2026-12-18")
+    at_k = PZ.value_at(norm, 100.0, h, 0.30, 0.04)
+    wings = [PZ.value_at(norm, x, h, 0.30, 0.04) for x in (70.0, 140.0)]
+    RESULTS.append((at_k > max(wings), "and it peaks at the strike",
+                    f"{at_k:.0f} at 100 vs {wings[0]:.0f} / {wings[1]:.0f}"))
+
+    # Single-expiry positions must be untouched by any of this.
+    plain = PZ.analyse([_c("call", "long", 100, 5), _c("call", "short", 110, 2)],
+                       _S, 0.30, 0.04)
+    check("a plain spread still pays intrinsic", plain["max_profit"], 700.0, 0.01)
+except Exception as exc:
+    RESULTS.append((False, "strategy detector", f"could not run: {exc}"))
+
 section("Discrete dividends, priced the way the market pays them")
 
 try:

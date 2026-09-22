@@ -1475,3 +1475,76 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
   margin-left: 7px; border-bottom: 1px dashed var(--rule2); cursor: help;
 }
+
+/* ---- the fork ----
+   Two jobs that were sharing one screen. Building a spread leg by leg
+   and picking one off a menu want opposite things, so they are asked
+   for once, up front, and then you are in one of them.
+
+   The animation is doing a job rather than decorating: the card you
+   did not pick collapses and the one you did slides to the middle and
+   opens into what it was describing, so the grid that appears is
+   visibly the same object you clicked rather than a new screen. */
+.routewrap {
+  min-height: 62vh; display: flex; align-items: center; justify-content: center;
+  padding: 24px 20px;
+}
+.routes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  width: min(880px, 100%);
+  transition: grid-template-columns .42s cubic-bezier(.4, 0, .2, 1),
+              gap .42s cubic-bezier(.4, 0, .2, 1),
+              width .42s cubic-bezier(.4, 0, .2, 1);
+}
+.route {
+  display: flex; flex-direction: column; gap: 9px; text-align: left;
+  background: var(--panel); border: none; cursor: pointer;
+  border-radius: 4px; padding: 26px 26px 22px;
+  font-family: var(--ui); color: var(--text2);
+  transition: background .16s ease, opacity .34s ease,
+              transform .42s cubic-bezier(.4, 0, .2, 1);
+}
+.route:hover { background: var(--raised); }
+.rk { font-size: 17px; font-weight: 600; color: var(--text); }
+.rd { font-size: 12.5px; line-height: 1.6; max-width: 42ch; }
+.rg {
+  margin-top: 4px; font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--faint);
+}
+
+/* Chosen: the other one folds away, this one takes the middle. The
+   collapsing card keeps `visibility` until the end so it fades rather
+   than vanishing on the first frame. */
+.routes.picked { grid-template-columns: 1fr; width: min(560px, 100%); gap: 0; }
+.routes.picked .route { pointer-events: none; }
+.routes.to-custom .route[data-route="ready"],
+.routes.to-ready .route[data-route="custom"] {
+  opacity: 0; transform: scale(.96); grid-row: 1; grid-column: 1;
+}
+.routes.to-custom .route[data-route="custom"],
+.routes.to-ready .route[data-route="ready"] {
+  grid-row: 1; grid-column: 1; background: var(--raised);
+}
+
+/* Where you are, and the one word back to the other side. */
+.routebar {
+  display: flex; align-items: baseline; gap: 14px;
+  max-width: 1320px; margin: 0 auto; padding: 14px 16px 0;
+}
+.rbnow {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--text2);
+}
+
+/* The setups arriving. Same easing as the card that opened into them,
+   so it reads as one movement. */
+.readywrap .pregrid, .readywrap .expbar { animation: routein .34s ease both; }
+.readywrap .pregrid { animation-delay: .04s; }
+@keyframes routein {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (max-width: 760px) {
+  .routes { grid-template-columns: 1fr; }
+}

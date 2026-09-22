@@ -155,6 +155,12 @@ function newPositionTab() {
       legs: saved?.legs || [],
       chain: null, expiry: null, chainLoading: false, chainError: null,
       basis: "atm", unit: "cash",
+      // Which way in. A position restored from a previous session goes
+      // straight to the custom workspace -- it already exists, and
+      // hiding it behind a question about how to build it would be
+      // asking someone to choose a door they are already through.
+      route: (saved?.legs || []).length ? "custom" : null,
+      leaving: null,
       suggest: [],
       zoom: null,
     },
@@ -720,8 +726,12 @@ function moneyBlock(a, symbol, spot) {
 function presetDetail(tab, p, c) {
   const legs = p.legs_explained || [];
 
-  const bes = p.breakevens || [];
-
+  /* Only what is particular to a ready-made setup lives here: what you
+   * would have to believe, the odds, and why these strikes and not the
+   * ones beside them. Everything below is renderAnalysis -- the same
+   * document the build-it-yourself route ends at, because they are the
+   * same position and two presentations of one thing would only raise
+   * the question of which to believe. */
   return `
   <div class="expbar">
     <button class="plink" id="pre-back">&larr; all setups</button>
@@ -742,85 +752,29 @@ function presetDetail(tab, p, c) {
     </div>
   </div>
 
-  ${moneyBlock(p, tab.ui.symbol, c.spot)}
-
-  <div class="pdgrid">
-    <div class="pdbox">
-      <div class="pdlab">breaks even at</div>
-      <div class="pdnum">${bes.length ? bes.map((b) => money(b)).join(" and ") : "&ndash;"}</div>
-    </div>
-    <div class="pdbox">
-      <div class="pdlab">chance of making money</div>
-      <div class="pdnum">${p.chance == null ? "&ndash;" : nf(p.chance, 0) + "%"}</div>
-    </div>
-    <div class="pdbox">
-      <div class="pdlab">sessions left</div>
-      <div class="pdnum">${p.days_left == null ? "&ndash;" : p.days_left}</div>
-    </div>
-  </div>
-
-  <div class="pdsec">what you are buying and selling</div>
+  <div class="pdsec">why these strikes</div>
   ${legs.map((l) => `<div class="pdleg">
       <span class="pdlt">${esc(l.text)}</span>
       <span class="pdlc">${l.direction === "out" ? "&minus;" : "+"}${money(Math.abs(l.cash))}</span>
       ${l.why ? `<span class="pdlw">${esc(l.why)}</span>` : ""}
     </div>`).join("")}
+  <div class="prenote">Strikes are picked by delta, which is the only strike
+    selector that carries across from a $16 stock to a $340 one. Each leg is
+    priced at what you would actually pay to buy or receive to sell, not the
+    midpoint between them.</div>
 
-  <div class="pdsec">what it is worth if the stock finishes at</div>
-  ${presetCurve(p)}
-  <div class="pdscen">
-    ${(p.scenarios || []).map((s) => `<div class="pdsrow ${s.good ? "win" : ""}">
-        <span class="pdsm">${s.move > 0 ? "+" : ""}${s.move}%</span>
-        <span class="pdsp">${money(s.price)}</span>
-        <span class="pdsv">${s.pl >= 0 ? "+" : "&minus;"}${money(Math.abs(s.pl))}</span>
-      </div>`).join("")}
-  </div>
+  ${tab.data ? renderAnalysis(tab)
+    : `<div class="loading" style="height:160px"><div class="spinner"></div>
+        <div>Pricing it</div></div>`}
 
-  <button class="pduse" data-use="${esc(p.id)}">Load this into the position &rarr;</button>
-  <div class="prenote">Every leg is priced at what you would actually pay to
-    buy or receive to sell right now, not the midpoint between them. Loading
-    it places nothing with a broker &mdash; it fills in the position above so
-    you can work on it.</div>`;
+  <button class="pduse" data-use="${esc(p.id)}">Open this on the board to edit it
+    &rarr;</button>
+  <div class="prenote">Takes the same legs into the build-it-yourself workspace,
+    where the strikes, the quantities and the prices you actually paid can all be
+    changed. Nothing here is placed with a broker.</div>`;
 }
 
-/* The payoff at expiry, drawn small. Where the line crosses zero is the
- * only thing on it worth marking, so it is the only thing marked. */
-function presetCurve(p) {
-  const pts = p.curve || [];
-  if (pts.length < 2) return "";
-  const xs = pts.map((q) => q.s), ys = pts.map((q) => q.pl);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys, 0), y1 = Math.max(...ys, 0);
-  const W = 640, H = 110, pad = 3;
-  const px = (v) => ((v - x0) / (x1 - x0 || 1)) * W;
-  const py = (v) => H - pad - ((v - y0) / (y1 - y0 || 1)) * (H - pad * 2);
-
-  const line = pts.map((q, i) =>
-    `${i ? "L" : "M"}${px(q.s).toFixed(1)},${py(q.pl).toFixed(1)}`).join("");
-
-  return `<svg class="pdcurve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <line x1="0" y1="${py(0).toFixed(1)}" x2="${W}" y2="${py(0).toFixed(1)}" class="pdzero"/>
-    ${(p.breakevens || []).filter((b) => b >= x0 && b <= x1).map((b) =>
-      `<line x1="${px(b).toFixed(1)}" y1="0" x2="${px(b).toFixed(1)}" y2="${H}" class="pdbe"/>`).join("")}
-    <path d="${line}" class="pdline"/>
-  </svg>
-  <div class="pdaxis"><span>share price ${money(x0)}</span>
-    <span>the flat line is break-even</span><span>${money(x1)}</span></div>`;
-}
-
-/** The option chain, laid out the way an option chain is laid out.
- *
- * Calls on the left, puts on the right, strikes down the middle, the same
- * columns in the same order on both sides, and a header saying what each
- * one is. That is the convention, and the convention exists because it is
- * what everyone who trades options can already read.
- *
- * The one thing that is not decoration: you buy at the ask and you sell at
- * the bid, so the ask and bid cells ARE the buttons. There is nothing to
- * learn -- click the number you would actually pay, and the leg is entered
- * at that price rather than at a midpoint you could not have transacted at.
- */
-function renderLadder(tab) {
+function renderLadder(tab, withPresets = true) {
   const u = tab.ui, c = u.chain;
   if (u.chainLoading) {
     return `<div class="loading" style="height:180px"><div class="spinner"></div>
@@ -939,7 +893,7 @@ function renderLadder(tab) {
       <span class="exphint">click an <b>ask</b> to buy &middot; click a <b>bid</b> to sell</span>
     </div>
 
-    ${renderPresets(tab, c)}
+    ${withPresets ? renderPresets(tab, c) : ""}
 
     <div class="chain">
       <div class="crow chead2">
@@ -967,6 +921,71 @@ function renderLadder(tab) {
            call and the put on one strike three points of volatility apart.`
         : ""}
     </div>
+  </div>`;
+}
+
+/* ---- the fork ---------------------------------------------------- */
+
+function renderRoutes(tab) {
+  const going = tab.ui.leaving;
+  return `<div class="routewrap">
+    <div class="routes${going ? ` picked to-${going}` : ""}">
+      <button class="route" data-route="custom">
+        <span class="rk">Build it myself</span>
+        <span class="rd">Click prices off the option board to assemble any
+          position, one leg at a time. Quipu names the structure once it
+          recognises it, and tells you what to do with it.</span>
+        <span class="rg">any structure &middot; 28 recognised</span>
+      </button>
+      <button class="route" data-route="ready">
+        <span class="rk">Use a ready-made setup</span>
+        <span class="rd">Eleven standard structures, already built from
+          today&rsquo;s prices with the strikes chosen for you, each with the
+          odds on it and what you would have to believe.</span>
+        <span class="rg">pick from a menu &middot; nothing to assemble</span>
+      </button>
+    </div>
+  </div>`;
+}
+
+/* Once you are inside a route, the other one is a single quiet word
+ * rather than a permanent half of the screen. */
+function renderRouteBar(tab) {
+  const u = tab.ui;
+  const other = u.route === "custom" ? "ready" : "custom";
+  const label = other === "ready" ? "use a ready-made setup" : "build it myself";
+  return `<div class="routebar">
+    <span class="rbnow">${u.route === "custom" ? "Building it yourself"
+      : "Ready-made setups"}</span>
+    <button class="plink" data-switch="${other}">${label}</button>
+  </div>`;
+}
+
+/* ---- the ready-made route ---------------------------------------- */
+
+function renderReady(tab) {
+  const u = tab.ui, c = u.chain;
+  if (u.chainLoading) {
+    return `<div class="loading" style="height:200px"><div class="spinner"></div>
+      <div>Building the setups for ${esc(u.symbol)}</div></div>`;
+  }
+  if (u.chainError) {
+    return `<div class="empty" style="height:140px"><div class="down">No contracts</div>
+      <div class="stage">${esc(u.chainError)}</div></div>`;
+  }
+  if (!c) return "";
+
+  const exps = c.all_expiries || [];
+  const pills = `<div class="cseg expiries">${exps.slice(0, 12).map((e) => `
+    <button data-pexp="${esc(e)}" class="${e === u.expiry ? "on" : ""}">${esc(e.slice(5))}</button>`
+  ).join("")}</div>`;
+
+  return `<div class="chainwrap readywrap">
+    <div class="expbar">
+      <span class="explab">expiry</span>${pills}
+      <span class="exphint">${c.days == null ? "" : `${c.trading_days} sessions away`}</span>
+    </div>
+    ${renderPresets(tab, c)}
   </div>`;
 }
 
@@ -1009,7 +1028,27 @@ function renderPosition(tab) {
     </div>`).join("")}
   </div>` : `<div class="chips empty-chips">Nothing yet &mdash; click a price on the board below</div>`;
 
-  let out = bar + picker + chips;
+  // ---- the fork -------------------------------------------------
+  //
+  // Two entirely different jobs were sharing one screen. Building a
+  // spread leg by leg and picking a ready-made structure off a menu
+  // want opposite things: the first wants the board and a set of
+  // chips, the second wants to be left alone with eleven cards. Shown
+  // together, the board pushed the setups below the fold and the
+  // setups made the board look like something you had to read first.
+  if (!u.route) return bar + renderRoutes(tab);
+
+  let out = bar + renderRouteBar(tab) + picker;
+  if (u.route === "ready") {
+    if (!u.symbol) {
+      return out + `<div class="loading" style="height:34%">
+        <div>Which company?</div>
+        <div class="stage">the setups are built from its live option prices</div></div>`;
+    }
+    return out + renderReady(tab);
+  }
+
+  out += chips;
   if (!u.symbol) {
     out += `<div class="loading" style="height:34%">
       <div>Search for the company you traded</div>
@@ -1017,13 +1056,24 @@ function renderPosition(tab) {
         and the strategy is worked out from them</div></div>`;
     return out;
   }
-  out += renderLadder(tab);
+  out += renderLadder(tab, false);
 
+  return out + renderAnalysis(tab);
+}
+
+/* The analysis itself, which is the same document however you arrived at
+ * it. Building a spread by hand and picking one off the menu produce the
+ * same legs, so they get the same page: the name the detector gave it,
+ * the money, the payoff, each leg, and what to do with it. Two different
+ * presentations of one position would only invite the question of which
+ * one to believe. */
+function renderAnalysis(tab) {
+  const u = tab.ui, d = tab.data;
   if (tab.error) {
-    return out + `<div class="empty" style="height:140px"><div class="down">Could not price that</div>
+    return `<div class="empty" style="height:140px"><div class="down">Could not price that</div>
       <div class="stage">${esc(tab.error)}</div></div>`;
   }
-  if (!d) return out;
+  if (!d) return "";
 
   const s = d.strategy;
   const plCls = d.pl >= 0 ? "up" : "down";
@@ -1032,7 +1082,7 @@ function renderPosition(tab) {
     `<div class="pstat"><span>${label}</span><b class="${cls}">${value}</b></div>`;
   const optLegs = d.legs.filter((l) => l.kind !== "stock").length;
 
-  return out + `
+  return `
     <div class="posbody">
       <div class="phead">
         <h2>${esc(s.name)}</h2>
@@ -1056,7 +1106,11 @@ function renderPosition(tab) {
         ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
       </div>
 
-      <h4>Profit at expiry, against where it finishes</h4>
+      <h4>${d.valued_at ? `Profit on ${esc(d.valued_at)}, the first expiry`
+        : "Profit at expiry"}, against where it finishes</h4>
+      ${d.valued_at ? `<div class="fnote" style="padding-top:0">The legs expiring
+        later are still alive on that date, so they are valued rather than
+        settled &mdash; which is the whole of how this position makes money.</div>` : ""}
       <div class="qchart-host poschart" style="height:250px"></div>
 
       <h4>The same thing, as figures</h4>
@@ -1132,14 +1186,54 @@ function wirePosition(tab) {
     b.onclick = () => loadChain(tab, b.dataset.pexp);
   });
 
+  document.querySelectorAll("[data-route]").forEach((b) => {
+    b.onclick = () => {
+      const pick = b.dataset.route;
+      // Let the chooser play out before the page changes under it: the
+      // unchosen card collapses and the chosen one slides to the middle,
+      // and only then does it become the thing it opens.
+      u.leaving = pick;
+      render();
+      setTimeout(() => {
+        u.route = pick;
+        u.leaving = null;
+        render();
+        if (u.symbol && !u.chain) loadChain(tab);
+      }, 420);
+    };
+  });
+
+  document.querySelectorAll("[data-switch]").forEach((b) => {
+    b.onclick = () => {
+      u.route = b.dataset.switch;
+      u.preset = null;
+      render();
+      if (u.symbol && !u.chain) loadChain(tab);
+    };
+  });
+
   const pt = document.getElementById("pre-toggle");
   if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(); };
 
   document.querySelectorAll("[data-preset]").forEach((b) => {
-    b.onclick = () => { u.preset = b.dataset.preset; render(); };
+    b.onclick = () => {
+      const p = (u.chain?.presets || []).find((x) => x.id === b.dataset.preset);
+      u.preset = b.dataset.preset;
+      // Price it on the way in rather than on a second click. Opening a
+      // setup and being shown a summary, then having to ask for the
+      // analysis, is two steps for one question.
+      if (p) {
+        u.legs = p.legs.map((l) => ({
+          kind: l.kind, side: l.side, qty: l.qty, entry: l.entry,
+          strike: l.strike ?? "", expiry: l.expiry ?? "",
+        }));
+        analysePosition(tab);
+      }
+      render();
+    };
   });
   const pb = document.getElementById("pre-back");
-  if (pb) pb.onclick = () => { u.preset = null; render(); };
+  if (pb) pb.onclick = () => { u.preset = null; u.legs = []; tab.data = null; render(); };
 
   document.querySelectorAll("[data-use]").forEach((b) => {
     b.onclick = () => {
@@ -1154,9 +1248,10 @@ function wirePosition(tab) {
         strike: l.strike ?? "", expiry: l.expiry ?? "",
       }));
       u.preset = null;
+      u.route = "custom";
       render();
       analysePosition(tab);
-      document.querySelector(".posbody")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.querySelector(".chips")?.scrollIntoView({ behavior: "smooth", block: "center" });
     };
   });
 

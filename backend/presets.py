@@ -24,16 +24,33 @@ from typing import Any, Dict, List, Optional
 import position as P
 
 
-def _pick(rows: List[Dict], target: float) -> Optional[Dict]:
+def _pick(rows: List[Dict], target: float,
+          below: Optional[float] = None,
+          above: Optional[float] = None) -> Optional[Dict]:
     """The listed strike whose delta is nearest the target.
 
     Delta rather than a percentage away from spot, because delta already
     accounts for how long there is and how much the thing moves: 0.30 is
     the same kind of bet on a sleepy utility and a biotech, where "5% out
     of the money" is two completely different trades.
+
+    `below` and `above` bound the strike, and exist because nearest-delta
+    on its own is not enough. On a one-day chain the deltas collapse
+    towards 0 and 1 within a couple of strikes, so the 0.20 and the 0.10
+    call both resolved to 345 -- and an iron condor whose two call legs
+    sit on the same strike has no call side at all. It was still named
+    an iron condor, and was really a put spread wearing the label.
+
+    Returning nothing is the right answer when the chain cannot express
+    the structure: _all then refuses to build it, and a setup that
+    cannot be built honestly is better missing than wrong.
     """
     usable = [r for r in rows
               if r.get("delta") is not None and (r.get("bid") or r.get("ask"))]
+    if below is not None:
+        usable = [r for r in usable if r["strike"] < below]
+    if above is not None:
+        usable = [r for r in usable if r["strike"] > above]
     if not usable:
         return None
     return min(usable, key=lambda r: abs(abs(r["delta"]) - target))
@@ -80,17 +97,19 @@ CATALOGUE = [
         "view": "You think it goes up, but not enormously.",
         "note": "Selling a higher call pays for part of the one you buy. "
                 "Cheaper than buying outright, and the gain stops at the short strike.",
-        "build": lambda c, p, e, s: _all(
-            _leg(_pick(c, 0.55), "call", "long", e),
-            _leg(_pick(c, 0.25), "call", "short", e)),
+        "build": lambda c, p, e, s: (lambda lo: _all(
+            _leg(lo, "call", "long", e),
+            _leg(_pick(c, 0.25, above=lo["strike"]) if lo else None,
+                 "call", "short", e)))(_pick(c, 0.55)),
     },
     {
         "id": "bear_put", "name": "Bear put spread",
         "view": "You think it falls, but not off a cliff.",
         "note": "The mirror of the bull call spread.",
-        "build": lambda c, p, e, s: _all(
-            _leg(_pick(p, 0.55), "put", "long", e),
-            _leg(_pick(p, 0.25), "put", "short", e)),
+        "build": lambda c, p, e, s: (lambda hi: _all(
+            _leg(hi, "put", "long", e),
+            _leg(_pick(p, 0.25, below=hi["strike"]) if hi else None,
+                 "put", "short", e)))(_pick(p, 0.55)),
     },
     {
         "id": "csp", "name": "Cash-secured put",
@@ -115,28 +134,31 @@ CATALOGUE = [
         "view": "You think it simply stays above a level.",
         "note": "Paid up front. You keep it if the stock holds up; the long put "
                 "below caps what a collapse can cost.",
-        "build": lambda c, p, e, s: _all(
-            _leg(_pick(p, 0.30), "put", "short", e),
-            _leg(_pick(p, 0.15), "put", "long", e)),
+        "build": lambda c, p, e, s: (lambda sh: _all(
+            _leg(sh, "put", "short", e),
+            _leg(_pick(p, 0.15, below=sh["strike"]) if sh else None,
+                 "put", "long", e)))(_pick(p, 0.30)),
     },
     {
         "id": "bear_call", "name": "Bear call spread",
         "view": "You think it simply stays below a level.",
         "note": "The mirror of the bull put spread.",
-        "build": lambda c, p, e, s: _all(
-            _leg(_pick(c, 0.30), "call", "short", e),
-            _leg(_pick(c, 0.15), "call", "long", e)),
+        "build": lambda c, p, e, s: (lambda sh: _all(
+            _leg(sh, "call", "short", e),
+            _leg(_pick(c, 0.15, above=sh["strike"]) if sh else None,
+                 "call", "long", e)))(_pick(c, 0.30)),
     },
     {
         "id": "iron_condor", "name": "Iron condor",
         "view": "You think it goes nowhere in particular.",
         "note": "Paid to define a range. Both ends are bought back, so the loss "
                 "is capped whichever way it breaks.",
-        "build": lambda c, p, e, s: _all(
-            _leg(_pick(p, 0.10), "put", "long", e),
-            _leg(_pick(p, 0.20), "put", "short", e),
-            _leg(_pick(c, 0.20), "call", "short", e),
-            _leg(_pick(c, 0.10), "call", "long", e)),
+        "build": lambda c, p, e, s: (lambda ps, cs: _all(
+            _leg(_pick(p, 0.10, below=ps["strike"]) if ps else None, "put", "long", e),
+            _leg(ps, "put", "short", e),
+            _leg(cs, "call", "short", e),
+            _leg(_pick(c, 0.10, above=cs["strike"]) if cs else None, "call", "long", e),
+        ))(_pick(p, 0.20), _pick(c, 0.20)),
     },
     {
         "id": "straddle", "name": "Long straddle",
@@ -151,9 +173,11 @@ CATALOGUE = [
         "id": "strangle", "name": "Long strangle",
         "view": "Same as the straddle, and you want it cheaper.",
         "note": "Both sides out of the money. Costs less and needs a bigger move.",
+        # A strangle wants the two strikes apart; at the money they are
+        # the same trade as a straddle and cost more to be so.
         "build": lambda c, p, e, s: _all(
-            _leg(_pick(c, 0.25), "call", "long", e),
-            _leg(_pick(p, 0.25), "put", "long", e)),
+            _leg(_pick(c, 0.25, above=s), "call", "long", e),
+            _leg(_pick(p, 0.25, below=s), "put", "long", e)),
     },
 ]
 
@@ -229,61 +253,6 @@ def _leg_words(leg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _curve(legs: List[Dict], spot: float, vol: float, years: float) -> List[Dict]:
-    """The payoff, drawn over the range the stock can actually reach.
-
-    analyse() scans from 40% to 180% of spot, which is the right range to
-    hunt for break-evens in and the wrong one to draw: on a one-day
-    expiry it put $136 and $621 on the axis of an Apple chart and squeezed
-    every strike that mattered into a sliver in the middle.
-
-    So the width comes from the move the option itself is priced for --
-    three standard deviations either side, which is where the lognormal
-    has essentially all of its mass -- and is then widened if it has to be
-    to keep every strike on the page.
-    """
-    norm = [P._norm(l) for l in legs]
-    strikes = [l["strike"] for l in norm if l["strike"]]
-
-    sd = (vol or 0.3) * (max(years, 1 / 252.0) ** 0.5)
-    band = max(3.0 * sd, 0.03)
-    lo, hi = spot * (1 - band), spot * (1 + band)
-
-    if strikes:
-        pad = (max(strikes) - min(strikes)) * 0.25 or spot * 0.02
-        lo = min(lo, min(strikes) - pad)
-        hi = max(hi, max(strikes) + pad)
-    lo = max(0.01, lo)
-
-    return [{"s": round(lo + (hi - lo) * i / 60, 2),
-             "pl": round(P.payoff_at(norm, lo + (hi - lo) * i / 60), 2)}
-            for i in range(61)]
-
-
-def _scenarios(legs: List[Dict], spot: float) -> List[Dict[str, Any]]:
-    """What it is worth at expiry across a spread of finishing prices.
-
-    A payoff curve shows the shape; this shows the arithmetic. People who
-    do not read charts read this, and people who do use it to check that
-    they read the chart the right way round.
-    """
-    # payoff_at works on normalised legs -- signed sides and a per-leg
-    # multiplier -- which analyse() builds internally. Handing it the raw
-    # catalogue legs looks like it works right up until it does not.
-    norm = [P._norm(l) for l in legs]
-    out = []
-    for move in (-0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15):
-        price = spot * (1 + move)
-        pl = P.payoff_at(norm, price)
-        out.append({
-            "move": round(move * 100),
-            "price": round(price, 2),
-            "pl": round(pl, 2),
-            "good": pl > 0,
-        })
-    return out
-
-
 def _sentence(a: Dict[str, Any], spot: float) -> str:
     """The trade-off -- what it costs, what it can do -- in one line."""
     mp, ml = a.get("max_profit"), a.get("max_loss")
@@ -333,11 +302,7 @@ def build(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
             continue
         out.append({
             "legs_explained": [_leg_words(l) for l in legs],
-            "scenarios": _scenarios(legs, spot),
-            "greeks": a.get("greeks"),
             "days_left": a.get("days_left"),
-            "curve": _curve(legs, spot, vol, _years(expiry)),
-            "risk": a.get("risk"),
             "expiry": expiry,
             "id": spec["id"],
             "name": spec["name"],
