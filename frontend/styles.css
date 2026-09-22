@@ -1548,3 +1548,37 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .routes { grid-template-columns: 1fr; }
 }
+
+/* ---- the calendar's two sides ----
+   One panel switched between rather than two panels stacked: the packer
+   could otherwise land them on opposite sides of the page, and comparing
+   "earnings on the 29th" with "Fed on the 28th" then meant holding one
+   in your head while you went and found the other. */
+.calseg {
+  display: flex; gap: 2px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--rule);
+}
+.calseg button {
+  background: none; border: none; cursor: pointer;
+  padding: 7px 13px 8px; margin-bottom: -1px;
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+  border-bottom: 1px solid transparent; transition: color .12s ease;
+}
+.calseg button:hover { color: var(--text2); }
+.calseg button.on { color: var(--text); border-bottom-color: var(--text); }
+
+/* A filing that has already happened. Dimmer than a date still ahead --
+   it is context for the forward dates, not one of them. */
+.evrow.filed .evd { color: var(--text2); }
+.evrow.filed .evn { color: var(--text2); }
+.evrow.filed.w3 .evn { color: var(--text); }
+.evform {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  color: var(--faint); margin-right: 6px;
+}
+.evrow.filed.w3 .evform { color: var(--text); }
+.evitem {
+  font-style: normal; font-family: var(--mono); font-size: 9.5px;
+  color: var(--rule2); margin-right: 2px;
+}

@@ -480,11 +480,12 @@ def market_events(horizon: int = 180) -> Dict[str, Any]:
     return events.upcoming(None, horizon=horizon)
 
 
-def _events(symbol, earnings, fundamentals, dividends=None):
+def _events(symbol, earnings, fundamentals, dividends=None, filings=None):
     """The calendar, or nothing. Never enough to fail the whole page."""
     try:
         return events.upcoming(symbol, horizon=180, earnings=earnings,
-                               fundamentals=fundamentals, dividends=dividends)
+                               fundamentals=fundamentals, dividends=dividends,
+                               filings=filings)
     except Exception as exc:                       # noqa: BLE001
         return {"events": [], "error": str(exc)}
 
@@ -517,6 +518,7 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                     dividends=_div_schedule(symbol)),
                 "filings": lambda: sec_edgar.fetch_filings(symbol),
                 "sec": lambda: sec_xbrl.fetch(symbol, sec_edgar.lookup_cik),
+                "edgar_cal": lambda: sec_edgar.fetch_calendar(symbol),
                 "social": lambda: news_rss.stocktwits(symbol),
                 "profile": lambda: deep.fetch_profile(symbol),
                 "financials": lambda: deep.fetch_financials(symbol),
@@ -633,6 +635,7 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
             stage1["earnings"].data if stage1["earnings"].ok else None,
             stage1["fundamentals"].data if stage1["fundamentals"].ok else None,
             stage1["dividends"].data if stage1["dividends"].ok else None,
+            stage1["edgar_cal"].data if stage1["edgar_cal"].ok else None,
         ),
         "crossref": crossref,
         "diagnostics": {

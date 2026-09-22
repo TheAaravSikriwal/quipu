@@ -425,7 +425,8 @@ def _expected_bls(horizon: int) -> List[Dict[str, Any]]:
 
 def company(symbol: str, earnings: Optional[Dict] = None,
             fundamentals: Optional[Dict] = None,
-            dividends: Optional[Dict] = None) -> List[Dict[str, Any]]:
+            dividends: Optional[Dict] = None,
+            filings: Optional[Dict] = None) -> List[Dict[str, Any]]:
     """Earnings and dividend dates for one ticker.
 
     Takes what the ticker page already fetched rather than going back out
@@ -451,6 +452,28 @@ def company(symbol: str, earnings: Optional[Dict] = None,
               "against the investor relations page before trading around it.",
             "Yahoo Finance", scope="company", weight=3,
             url=f"{yahoo}/analysis"))
+
+    # The statutory filing deadline. Every other forward date in this
+    # app is a habit someone has noticed -- a company reports around the
+    # same week each quarter, pays its dividend on roughly the same
+    # cadence. This one is law: a large accelerated filer has 40 days
+    # after a quarter ends to file the 10-Q and 60 after a year to file
+    # the 10-K, and the bracket it sits in is published in its own EDGAR
+    # record. The numbers arrive on or before this date or the company
+    # is late, which is itself news.
+    due = (filings or {}).get("next_report")
+    if due and due.get("due", "") >= today.isoformat():
+        out.append(_ev(
+            due["due"], f"{due['form']} due", "filing",
+            f"The last legal date for the {due['form']} covering the period "
+            f"ending {due['period_end']}. As a {str(due.get('category', 'filer')).lower()} "
+            f"the company has {due['window_days']} days after the period closes. "
+            "Most file earlier \u2014 the earnings release usually comes first and "
+            "the full report follows within a week \u2014 but nothing can come "
+            "later without the company filing for an extension, which is "
+            "itself a signal.",
+            "SEC EDGAR", scope="company", weight=2,
+            url=(filings or {}).get("source_url")))
 
     div = dividends or {}
     amount = div.get("amount")
@@ -511,7 +534,8 @@ def _key(row: Dict) -> tuple:
 def upcoming(symbol: Optional[str] = None, horizon: int = 120,
              earnings: Optional[Dict] = None,
              fundamentals: Optional[Dict] = None,
-             dividends: Optional[Dict] = None) -> Dict[str, Any]:
+             dividends: Optional[Dict] = None,
+             filings: Optional[Dict] = None) -> Dict[str, Any]:
     """Every known date between today and `horizon` days out."""
     today = date.today()
     limit = today + timedelta(days=horizon)
@@ -523,7 +547,7 @@ def upcoming(symbol: Optional[str] = None, horizon: int = 120,
     rows += week
     rows += _expected_bls(horizon)
     if symbol:
-        rows += company(symbol, earnings, fundamentals, dividends)
+        rows += company(symbol, earnings, fundamentals, dividends, filings)
 
     # A confirmed date always beats an estimate of the same thing, and the
     # week-ahead feed confirms exactly the two the BLS will not serve.
@@ -550,8 +574,26 @@ def upcoming(symbol: Optional[str] = None, horizon: int = 120,
         r["days"] = (date.fromisoformat(r["date"]) - today).days
 
     merged.sort(key=lambda r: (r["date"], -r["weight"]))
+
+    # What has already been filed, decoded. Not upcoming, but it is the
+    # other half of the same question -- an 8-K saying the auditor has
+    # been changed is the context for every forward date underneath it.
+    filed = []
+    for r in ((filings or {}).get("recent") or [])[:8]:
+        filed.append({
+            "date": r["filed"], "form": r["form"], "headline": r["headline"],
+            "items": r.get("items") or [], "url": r.get("url"),
+            "days_ago": r.get("age_days"), "weight": r.get("weight", 1),
+        })
+
     return {
         "as_of": today.isoformat(),
+        "filed": filed,
+        "filer": {
+            "category": (filings or {}).get("category"),
+            "fiscal_year_end": (filings or {}).get("fiscal_year_end"),
+            "source_url": (filings or {}).get("source_url"),
+        } if filings else None,
         "horizon": horizon,
         "events": merged,
         "sources": [
@@ -562,6 +604,8 @@ def upcoming(symbol: Optional[str] = None, horizon: int = 120,
              "what": "inflation and jobs \u2014 dates projected, see below", "url": BLS_URL},
             {"name": "Yahoo Finance", "what": "earnings and dividend dates",
              "url": "https://finance.yahoo.com"},
+            {"name": "SEC EDGAR", "what": "filings and statutory deadlines",
+             "url": "https://www.sec.gov/edgar/searchedgar/companysearch"},
         ],
         "bls_note": ("The inflation and jobs reports come from the BLS, which "
                      "blocks automated requests. Those two are shown at their "

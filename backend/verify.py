@@ -660,6 +660,68 @@ try:
 except Exception as exc:
     RESULTS.append((False, "discrete dividends", f"could not run: {exc}"))
 
+section("Filings decode, and deadlines land on real dates")
+
+try:
+    from datetime import date as _dd
+    from sources import sec_edgar as SEC
+
+    # 8-K item numbers are the only field that says WHAT happened. An
+    # earnings release and a company disowning its own past accounts
+    # both arrive as an 8-K and are indistinguishable without them.
+    codes = SEC._items("2.02,9.01")
+    RESULTS.append((any(c["code"] == "2.02" and "arnings" in c["means"] for c in codes),
+                    "item 2.02 decodes as the earnings release",
+                    ", ".join(c["means"] for c in codes)))
+    RESULTS.append((SEC._items("4.02")[0]["weight"] == 3,
+                    "a non-reliance notice is weighted as serious",
+                    SEC._items("4.02")[0]["means"]))
+    RESULTS.append((SEC._items("")  == [], "an 8-K with no items decodes to nothing", "[]"))
+
+    # The statutory windows, which are law rather than habit.
+    RESULTS.append((SEC.DEADLINES["large accelerated filer"] == {"10-K": 60, "10-Q": 40},
+                    "large accelerated filer windows are 60 and 40 days",
+                    str(SEC.DEADLINES["large accelerated filer"])))
+
+    seen = []
+    for sym in ("AAPL", "META", "KO", "MSFT"):
+        cal = SEC.fetch_calendar(sym)
+        if not cal.get("available"):
+            continue
+        seen.append(sym)
+        nxt = cal.get("next_report") or {}
+        due = _dd.fromisoformat(nxt["due"])
+
+        # Exchange Act Rule 0-3 rolls a deadline off a weekend or a
+        # federal holiday. The panel printed "10-Q due Sunday 8
+        # November", which is not a date anything is ever due on.
+        RESULTS.append((due.weekday() <= 4,
+                        f"{sym}: the deadline is a weekday",
+                        f'{nxt["form"]} due {due} ({due.strftime("%a")})'))
+        RESULTS.append((due not in SEC._market_holidays(due.year),
+                        f"{sym}: and not a market holiday", str(due)))
+
+        # A 10-Q is never filed for the fourth quarter -- that period is
+        # inside the annual report. Apple's next quarter ends on its
+        # fiscal year end, and projecting a 10-Q there invented a filing
+        # that is never made and hid the 10-K that actually is.
+        q = cal.get("next_10q") or {}
+        if q.get("period_end"):
+            RESULTS.append((not SEC._is_year_end(_dd.fromisoformat(q["period_end"]),
+                                                 cal.get("fiscal_year_end")),
+                            f"{sym}: no 10-Q projected onto the year end",
+                            q["period_end"]))
+
+        # And the one reported as next must be the earlier of the two.
+        both = [d["due"] for d in (cal.get("next_10q"), cal.get("next_10k")) if d]
+        RESULTS.append((nxt["due"] == min(both),
+                        f"{sym}: the nearer deadline is the one shown",
+                        f'{nxt["form"]} {nxt["due"]} of {both}'))
+
+    RESULTS.append((len(seen) == 4, "filing calendars load", ", ".join(seen)))
+except Exception as exc:
+    RESULTS.append((False, "filing calendar", f"could not run: {exc}"))
+
 section("Filed accounts agree with the filings")
 
 try:
