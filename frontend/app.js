@@ -4414,11 +4414,48 @@ let liveCharts = [];
  * range is a new series, and the reference line and zoom that belonged to the
  * old one mean nothing against it. The toggles below never rebuild; they poke
  * the live chart, so the zoom you set survives turning an average on. */
+/* Daily ranges, longest first. All four hold the same daily bars and
+ * differ only in how far back they reach, so the longest is a superset
+ * of every other -- which is what makes the trick below sound. */
+const DAILY_RANGES = ["5Y", "1Y", "6M", "1M"];
+
+/* The bars to compute FROM, which are not the bars to SHOW.
+ *
+ * A 200-day average needs 200 days. Handed only the 126 bars of a
+ * six-month chart it has nothing to work with, so the line was simply
+ * absent -- and a 200-day average on a six-month chart is not an
+ * unreasonable thing to want. Every other platform draws it, because
+ * every other platform computes it from data BEFORE the left edge.
+ *
+ * So on the daily ranges the chart is handed the longest daily series
+ * there is and opened on the window that was asked for. The averages
+ * then have all the history they need, the axis and the statistics
+ * still describe the visible window, and the 200-day turns up on a
+ * six-month chart the way it does everywhere else.
+ *
+ * Intraday is left alone: those bars are minutes, and a 200-DAY
+ * average has no meaning on an axis of minutes. There the honest
+ * answer is still that it cannot be drawn.
+ */
+function priceSource(sel) {
+  const want = PRICE_SERIES?.[sel];
+  if (!want?.points?.length) return null;
+  if (!DAILY_RANGES.includes(sel)) {
+    return { points: want.points, range: null, daily: false };
+  }
+  const long = DAILY_RANGES.map((r) => PRICE_SERIES[r])
+    .find((f) => f?.points?.length >= want.points.length) || want;
+  const n = long.points.length;
+  const show = Math.min(want.points.length, n);
+  return { points: long.points, range: [Math.max(0, n - show), n - 1], daily: true };
+}
+
 function mountPriceChart(tab, host, keyPrefix, statsSel, keepZoom = true) {
   if (!host || !PRICE_SERIES) return null;
   const sel = tab.ui.priceRange;
-  const frame = PRICE_SERIES[sel];
-  if (!frame?.points?.length) return null;
+  const src = priceSource(sel);
+  if (!src) return null;
+  const frame = { points: src.points };
   const ui = tab.ui.priceOpts || { candles: true, log: false, mas: {} };
 
   const key = keyPrefix + ":price";
@@ -4435,7 +4472,7 @@ function mountPriceChart(tab, host, keyPrefix, statsSel, keepZoom = true) {
     bands: ui.bands,
     osc: ui.osc,
     crosses: ui.crosses,
-    range: keepZoom ? tab.ui.chartRanges[key + ":" + sel] : null,
+    range: (keepZoom && tab.ui.chartRanges[key + ":" + sel]) || src.range,
     onRange: (r) => { tab.ui.chartRanges[key + ":" + sel] = r; },
     onState: (s) => paintChartStats(s, sel, statsSel),
   });

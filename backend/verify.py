@@ -915,6 +915,46 @@ try:
 except Exception as exc:
     RESULTS.append((False, "control byte scan", f"could not run: {exc}"))
 
+section("Every glossary term says how to use it")
+
+# A definition that only says what a word means leaves the reader where
+# it found them. Every entry carries a "using it" line as well, and the
+# check is simply that none was missed -- there are fifty-eight, and
+# adding a fifty-ninth without one would be easy.
+try:
+    import re as _re
+
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "frontend" / "glossary.js").read_text(encoding="utf-8")
+    body = text[text.index("const TERMS"):]
+    blocks = _re.findall(r'^  ("[^"]+"|\w+): \{(.*?)^  \},', body, _re.S | _re.M)
+
+    bare = [k for k, b in blocks if "use:" not in b]
+    RESULTS.append((bool(blocks) and not bare, "every term has a using-it line",
+                    f"{len(blocks)} terms" if not bare else f"missing: {bare[:4]}"))
+
+    # A one-clause "use it carefully" would pass the check above and
+    # help nobody.
+    thin = []
+    for k, b in blocks:
+        m = _re.search(r'use:\s*(.*?)(?:\n  \}|\n    \w+:)', b + "\n  }", _re.S)
+        if m and len(m.group(1)) < 80:
+            thin.append(k)
+    RESULTS.append((not thin, "and none of them is a stub",
+                    "all substantial" if not thin else str(thin[:3])))
+
+    # The tip must sit above the panel overlay, or it is invisible in
+    # exactly the place it is most wanted: inside an opened panel.
+    css = (root / "frontend" / "styles.css").read_text(encoding="utf-8")
+    tip = _re.search(r"\.termtip \{.*?z-index: (\d+)", css, _re.S)
+    over = _re.search(r"position: fixed; inset: 0; z-index: (\d+)", css)
+    ok_layer = bool(tip and over and int(tip.group(1)) > int(over.group(1)))
+    RESULTS.append((ok_layer, "the definition sits above the panel overlay",
+                    "tip %s over overlay %s" % (tip.group(1) if tip else "?",
+                                                over.group(1) if over else "?")))
+except Exception as exc:                               # noqa: BLE001
+    RESULTS.append((False, "glossary", f"could not run: {exc}"))
+
 section("Chart indicators, checked in their own runtime")
 
 # The indicators live in JavaScript, so they are checked by node rather
