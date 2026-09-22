@@ -96,6 +96,13 @@
   --c-derived: #9C87C4;
   --c-claimed: #A8845E;
 
+  /* Worth a second look. Not good, not bad -- unusual. Volume against
+     open interest, a burst of filings, an implied volatility a long way
+     from what the stock has actually been doing. Amber because that is
+     what amber has always meant, and because neither green nor red is
+     honest about something whose direction is unknown. */
+  --attn:   #C79A52;
+
   --mast:   "Bodoni Moda", Georgia, serif;
   /* GFS Didot, from the Greek Font Society -- a Greek Didone that also cuts
      Latin. Used for the name alone, nowhere else. */
@@ -742,7 +749,7 @@ span.q.px { color: var(--rule2); }
 .prose { font-size: 12px; line-height: 1.6; color: var(--text2); }
 .prose b { color: var(--text); font-weight: 600; }
 .dim { color: var(--faint); }
-.warn { color: var(--text); }
+.warn { color: var(--attn); }
 
 /* Direction, the old newspaper stock-table way: filled triangle up,
    hollow down. The triangles stay and stay load-bearing -- they are why
@@ -1182,7 +1189,8 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: .1em; text-transform: uppercase;
   border: 1px solid var(--rule2); color: var(--text2); margin-right: 6px;
 }
-.pill.hot, .pill.good { background: var(--text); color: var(--black); border-color: var(--text); }
+.pill.good { background: var(--c-priced); color: var(--black); border-color: var(--c-priced); }
+.pill.hot  { background: var(--attn); color: var(--black); border-color: var(--attn); }
 
 .loading, .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 72%; gap: 16px; color: var(--text2); }
 .loading b { font-family: var(--mast); font-weight: 700; color: var(--text); }
@@ -1808,3 +1816,136 @@ a { color: inherit; text-decoration: none; }
 /* The payoff curve's break-even line, and the profitable side of it. */
 .pdline { stroke: var(--text); }
 .pdzero { stroke: var(--rule2); }
+
+/* ---- the three other rooms ----
+   The front page was a search field and two sentences, and the
+   sentences were doing too much: "I am already in a trade" is a mood,
+   not a destination. Naming the places is shorter and says where each
+   one goes.
+
+   Kept at label size and unoutlined, like everything else on this
+   page, because the search field is still the point of it. The log
+   carries a count only when there is something in it -- the one thing
+   a door can usefully tell you before you walk through. */
+.doors {
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;
+  margin-top: 4px;
+}
+.door {
+  display: flex; flex-direction: column; gap: 3px; align-items: center;
+  background: none; border: none; cursor: pointer;
+  padding: 11px 22px; border-radius: 10px;
+  transition: background .14s ease;
+}
+.door:hover { background: var(--panel); }
+.dn {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--ui); font-size: 12.5px; font-weight: 600; color: var(--text2);
+  transition: color .14s ease;
+}
+.door:hover .dn { color: var(--text); }
+.dw {
+  font-family: var(--ui); font-size: 10px; color: var(--faint);
+  letter-spacing: .02em;
+}
+.dcount {
+  font-style: normal; font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  background: var(--c-priced); color: var(--black);
+  padding: 0 5px; border-radius: 999px; line-height: 15px;
+}
+
+/* ---- back and forward ----
+   One pair, acting on whichever tab is in front. The trail belongs to
+   the tab, so switching tabs switches history with it. */
+.navpair {
+  display: flex; align-items: stretch; gap: 1px;
+  background: var(--black); -webkit-app-region: no-drag;
+}
+.navb {
+  background: none; border: none; cursor: pointer;
+  padding: 0 9px; font-size: 17px; line-height: 1; color: var(--rule2);
+  transition: color .12s ease;
+}
+.navb:hover:not(:disabled) { color: var(--text); }
+.navb:disabled { color: var(--rule); cursor: default; }
+
+
+/* ---- the rest of the site ----
+   Same rule throughout: a hue only where it names something the page
+   already states in words, so nothing here is the only way to read
+   anything. Everything stays desaturated -- the point is a page that
+   can be scanned, not a page that shouts. */
+
+/* THE LIVE BAR. The price and its move, pinned to the top of every
+   panel-grid, which is the one number always on screen. */
+.livebar .lbprice > span.up { color: var(--pos); }
+.livebar .lbprice > span.down { color: var(--neg); }
+
+/* THE REGION RAIL. Where you are in the document, which is a place and
+   not a judgement -- so the marker takes the FILED blue, the same hue
+   the app uses for "this is on the record", rather than a verdict hue. */
+.rail button.on { color: var(--text); }
+.rail button.on::before { background: var(--c-filed); }
+
+/* THE FINDER. A ranked table is read down one column, so only the
+   number that decides the ranking is tinted, and only by direction. */
+.frow .fv.up { color: var(--pos); }
+.frow .fv.down { color: var(--neg); }
+.frow .fwhy em:first-child { color: var(--text); }
+
+/* THE OPTION BOARD. In-the-money shading stays a wash rather than a
+   hue: it covers half the board, and half a board of colour is a
+   background, not a signal. The spot marker gets the line, because it
+   is the one thing on the board that moves. */
+/* The share price across the board. Blue, not green: this line is
+   where the stock IS, which is a fact and not a gain -- in green it
+   read as profit, which is the page editorialising about a number
+   that has no opinion in it. */
+.spotrow { border-top-color: var(--c-filed); }
+.spotrow span { color: var(--c-filed); }
+.spotrow span::before { background: var(--c-filed); }
+
+/* THE CALENDAR. An event that can move the whole market against one
+   that cannot -- said in the panel text either way. */
+.evrow.w3 .evd, .evrow .evn em { color: var(--attn); }
+
+/* THE VOLATILITY PANEL and anywhere else stating rich or cheap. */
+.rich, .expensive { color: var(--neg); }
+.cheap, .inexpensive { color: var(--pos); }
+
+/* THE SETUP CARDS. The odds are the number being compared across
+   eleven cards, so the eye needs somewhere to land -- but the reading
+   is a probability, not a verdict, and colouring 70% green would be
+   the app calling it the better trade when it is only the likelier
+   one. Left alone deliberately. */
+
+/* THE GLOSSARY. A term you can hover is a different kind of word from
+   the ones around it. */
+.term { border-bottom-color: var(--c-derived); }
+
+/* LOADING. The one moving thing on the page. */
+.spinner { border-top-color: var(--c-filed); }
+
+/* THE COMMIT BAR, which is the end of both routes. */
+.bookadd { background: var(--c-priced); color: var(--black); }
+.bookadd:hover { opacity: .88; }
+
+/* THE POSITION CHART. Profit above the line, loss below it. */
+.poschart .qc-pos { fill: var(--pos); }
+.poschart .qc-neg { fill: var(--neg); }
+
+/* The triangle is the primary carrier of direction and the colour is the
+   echo -- but several of these numbers already print their own + or -,
+   and a row reading "▲ +12%" says it three times. Where the sign is in
+   the text, the glyph steps aside and the hue does the echoing. */
+.fv.up::before, .fv.down::before,
+.bpl.up::before, .bpl.down::before,
+.bpct.up::before, .bpct.down::before,
+.pstat b.up::before, .pstat b.down::before,
+.pleg span.up::before, .pleg span.down::before,
+.pdsv.up::before, .pdsv.down::before,
+.booktot.up b::before, .booktot.down b::before { content: none; margin: 0; }
+
+/* .warn sits inside a key-value row, and `.kv > span:last-child` is the
+   more specific selector, so the plain class never landed. */
+.kv > span.warn, span.warn { color: var(--attn); }

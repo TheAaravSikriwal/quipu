@@ -259,6 +259,65 @@ function closeTab(id, event) {
 
 const current = () => state.tabs.find((t) => t.id === state.active);
 
+/* ---- where you have been, per tab ----------------------------------
+ *
+ * Each tab keeps its own trail, because each tab is a separate line of
+ * thought: stepping back in the position workspace should not undo a
+ * zoom in the ticker beside it.
+ *
+ * A "place" is only the handful of fields that decide what is on
+ * screen. Data, chains and analyses are deliberately left out -- going
+ * back should return you to a view, not to a stale copy of the numbers
+ * it was showing an hour ago. */
+const PLACE = {
+  position: (u) => ({ view: u.view, route: u.route, editing: u.editing,
+                      preset: u.preset, symbol: u.symbol,
+                      legs: JSON.stringify(u.legs || []) }),
+  finder: (u) => ({ ranking: u.ranking, study: u.study }),
+  ticker: (u) => ({ zoom: u.zoom }),
+};
+
+const placeOf = (tab) => (PLACE[tab.kind] || PLACE.ticker)(tab.ui || {});
+const samePlace = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Record where the tab is now, if it has moved. */
+function markPlace(tab) {
+  if (!tab) return;
+  const here = placeOf(tab);
+  tab.hist ||= { stack: [here], at: 0 };
+  if (samePlace(tab.hist.stack[tab.hist.at], here)) return;
+  // Stepping back and then somewhere new abandons the forward trail,
+  // which is what every back button in the world does.
+  tab.hist.stack = tab.hist.stack.slice(0, tab.hist.at + 1);
+  tab.hist.stack.push(here);
+  if (tab.hist.stack.length > 40) tab.hist.stack.shift();
+  tab.hist.at = tab.hist.stack.length - 1;
+}
+
+function step(tab, delta) {
+  if (!tab?.hist) return;
+  const to = tab.hist.at + delta;
+  if (to < 0 || to >= tab.hist.stack.length) return;
+  tab.hist.at = to;
+  const place = tab.hist.stack[to];
+  Object.entries(place).forEach(([k, v]) => {
+    tab.ui[k] = k === "legs" ? JSON.parse(v) : v;
+  });
+  // Restoring a position means re-pricing it: the legs came back, the
+  // analysis of them did not, and showing the old one would be showing
+  // numbers for a different trade.
+  render(true);
+  if (tab.kind === "position") {
+    if (tab.ui.view === "book") markBook(tab);
+    else if (tab.ui.legs?.length) analysePosition(tab);
+  }
+}
+
+const canStep = (tab, d) => {
+  const h = tab?.hist;
+  return !!h && h.at + d >= 0 && h.at + d < h.stack.length;
+};
+
 async function load(tab) {
   tab.status = "loading";
   tab.error = null;
@@ -448,8 +507,23 @@ function setTitle(tab) {
 
 function renderTabs() {
   const strip = document.getElementById("tabstrip");
-  strip.querySelectorAll(".tab").forEach((el) => el.remove());
+  strip.querySelectorAll(".tab, .navpair").forEach((el) => el.remove());
   const plus = document.getElementById("newtab");
+
+  // One pair of arrows, acting on whichever tab is in front. The trail
+  // itself belongs to the tab, so switching tabs switches history with
+  // it -- which is the behaviour of every browser and needs no
+  // explaining.
+  const tab = current();
+  const nav = document.createElement("div");
+  nav.className = "navpair";
+  nav.innerHTML = `
+    <button class="navb" data-step="-1" title="Back"${canStep(tab, -1) ? "" : " disabled"}>&#8249;</button>
+    <button class="navb" data-step="1" title="Forward"${canStep(tab, 1) ? "" : " disabled"}>&#8250;</button>`;
+  nav.querySelectorAll("[data-step]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); step(current(), Number(b.dataset.step)); };
+  });
+  strip.insertBefore(nav, strip.firstChild);
 
   state.tabs.forEach((tab) => {
     const el = document.createElement("div");
@@ -477,6 +551,32 @@ function renderTabs() {
 }
 
 
+/* The three other rooms.
+ *
+ * The front page was a search field and two sentences, and the
+ * sentences were doing too much work: "I am already in a trade" is a
+ * mood, not a destination, and it was the only way to reach either the
+ * workshop or the log. Naming the three places plainly is shorter and
+ * says where each one goes.
+ *
+ * Kept quiet on purpose. The search field is still the point of this
+ * page -- these sit under it at label size, with the log carrying a
+ * count only when there is something in it, which is the one piece of
+ * information a door can usefully show before you walk through it. */
+function renderDoors() {
+  const open = bookOpen(loadBook()).length;
+  const door = (id, name, what, badge = "") => `<button class="door" data-door="${id}">
+      <span class="dn">${name}${badge}</span>
+      <span class="dw">${what}</span>
+    </button>`;
+  return `<div class="doors">
+    ${door("finder", "Finder", "rank the whole market and find one")}
+    ${door("workshop", "Workshop", "build a position and price it")}
+    ${door("logbook", "Trade log", "what you are holding now",
+           open ? `<i class="dcount">${open}</i>` : "")}
+  </div>`;
+}
+
 /** The front page is the logo and the search field. Nothing else. */
 function renderLauncher() {
   return `<div class="launcher">
@@ -491,10 +591,7 @@ function renderLauncher() {
       <div class="quick">
         ${["NVDA", "AAPL", "TSLA", "AMD", "SPY", "MSFT"].map((s) => `<span data-s="${s}">${s}</span>`).join("")}
       </div>
-      <div class="launchlinks">
-        <button class="findlink" id="findlink">I do not know what I am looking for</button>
-        <button class="findlink" id="poslink">I am already in a trade</button>
-      </div>
+      ${renderDoors()}
     </div>`;
 }
 
@@ -1583,12 +1680,15 @@ function wirePosition(tab) {
  * These are the constants you want in order to compare a name from one list
  * against a name from another: what it costs, whether you can get out, how
  * much it moves, and what it has done lately. */
+// The fourth field says whether the number has a direction. Price and
+// turnover do not -- a big number is not an up number -- and volatility
+// has one but it is not good or bad, so only the two returns are tinted.
 const FINDER_COLS = [
-  ["price", "price", money],
-  ["dollar_vol", "a day", big],
-  ["vol20", "volatility", (v) => pct(v, 0)],
-  ["ret_1m", "1 month", (v) => signed(v, 0)],
-  ["ret_12m", "12 months", (v) => signed(v, 0)],
+  ["price", "price", money, false],
+  ["dollar_vol", "a day", big, false],
+  ["vol20", "volatility", (v) => pct(v, 0), false],
+  ["ret_1m", "1 month", (v) => signed(v, 0), true],
+  ["ret_12m", "12 months", (v) => signed(v, 0), true],
 ];
 
 function renderFinder(tab) {
@@ -1646,7 +1746,9 @@ function renderFinder(tab) {
           <span class="fsym"><b>${esc(r.symbol)}</b>
             <i>${esc((r.name || "").replace(/ (Common Stock|Class A Common Stock|Ordinary Shares).*$/i, ""))}</i></span>
           <span class="fwhy">${r.why.map((w) => `<em>${esc(w)}</em>`).join("")}</span>
-          ${FINDER_COLS.map(([k, , fmt]) => `<span class="fv">${r[k] == null ? "--" : fmt(r[k])}</span>`).join("")}
+          ${FINDER_COLS.map(([k, , fmt, signed_]) => `<span class="fv ${
+            signed_ && r[k] != null ? sign(r[k]) : ""}">${
+            r[k] == null ? "--" : fmt(r[k])}</span>`).join("")}
         </div>`).join("")}
     </div>
     ${FINDER_STUDY ? `<div class="fstudy prose">
@@ -4205,6 +4307,9 @@ setInterval(() => {
 window.addEventListener("resize", repack);
 
 function render(keepScroll = false) {
+  // Note where we are before drawing it, so the trail is written by the
+  // act of arriving rather than by every control having to remember.
+  markPlace(current());
   renderTabs();
   const view = document.getElementById("viewport");
   const scroll = keepScroll ? view.scrollTop : 0;
@@ -4281,10 +4386,24 @@ function wireLauncher() {
     else if (e.key === "Escape") { suggestions = []; paintSuggestions(); }
   };
   document.querySelectorAll(".quick span").forEach((el) => { el.onclick = () => pick(el.dataset.s); });
-  const fl = document.getElementById("findlink");
-  if (fl) fl.onclick = async () => { if (!FINDER_RANKINGS.length) await loadRankings(); newFinderTab(); };
-  const pl = document.getElementById("poslink");
-  if (pl) pl.onclick = () => newPositionTab();
+  document.querySelectorAll("[data-door]").forEach((b) => {
+    b.onclick = async () => {
+      const where = b.dataset.door;
+      if (where === "finder") {
+        if (!FINDER_RANKINGS.length) await loadRankings();
+        newFinderTab();
+        return;
+      }
+      // The workshop and the log are two views of one tab, so the door
+      // opens the tab and then says which room to arrive in.
+      const tab = newPositionTab();
+      if (where === "workshop") {
+        tab.ui.view = "new";
+        tab.ui.route = null;
+        render();
+      }
+    };
+  });
 }
 
 /* ---- charts ---------------------------------------------------------- */
