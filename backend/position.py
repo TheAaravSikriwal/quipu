@@ -405,6 +405,8 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "share_equivalent": round(greeks["delta"], 1),
         "breakevens": bes,
         "chance": pop,
+        "needs": _needs(legs, spot, bes, curve),
+        **_where_extreme(legs, spot),
         "days_left": days_left,
         "curve": curve,
         **ext,
@@ -678,6 +680,132 @@ def _outside(a: Dict[str, Any]) -> bool:
     target = (min(bes) + max(bes)) / 2
     mid = min(c, key=lambda p: abs(p["s"] - target))
     return mid["pl"] < 0
+
+
+def _where_extreme(legs: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:
+    """Where the best and worst cases happen -- as a range, not a point.
+
+    "The most you can lose is $300" is a true sentence that tells you
+    nothing about whether to worry. The missing half is the price it
+    happens at, and for a cash-secured put that half is the whole
+    argument.
+
+    But the price is usually a RANGE. A bull call spread loses its full
+    premium anywhere at or below the long strike, not at zero, and an
+    iron condor makes its maximum anywhere between the two short
+    strikes. Reporting the single worst grid point named $0.00 for a
+    spread that is equally dead at $100 -- technically true, and it
+    would have sent someone looking for a crash that was not the risk.
+
+    Payoffs are piecewise linear with corners only at the strikes, so
+    checking zero, every strike and one point far out finds both the
+    extreme and the full span it holds over.
+    """
+    strikes = sorted({l["strike"] for l in legs if l["strike"]})
+    if not strikes:
+        return {"best_at": None, "worst_at": None}
+
+    far = max(max(strikes), spot) * 4
+    pts = [(x, payoff_at(legs, x)) for x in [0.0] + strikes + [far]]
+
+    def span(target: float):
+        """Every stretch of price over which `target` is reached.
+
+        There can be more than one, and they need to stay apart. An iron
+        condor loses its maximum below the lower wing AND above the
+        upper one; collapsing those to a single low-to-high range says
+        it loses the maximum everywhere, including the middle, which is
+        exactly where it makes money.
+        """
+        xs = [x for x, _ in pts]
+        hit = [abs(pl - target) < 0.005 for _, pl in pts]
+        out, i = [], 0
+        while i < len(xs):
+            if not hit[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(xs) and hit[j + 1]:
+                j += 1
+            out.append({"lo": round(xs[i], 2), "hi": round(xs[j], 2),
+                        "to_zero": xs[i] <= 0.0, "to_inf": xs[j] >= far})
+            i = j + 1
+        return out or None
+
+    return {
+        "best_at": span(max(pl for _, pl in pts)),
+        "worst_at": span(min(pl for _, pl in pts)),
+    }
+
+
+def _needs(legs: List[Dict[str, Any]], spot: float, bes: List[float],
+           curve: List[Dict]) -> Dict[str, Any]:
+    """What has to happen for this to work, as a direction and a level.
+
+    Read off the payoff rather than the strategy name, because the name
+    is a label and the payoff is the trade. A "bull" call spread someone
+    has entered upside-down is not bullish, and the shape knows that
+    while the label does not.
+    """
+    if not curve:
+        return {"dir": "unknown", "text": "", "level": None,
+                "move_pct": None, "winning_now": False}
+
+    low, high = curve[0]["pl"], curve[-1]["pl"]
+    mid = payoff_at(legs, spot)
+    below = [b for b in bes if b < spot]
+    above = [b for b in bes if b >= spot]
+
+    def gap(level):
+        return round((level / spot - 1) * 100, 1) if spot else None
+
+    # Whether the level is already on the right side of you changes the
+    # sentence completely. A short call at 105 with the stock at 100 does
+    # not need the stock to FALL -- it needs it not to rise, and it wins
+    # if nothing happens at all. Telling someone holding a credit trade
+    # that they need a move is exactly backwards.
+    winning = mid > 0
+
+    if high > 0 >= low:
+        lvl = min(above) if above else (max(bes) if bes else None)
+        verb = "stay above" if winning else "rise above"
+        return {"dir": "up", "level": lvl, "winning_now": winning,
+                "move_pct": gap(lvl) if lvl else None,
+                "text": (f"{verb} {_dollars(lvl)}" if lvl
+                         else ("stay up" if winning else "rise"))}
+    if low > 0 >= high:
+        lvl = max(below) if below else (min(bes) if bes else None)
+        verb = "stay below" if winning else "fall below"
+        return {"dir": "down", "level": lvl, "winning_now": winning,
+                "move_pct": gap(lvl) if lvl else None,
+                "text": (f"{verb} {_dollars(lvl)}" if lvl
+                         else ("stay down" if winning else "fall"))}
+    if mid > 0 and low <= 0 and high <= 0:
+        lo = max(below) if below else (min(bes) if bes else None)
+        hi = min(above) if above else (max(bes) if bes else None)
+        return {"dir": "still", "level": None, "move_pct": None,
+                "winning_now": mid > 0,
+                "text": (f"finish between {_dollars(lo)} and {_dollars(hi)}"
+                         if lo is not None and hi is not None else "stay where it is")}
+    if mid <= 0 and low > 0 and high > 0:
+        lo = max(below) if below else (min(bes) if bes else None)
+        hi = min(above) if above else (max(bes) if bes else None)
+        return {"dir": "move", "level": None, "move_pct": None,
+                "winning_now": mid > 0,
+                "text": (f"finish below {_dollars(lo)} or above {_dollars(hi)}"
+                         if lo is not None and hi is not None
+                         else "move a long way, either direction")}
+    if low > 0 and high > 0 and mid > 0:
+        return {"dir": "any", "level": None, "move_pct": None,
+                "winning_now": True,
+                "text": "make money wherever it finishes"}
+    return {"dir": "none", "level": None, "move_pct": None,
+            "winning_now": False,
+            "text": "finish outside the range this can profit in"}
+
+
+def _dollars(v: Optional[float]) -> str:
+    return "--" if v is None else f"${v:,.2f}"
 
 
 def _chance_of_profit(legs: List[Dict[str, Any]], spot: float, vol: float,

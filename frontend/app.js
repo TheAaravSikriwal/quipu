@@ -589,6 +589,126 @@ function renderPresets(tab, c) {
   </div>`;
 }
 
+/* ---- the money, before anything else ---------------------------------
+ *
+ * Everything on this page used to sit at one weight: what you paid was a
+ * chip the same size as how many sessions were left. So the single most
+ * important fact about a trade -- this much leaves your account today,
+ * and here is the most it can ever come back as -- had to be assembled
+ * by a reader out of a row of equal-looking numbers.
+ *
+ * Three columns, in the order the money actually moves. Today, then the
+ * best case, then the worst. Each says what the number IS as well as
+ * what it is worth, because "you receive $57" and "you keep $57" are
+ * different claims and a credit trade is where people confuse them: the
+ * cash arrives immediately and is not yours until the thing expires.
+ */
+/* "has to stay below $343" reads correctly; "you keep it if it stay
+ * below $343" does not. The backend hands over a bare verb phrase so it
+ * can follow "has to", and this puts it in the third person for the
+ * sentences that need it. */
+function third(text) {
+  if (!text) return text;
+  const i = text.indexOf(" ");
+  const head = i < 0 ? text : text.slice(0, i);
+  const tail = i < 0 ? "" : text.slice(i);
+  return head + (/(s|sh|ch|x|z)$/.test(head) ? "es" : "s") + tail;
+}
+
+function moneyBlock(a, symbol, spot) {
+  const cost = a.net_cost || 0;
+  const credit = cost < 0;
+  const paid = Math.abs(cost);
+  const n = a.needs || {};
+  /* A maximum without the price it happens at is half a fact -- and the
+   * price is nearly always a range, because these payoffs go flat once
+   * past a strike. */
+  const oneRange = (r) => {
+    // A single point first: a cash-secured put reaches its worst case
+    // only if the shares go to zero, and "at or below $0.00" would make
+    // that sound like a range of outcomes rather than the one.
+    if (Math.abs(r.hi - r.lo) < 0.005) return `at ${money(r.lo)}`;
+    if (r.to_zero && r.to_inf) return "anywhere";
+    if (r.to_zero) return `at or below ${money(r.hi)}`;
+    if (r.to_inf) return `at or above ${money(r.lo)}`;
+    return `between ${money(r.lo)} and ${money(r.hi)}`;
+  };
+  const at = (rs) => {
+    if (!rs || !rs.length) return "";
+    const t = rs.map(oneRange).join(", or ");
+    return `If it finishes ${t}: `;
+  };
+
+  const mp = a.max_profit_unbounded ? null : a.max_profit;
+  const ml = a.max_loss_unbounded ? null : (a.max_loss == null ? null : Math.abs(a.max_loss));
+
+  // What the worst case means in cash, which is not the same sentence
+  // for money you have already handed over and money you have taken in.
+  let worstWhy;
+  if (a.max_loss_unbounded) {
+    worstWhy = "There is no ceiling on a share price, so there is no floor "
+             + "under this loss. It can exceed what you were paid many times over.";
+  } else if (credit) {
+    worstWhy = `${at(a.worst_at)}you keep the ${money(paid)} you were paid, but `
+             + `closing it costs ${money((ml || 0) + paid)} &mdash; ${money(ml)} down overall.`;
+  } else if (ml != null && Math.abs(ml - paid) < 0.51) {
+    worstWhy = `${at(a.worst_at)}every penny you paid. It expires worthless `
+             + "and there is nothing left to sell.";
+  } else {
+    worstWhy = `${at(a.worst_at)}less than the ${money(paid)} you paid, because `
+             + "part of the position still has value at expiry.";
+  }
+
+  const bestWhy = a.max_profit_unbounded
+    ? "Nothing caps this. The further it runs, the more it makes."
+    : credit
+      ? `${at(a.best_at)}the whole amount you were paid, and no more &mdash; `
+        + `yours if ${esc(symbol || "it")} ${esc(third(n.text) || "expires out of the money")}.`
+      : mp != null
+        ? `${at(a.best_at)}you sell it back for ${money(mp + paid)}, having paid ${money(paid)}.`
+        : "";
+
+  const ratio = (!credit && mp != null && paid > 0)
+    ? `Risking ${money(paid)} to make ${money(mp)} &mdash; <b>${nf(mp / paid, 1)}&times;</b> what you put in.`
+    : (credit && ml != null && paid > 0)
+      ? `Risking ${money(ml)} to make ${money(paid)} &mdash; you are putting up <b>${nf(ml / paid, 1)}&times;</b> what you stand to earn.`
+      : "";
+
+  const arrow = { up: "&uarr;", down: "&darr;", still: "&ndash;", move: "&harr;" }[n.dir] || "";
+
+  return `
+  <div class="mny">
+    <div class="mnyneed ${esc(n.dir || "")}">
+      <span class="mnyarrow">${arrow}</span>
+      <span class="mnytext">${esc(symbol || "It")} has to <b>${esc(n.text || "finish in profit")}</b>
+        ${n.winning_now ? `<i>&mdash; it is there now</i>`
+          : n.move_pct != null ? `<i>&mdash; ${n.move_pct > 0 ? "up" : "down"}
+              ${nf(Math.abs(n.move_pct), 1)}% from ${money(spot)}</i>` : ""}</span>
+    </div>
+
+    <div class="mnygrid">
+      <div class="mnycol today">
+        <div class="mnylab">${credit ? "you receive today" : "you pay today"}</div>
+        <div class="mnybig">${credit ? "+" : "&minus;"}${money(paid)}</div>
+        <div class="mnywhy">${credit
+          ? "Cash arrives in your account now &mdash; but it is not yours to keep until this is closed or expires."
+          : "Cash leaves your account now. This is the whole of what you have committed."}</div>
+      </div>
+      <div class="mnycol best">
+        <div class="mnylab">most you can make</div>
+        <div class="mnybig">${a.max_profit_unbounded ? "no cap" : "+" + money(mp)}</div>
+        <div class="mnywhy">${bestWhy}</div>
+      </div>
+      <div class="mnycol worst">
+        <div class="mnylab">most you can lose</div>
+        <div class="mnybig">${a.max_loss_unbounded ? "no limit" : "&minus;" + money(ml)}</div>
+        <div class="mnywhy">${worstWhy}</div>
+      </div>
+    </div>
+    ${ratio ? `<div class="mnyratio">${ratio}</div>` : ""}
+  </div>`;
+}
+
 /* One setup, opened up.
  *
  * The card answers "what is this". This answers "what am I actually
@@ -599,12 +719,7 @@ function renderPresets(tab, c) {
  */
 function presetDetail(tab, p, c) {
   const legs = p.legs_explained || [];
-  const cost = p.net_cost || 0;
 
-  const maxp = p.max_profit_unbounded ? "no cap"
-    : p.max_profit == null ? "&ndash;" : money(p.max_profit);
-  const maxl = p.max_loss_unbounded ? "no limit"
-    : p.max_loss == null ? "&ndash;" : money(Math.abs(p.max_loss));
   const bes = p.breakevens || [];
 
   return `
@@ -627,22 +742,20 @@ function presetDetail(tab, p, c) {
     </div>
   </div>
 
+  ${moneyBlock(p, tab.ui.symbol, c.spot)}
+
   <div class="pdgrid">
-    <div class="pdbox">
-      <div class="pdlab">${cost > 0 ? "costs you" : "pays you"}</div>
-      <div class="pdnum">${money(Math.abs(cost))}</div>
-    </div>
-    <div class="pdbox">
-      <div class="pdlab">most it can make</div>
-      <div class="pdnum">${maxp}</div>
-    </div>
-    <div class="pdbox">
-      <div class="pdlab">most it can lose</div>
-      <div class="pdnum">${maxl}</div>
-    </div>
     <div class="pdbox">
       <div class="pdlab">breaks even at</div>
       <div class="pdnum">${bes.length ? bes.map((b) => money(b)).join(" and ") : "&ndash;"}</div>
+    </div>
+    <div class="pdbox">
+      <div class="pdlab">chance of making money</div>
+      <div class="pdnum">${p.chance == null ? "&ndash;" : nf(p.chance, 0) + "%"}</div>
+    </div>
+    <div class="pdbox">
+      <div class="pdlab">sessions left</div>
+      <div class="pdnum">${p.days_left == null ? "&ndash;" : p.days_left}</div>
     </div>
   </div>
 
@@ -927,19 +1040,19 @@ function renderPosition(tab) {
         ${s.note ? `<p>${esc(s.note)}</p>` : ""}
       </div>
 
+      ${moneyBlock(d, u.symbol, d.spot)}
+
       ${d.plain ? `<div class="plain">
         <p>${d.plain.position}</p>
         ${d.plain.behaviour ? `<p>${d.plain.behaviour}</p>` : ""}
       </div>` : ""}
 
       <div class="pstats">
-        ${chip("profit / loss", (d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), plCls)}
+        ${chip("profit / loss right now", (d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), plCls)}
         ${chip("of what is at risk", d.pl_pct == null ? "--" : signed(d.pl_pct, 0), plCls)}
-        ${chip(d.debit ? "paid" : "received", money(Math.abs(d.net_cost), 0))}
-        ${chip("worth now", money(d.value_now, 0))}
-        ${chip("max profit", d.max_profit_unbounded ? "unlimited" : money(d.max_profit, 0))}
-        ${chip("max loss", d.max_loss_unbounded ? "unlimited" : money(Math.abs(d.max_loss || 0), 0))}
+        ${chip("worth if closed now", money(d.value_now, 0))}
         ${chip("break-even", (d.breakevens || []).map((b) => money(b)).join("  /  ") || "--")}
+        ${chip("chance of making money", d.chance == null ? "--" : nf(d.chance, 0) + "%")}
         ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
       </div>
 
