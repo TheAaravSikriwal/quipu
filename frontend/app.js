@@ -539,12 +539,23 @@ function paintPosSuggest(tab) {
   });
 }
 
-/** The contract ladder. */
+/** The option chain, laid out the way an option chain is laid out.
+ *
+ * Calls on the left, puts on the right, strikes down the middle, the same
+ * columns in the same order on both sides, and a header saying what each
+ * one is. That is the convention, and the convention exists because it is
+ * what everyone who trades options can already read.
+ *
+ * The one thing that is not decoration: you buy at the ask and you sell at
+ * the bid, so the ask and bid cells ARE the buttons. There is nothing to
+ * learn -- click the number you would actually pay, and the leg is entered
+ * at that price rather than at a midpoint you could not have transacted at.
+ */
 function renderLadder(tab) {
   const u = tab.ui, c = u.chain;
   if (u.chainLoading) {
     return `<div class="loading" style="height:180px"><div class="spinner"></div>
-      <div>Loading the board for ${esc(u.symbol)}</div></div>`;
+      <div>Loading the chain for ${esc(u.symbol)}</div></div>`;
   }
   if (u.chainError) {
     return `<div class="empty" style="height:130px"><div class="down">No contracts</div>
@@ -557,15 +568,12 @@ function renderLadder(tab) {
     <button data-pexp="${esc(e)}" class="${e === u.expiry ? "on" : ""}">${esc(e.slice(5))}</button>`
   ).join("")}</div>`;
 
-  /* Which rungs you are actually standing on. Without this the board and
-   * the chips above it are two unrelated lists of numbers, and the one
-   * question you have when you open the page -- where am I on this thing --
-   * needs you to read a strike off a chip and hunt for it. */
+  // Which contracts you already hold, so the row can say so.
   const held = new Map();
   u.legs.forEach((l) => {
     if (l.kind === "stock" || !l.strike) return;
     const k = `${l.kind}:${Number(l.strike)}`;
-    const cur = held.get(k) || { qty: 0, expiry: l.expiry };
+    const cur = held.get(k) || { qty: 0 };
     cur.qty += (l.side === "short" ? -1 : 1) * (Number(l.qty) || 0);
     held.set(k, cur);
   });
@@ -576,119 +584,113 @@ function renderLadder(tab) {
     const e = byStrike.get(r.strike) || { strike: r.strike };
     e.put = r; byStrike.set(r.strike, e);
   });
-  const rows = [...byStrike.values()].sort((a, b) => a.strike - b.strike);
-  const maxOI = Math.max(1, ...rows.flatMap((r) =>
-    [r.call?.open_interest || 0, r.put?.open_interest || 0]));
-
+  const all = [...byStrike.values()].sort((a, b) => a.strike - b.strike);
   const spot = c.spot || 0;
-  // Keep to the strikes near the money, but never drop one you hold.
-  const near = rows
+  const rows = all
     .map((r, i) => ({ r, i, d: Math.abs(r.strike - spot) }))
-    .sort((a, b) => a.d - b.d).slice(0, 18)
-    .concat(rows.map((r, i) => ({ r, i, d: 0 })).filter((x) =>
+    .sort((a, b) => a.d - b.d).slice(0, 20)
+    .concat(all.map((r, i) => ({ r, i, d: 0 })).filter((x) =>
       held.has(`call:${x.r.strike}`) || held.has(`put:${x.r.strike}`)))
     .filter((x, i, arr) => arr.findIndex((y) => y.r.strike === x.r.strike) === i)
     .sort((a, b) => a.r.strike - b.r.strike).map((x) => x.r);
 
+  const inVol = u.unit === "vol";
+  const num = (v, dp = 2) => (v == null ? "&ndash;" : nf(v, dp));
+
+  const side = (r, kind, strike, itm) => {
+    if (!r) return `<span class="q oi">&ndash;</span><span class="q">&ndash;</span>
+      <span class="q">&ndash;</span><span class="q">&ndash;</span>
+      <span class="q edge">&ndash;</span><span class="q px">&ndash;</span><span class="q px">&ndash;</span>`;
+    const ed = inVol ? r.edge_vol : r.edge;
+    const edCls = ed == null ? "" : (ed > (inVol ? 0.2 : 0.02) ? "dear"
+      : ed < (inVol ? -0.2 : -0.02) ? "cheap" : "flat");
+    const edTxt = ed == null ? "&ndash;"
+      : (ed > 0 ? "+" : "−") + nf(Math.abs(ed), inVol ? 1 : 2);
+    const bid = r.bid, ask = r.ask;
+    const cells = [
+      `<span class="q oi" title="${big(r.open_interest)} contracts open">${big(r.open_interest)}</span>`,
+      `<span class="q">${big(r.volume)}</span>`,
+      `<span class="q">${r.iv == null ? "&ndash;" : nf(r.iv, 1)}</span>`,
+      `<span class="q">${r.delta == null ? "&ndash;" : nf(Math.abs(r.delta), 2)}</span>`,
+      `<span class="q edge ${edCls}" title="${r.fair == null ? "" : `worth ${money(r.fair)} at the reference`}">${edTxt}</span>`,
+      bid ? `<button class="q px sell" data-add="short|${kind}|${strike}|${bid}"
+              title="Sell one ${kind} at the bid, ${money(bid)}">${num(bid)}</button>`
+          : `<span class="q px">&ndash;</span>`,
+      ask ? `<button class="q px buy" data-add="long|${kind}|${strike}|${ask}"
+              title="Buy one ${kind} at the ask, ${money(ask)}">${num(ask)}</button>`
+          : `<span class="q px">&ndash;</span>`,
+    ];
+    // Puts mirror: bid and ask stay next to the strike on both sides.
+    return (kind === "put" ? cells.slice(5).concat(cells.slice(0, 5).reverse())
+                           : cells).join("");
+  };
+
   let spotDrawn = false;
-  const body = near.map((row) => {
+  const body = rows.map((row) => {
     const crossed = !spotDrawn && row.strike > spot;
     if (crossed) spotDrawn = true;
-
-    const cell = (r, kind) => {
-      const h = held.get(`${kind}:${row.strike}`);
-      const mine = h && h.qty !== 0
-        ? `<span class="mine ${h.qty > 0 ? "long" : "short"}">${h.qty > 0 ? "+" : ""}${h.qty}</span>` : "";
-      if (!r || !(r.mark || r.last)) return `<span class="lcell empty">${mine}<em>&ndash;</em></span>`;
-      const px = r.mark || r.last;
-      const oi = Math.max(2, (r.open_interest || 0) / maxOI * 100);
-      const itm = kind === "call" ? row.strike < spot : row.strike > spot;
-      /* The edge, not the implied vol. "22%" beside a price tells you
-       * nothing without holding the rest of the board in your head;
-       * "+0.44" says you are paying forty-four cents over what this
-       * contract is worth at the reference volatility, which is the
-       * comparison you actually came to make. IV moves to the tooltip. */
-      /* Two ways to read the same gap, and both are needed.
-       *
-       * Dollars are what leaves your account. Volatility points are the
-       * only unit comparable ACROSS strikes: a far out-of-the-money
-       * contract has almost no vega, so four points of extra volatility
-       * costs a cent there and half a dollar at the money. Judging the
-       * board on dollars alone makes the wings look harmless. */
-      const inVol = u.unit === "vol";
-      const ed = inVol ? r.edge_vol : r.edge;
-      const edCls = ed == null ? ""
-        : (ed > (inVol ? 0.2 : 0.02) ? "dear" : ed < (inVol ? -0.2 : -0.02) ? "cheap" : "flat");
-      const edTxt = ed == null ? ""
-        : (ed > 0 ? "+" : "−") + (inVol ? nf(Math.abs(ed), 1) : nf(Math.abs(ed), 2));
-      const tip = [
-        r.iv == null ? null : `${nf(r.iv, 1)}% implied`,
-        r.fair == null ? null : `worth ${money(r.fair)} at the reference`,
-        r.edge == null ? null : `${r.edge > 0 ? "dear by" : "cheap by"} ${money(Math.abs(r.edge))}`,
-        r.edge_vol == null ? null : `${nf(Math.abs(r.edge_vol), 1)} vol points`,
-        `${big(r.open_interest)} open`,
-        r.spread_pct == null ? null : `${nf(r.spread_pct, 0)}% spread`,
-      ].filter(Boolean).join(" · ");
-      return `<span class="lcell ${itm ? "itm" : ""} ${h && h.qty ? "held" : ""}" title="${tip}">
-        <i class="oi" style="width:${oi.toFixed(1)}%"></i>
-        ${mine}
-        <b>${nf(px, 2)}</b>
-        <em class="edge ${edCls}">${edTxt}</em>
-        <span class="acts">
-          <button data-add="long|${kind}|${row.strike}|${px}" title="Buy one">buy</button>
-          <button data-add="short|${kind}|${row.strike}|${px}" title="Sell one">sell</button>
-        </span></span>`;
-    };
-
-    const anyHeld = held.get(`call:${row.strike}`)?.qty || held.get(`put:${row.strike}`)?.qty;
-    return (crossed ? `<div class="spotline"><span>${money(spot)}</span></div>` : "")
-      + `<div class="lrow${anyHeld ? " rowheld" : ""}">
-        ${cell(row.call, "call")}
-        <span class="lstrike">${nf(row.strike, row.strike % 1 ? 1 : 0)}</span>
-        ${cell(row.put, "put")}
-      </div>`;
+    const hc = held.get(`call:${row.strike}`)?.qty || 0;
+    const hp = held.get(`put:${row.strike}`)?.qty || 0;
+    const badge = (q) => q ? `<i class="pos ${q > 0 ? "l" : "s"}">${q > 0 ? "+" : ""}${q}</i>` : "";
+    return (crossed
+      ? `<div class="spotrow"><span>${esc(u.symbol)} ${money(spot)}</span></div>` : "")
+      + `<div class="crow${hc || hp ? " mine" : ""}">
+          <div class="cside calls ${row.strike < spot ? "itm" : ""}">
+            ${side(row.call, "call", row.strike, row.strike < spot)}</div>
+          <div class="cstrike">${badge(hc)}<b>${nf(row.strike, row.strike % 1 ? 1 : 0)}</b>${badge(hp)}</div>
+          <div class="cside puts ${row.strike > spot ? "itm" : ""}">
+            ${side(row.put, "put", row.strike, row.strike > spot)}</div>
+        </div>`;
   }).join("");
 
-  return `<div class="ladderwrap">
+  const callHead = ["open int", "volume", "impl vol", "delta",
+                    inVol ? "vs fair" : "vs fair $", "bid", "ask"];
+  const putHead = ["bid", "ask", inVol ? "vs fair" : "vs fair $",
+                   "delta", "impl vol", "volume", "open int"];
+
+  return `<div class="chainwrap">
     <div class="expbar">
       <span class="explab">expiry</span>${pills}
       <span class="exphint">${c.days == null ? "" : `${c.trading_days} sessions away`}</span>
     </div>
     <div class="expbar">
-      <span class="explab">price against</span>
+      <span class="explab">compare against</span>
       <div class="cseg">
-        <button data-basis="atm" class="${(u.basis || "atm") === "atm" ? "on" : ""}">
-          at-the-money${c.atm_iv ? ` ${nf(c.atm_iv, 0)}%` : ""}</button>
-        <button data-basis="realised" class="${u.basis === "realised" ? "on" : ""}">
-          realised${c.realised?.rv20 ? ` ${nf(c.realised.rv20, 0)}%` : ""}</button>
+        <button data-basis="atm" class="${(u.basis || "atm") === "atm" ? "on" : ""}">at-the-money${c.atm_iv ? ` ${nf(c.atm_iv, 0)}%` : ""}</button>
+        <button data-basis="realised" class="${u.basis === "realised" ? "on" : ""}">realised${c.realised?.rv20 ? ` ${nf(c.realised.rv20, 0)}%` : ""}</button>
       </div>
       <div class="cseg">
         <button data-unit="cash" class="${(u.unit || "cash") === "cash" ? "on" : ""}">in $</button>
         <button data-unit="vol" class="${u.unit === "vol" ? "on" : ""}">in vol pts</button>
       </div>
-      <span class="exphint">${(u.basis || "atm") === "atm"
-        ? "difference is the skew"
-        : "difference is what you pay over what the stock does"}</span>
+      <span class="exphint">click an <b>ask</b> to buy &middot; click a <b>bid</b> to sell</span>
     </div>
-    <div class="ladder">
-      <div class="lcols">
-        <span class="lc">calls</span>
-        <span class="lm">strike</span>
-        <span class="lp">puts</span>
+
+    <div class="chain">
+      <div class="crow chead2">
+        <div class="cside calls"><span class="hd">calls</span></div>
+        <div class="cstrike"></div>
+        <div class="cside puts"><span class="hd">puts</span></div>
+      </div>
+      <div class="crow chead">
+        <div class="cside calls">${callHead.map((h) => `<span class="q">${h}</span>`).join("")}</div>
+        <div class="cstrike"><b>strike</b></div>
+        <div class="cside puts">${putHead.map((h) => `<span class="q">${h}</span>`).join("")}</div>
       </div>
       ${body}
-      <div class="lfoot">Each price is followed by what it costs
-        <b>over or under</b> the same contract valued at ${esc(c.fair_label || "the reference")}
-        volatility, ${(u.unit || "cash") === "vol"
-          ? "in points of volatility &mdash; the unit that compares across strikes, since a far "
-            + "out-of-the-money contract has almost no vega"
-          : "in dollars"}. <b>+</b> is dear, <b>&minus;</b> is cheap. The bar is open interest.
-        Hover any price for the full read; click to buy or sell one.
-        ${c.spot_source && c.spot_source !== "quote"
-          ? `<br>Priced off <b>${money(c.spot)}</b>, taken from ${esc(c.spot_source)} rather than
-             the quoted ${money(c.spot_quoted)} &mdash; the quote lags the options tape, and
-             using it put the calls and puts on one strike three points of volatility apart.`
-          : ""}</div>
+    </div>
+    <div class="cfoot">
+      <b>vs fair</b> is what the contract costs over (+) or under (&minus;) the same
+      option valued at ${esc(c.fair_label || "the reference")} volatility${inVol
+        ? ", in points of volatility &mdash; the unit that compares across strikes, "
+          + "since a far out-of-the-money contract barely responds to volatility at all"
+        : ", in dollars"}.
+      Shaded rows are in the money.
+      ${c.spot_source && c.spot_source !== "quote"
+        ? `Priced off <b>${money(c.spot)}</b>, read from ${esc(c.spot_source)} rather than the
+           quoted ${money(c.spot_quoted)}: the quote lags the options tape, and using it put the
+           call and the put on one strike three points of volatility apart.`
+        : ""}
     </div>
   </div>`;
 }

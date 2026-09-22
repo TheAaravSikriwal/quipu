@@ -235,124 +235,122 @@ body {
 }
 .chip button:hover { color: var(--text); }
 
-/* ---- the ladder ----
-   Held to a column width on purpose. Stretched across a 1900px window the
-   two halves end up a foot apart with a void between them, and comparing a
-   call against the put on the same strike -- the one comparison the layout
-   exists to make -- turns into a head movement. */
-.ladderwrap { max-width: 940px; margin: 0 auto; padding: 0 16px 18px; }
+/* ---- the chain ----
+   Built to the convention rather than around it. Seven headed columns a
+   side, the same order on both, strikes down the middle, in-the-money
+   rows shaded. Anyone who has opened a broker's chain can read this
+   without being told, which is the entire argument for it -- the previous
+   version invented a layout and then had to explain itself in a footnote. */
+.chainwrap { max-width: 1320px; margin: 0 auto; padding: 0 16px 18px; }
 
 .expbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 14px 0 12px;
+  padding: 12px 0 10px;
 }
 .explab, .exphint {
   font-family: var(--ui); font-size: 9px; font-weight: 700;
   letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
 }
 .exphint { margin-left: auto; }
+.exphint b { color: var(--text); }
 .expiries { flex-wrap: wrap; }
 
-.lcols {
-  display: grid; grid-template-columns: 1fr 86px 1fr;
-  font-family: var(--ui); font-size: 9px; font-weight: 700;
-  letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
-  padding-bottom: 7px; border-bottom: 1px solid var(--rule);
-}
-.lcols .lm { text-align: center; }
-.lcols .lp { text-align: right; }
+.chain { border-top: 1px solid var(--rule); }
 
-.lrow {
-  display: grid; grid-template-columns: 1fr 86px 1fr;
-  align-items: stretch; border-bottom: 1px solid var(--hline);
+.crow {
+  display: grid; grid-template-columns: 1fr 96px 1fr;
+  border-bottom: 1px solid var(--hline);
 }
-.lrow:hover { background: rgba(242, 242, 240, .02); }
-/* A rung you are standing on. */
-.lrow.rowheld .lstrike { color: var(--black); background: var(--text); border-radius: 999px; }
-
-.lstrike {
-  font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--text);
-  text-align: center; align-self: center; padding: 3px 0;
+.cside {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  align-items: stretch;
 }
 
-.lcell {
-  position: relative; display: flex; align-items: baseline; gap: 9px;
-  padding: 6px 12px; overflow: hidden; cursor: default;
+/* The two header rows: what side, then what column. */
+.chead2 { border-bottom: none; }
+.chead2 .hd {
+  grid-column: 1 / -1; padding: 8px 10px 2px;
+  font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .2em; text-transform: uppercase; color: var(--text);
 }
-/* Calls read outward to the left, puts outward to the right, so the two
-   sides mirror around the strike instead of both running the same way. */
-.lrow > .lcell:first-child { flex-direction: row-reverse; text-align: right; }
-
-.lcell.empty { color: var(--rule2); font-family: var(--mono); font-size: 12px; }
-.lcell.empty em { font-style: normal; }
-
-/* Open interest, anchored at the strike and growing outward. Capped at
-   60% so a single enormous strike cannot make every other bar invisible,
-   and mirrored left/right so the two sides are actually comparable. */
-.lcell .oi {
-  position: absolute; bottom: 0; height: 2px; max-width: 38%;
-  background: var(--rule2); z-index: 0;
-  /* 38%, not 60%: on a 400px cell the longer cap produced a 240px line
-     that reads as a rule under the row rather than a quantity beside it.
-     Short enough to be a bar, long enough to compare. */
+.chead2 .puts .hd { text-align: right; }
+.chead .q, .chead b {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  padding: 4px 6px 7px;
 }
-.lrow > .lcell:first-child .oi { right: 0; }
-.lrow > .lcell:last-child .oi { left: 0; }
+.chead { border-bottom: 1px solid var(--rule); }
 
-.lcell b, .lcell em, .lcell .acts, .lcell .mine { position: relative; z-index: 1; }
-.lcell b { font-family: var(--mono); font-size: 13.5px; font-weight: 500; color: var(--text2); }
-.lcell em {
-  font-family: var(--mono); font-style: normal; font-size: 10px; color: var(--rule2);
+.q {
+  font-family: var(--mono); font-size: 12px; color: var(--text2);
+  padding: 5px 6px; text-align: right; align-self: center;
+  white-space: nowrap; overflow: hidden;
 }
-/* Dear or cheap against the reference volatility.
-   Weight rather than colour, as everywhere else on this page: a contract
-   trading above its reference value is set in full ink, one below it is
-   set back, and anything within two cents of fair is left grey because at
-   that distance the bid-ask spread decides it, not the model. */
-.lcell em.dear { color: var(--text); }
-.lcell em.cheap { color: var(--text2); }
-.lcell em.flat { color: var(--rule2); }
-.lcell em.dear::after { content: ""; }
-/* In the money: the price brightens. No background wash -- tinting every
-   cell on one side of the spot turned half the board into a grey slab. */
-.lcell.itm b { color: var(--text); }
+.cside.calls .q { text-align: right; }
+.cside.puts .q { text-align: left; }
+.cside.puts .chead .q { text-align: left; }
 
-/* How many of these you are holding, right on the rung. */
-.lcell .mine {
-  font-family: var(--mono); font-size: 10px; font-weight: 700;
-  padding: 1px 6px; border-radius: 999px;
+/* In the money, shaded, as every chain shades it. */
+.cside.itm { background: rgba(242, 242, 240, .04); }
+
+.q.oi { color: var(--faint); }
+
+/* Bid and ask are the controls. They are boxed so they read as pressable
+   before the cursor reaches them, and each one says what it will do. */
+button.q.px {
+  border: none; cursor: pointer; border-radius: 3px;
+  font-family: var(--mono); font-size: 12.5px; font-weight: 500;
+  color: var(--text); background: var(--sunk);
+  margin: 2px 3px; padding: 4px 6px; transition: background .1s ease, color .1s ease;
 }
-.lcell .mine.long { background: var(--text); color: var(--black); }
-.lcell .mine.short { box-shadow: inset 0 0 0 1px var(--text); color: var(--text); }
-.lcell.held b { color: var(--text); }
+button.q.px:hover { background: var(--text); color: var(--black); }
+button.q.px.sell:hover::after { content: " sell"; font-size: 8px; letter-spacing: .1em; }
+button.q.px.buy:hover::after { content: " buy"; font-size: 8px; letter-spacing: .1em; }
+span.q.px { color: var(--rule2); }
 
-/* Buy and sell are always on the page rather than revealed by hovering,
-   because an action you cannot see is one you do not know exists. They sit
-   at the edge of legible until the row is under the cursor. */
-.lcell .acts { display: flex; gap: 3px; opacity: .26; transition: opacity .12s ease; }
-.lrow:hover .acts { opacity: 1; }
-.lcell .acts button {
-  background: none; border: none; cursor: pointer;
-  font-family: var(--ui); font-size: 8px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase;
-  padding: 2px 7px; border-radius: 999px; color: var(--faint);
-  box-shadow: inset 0 0 0 1px var(--rule);
+.q.edge.dear { color: var(--text); }
+.q.edge.cheap { color: var(--text2); }
+.q.edge.flat { color: var(--rule2); }
+
+.cstrike {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  border-left: 1px solid var(--rule); border-right: 1px solid var(--rule);
 }
-.lcell .acts button:hover { background: var(--text); color: var(--black); box-shadow: none; }
+.cstrike b {
+  font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text);
+  padding: 5px 0;
+}
+.crow.mine .cstrike { background: var(--raised); }
+.crow:hover { background: rgba(242, 242, 240, .025); }
 
-/* The share price, drawn through the rungs where it actually falls. */
-.spotline {
+/* How many of that exact contract you hold, on the strike it belongs to. */
+.pos {
+  font-family: var(--mono); font-style: normal; font-size: 9.5px; font-weight: 700;
+  padding: 1px 5px; border-radius: 999px;
+}
+.pos.l { background: var(--text); color: var(--black); }
+.pos.s { box-shadow: inset 0 0 0 1px var(--text); color: var(--text); }
+
+/* Where the stock is, across the board. */
+.spotrow {
   position: relative; height: 0; border-top: 1px solid var(--text);
   display: flex; justify-content: center;
 }
-.spotline span {
+.spotrow span {
   position: relative; top: -8px; background: var(--black);
   padding: 0 10px; font-family: var(--mono); font-size: 11px; color: var(--text);
 }
 
-.lfoot {
-  padding-top: 9px; font-size: 10px; letter-spacing: .06em;
-  color: var(--faint); text-align: center;
+.cfoot {
+  padding: 12px 2px 0; max-width: 92ch;
+  font-size: 11px; line-height: 1.6; color: var(--faint);
+}
+.cfoot b { color: var(--text2); }
+
+@media (max-width: 1200px) {
+  .cside { grid-template-columns: repeat(7, 1fr); }
+  .q { font-size: 11px; padding: 4px 3px; }
+  .chead .q { font-size: 7.5px; letter-spacing: .04em; }
 }
 
 /* ---- the read-out below ---- */
