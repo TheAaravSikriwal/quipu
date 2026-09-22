@@ -539,6 +539,45 @@ function paintPosSuggest(tab) {
   });
 }
 
+/* Ready-made structures off the board in front of you.
+ *
+ * Knowing you are mildly bullish is the easy half. Turning that into
+ * "long the 340 call, short the 355" is the part that stops people, and
+ * it is mechanical -- so the app does it, states what you would have to
+ * believe in a sentence, and puts the odds next to the payoff so the
+ * trade-off is visible before you commit rather than after.
+ *
+ * The pattern the numbers always show is the one worth seeing: the
+ * setups that work seven times in ten make small money, and the ones
+ * with no cap on the upside work three times in ten. */
+function renderPresets(tab, c) {
+  const list = c.presets || [];
+  if (!list.length) return "";
+  const open = tab.ui.presetsOpen !== false;
+
+  return `<div class="presets">
+    <div class="expbar">
+      <span class="explab">ready-made setups</span>
+      <button class="plink" id="pre-toggle">${open ? "hide" : "show"}</button>
+      <span class="exphint">what you would have to believe, and the odds on it</span>
+    </div>
+    ${open ? `<div class="pregrid">
+      ${list.map((p) => `
+        <button class="pcard" data-preset="${esc(p.id)}">
+          <span class="odds"><b>${p.chance == null ? "--" : nf(p.chance, 0)}</b>
+            <i>in 100 finish ahead</i></span>
+          <span class="pname">${esc(p.name)}</span>
+          <span class="pview">${esc(p.view)}</span>
+          <span class="psum">${p.summary}</span>
+          <span class="plegs">${p.legs.map((l) =>
+            `${l.side === "long" ? "buy" : "sell"} ${l.qty}
+             ${l.kind === "stock" ? "shares" : `${nf(l.strike, 0)} ${l.kind}`}`).join(" &middot; ")}</span>
+          <span class="puse">use this &rarr;</span>
+        </button>`).join("")}
+    </div>` : ""}
+  </div>`;
+}
+
 /** The option chain, laid out the way an option chain is laid out.
  *
  * Calls on the left, puts on the right, strikes down the middle, the same
@@ -632,6 +671,10 @@ function renderLadder(tab) {
     const hc = held.get(`call:${row.strike}`)?.qty || 0;
     const hp = held.get(`put:${row.strike}`)?.qty || 0;
     const badge = (q) => q ? `<i class="pos ${q > 0 ? "l" : "s"}">${q > 0 ? "+" : ""}${q}</i>` : "";
+    /* The share price used to be labelled in the centre of the board,
+     * directly on top of the strike column it was trying not to obscure.
+     * The line still runs across -- knowing which rungs are above and
+     * below is the point of it -- but the label sits out in the margin. */
     return (crossed
       ? `<div class="spotrow"><span>${esc(u.symbol)} ${money(spot)}</span></div>` : "")
       + `<div class="crow${hc || hp ? " mine" : ""}">
@@ -665,6 +708,8 @@ function renderLadder(tab) {
       </div>
       <span class="exphint">click an <b>ask</b> to buy &middot; click a <b>bid</b> to sell</span>
     </div>
+
+    ${renderPresets(tab, c)}
 
     <div class="chain">
       <div class="crow chead2">
@@ -855,6 +900,22 @@ function wirePosition(tab) {
 
   document.querySelectorAll("[data-pexp]").forEach((b) => {
     b.onclick = () => loadChain(tab, b.dataset.pexp);
+  });
+
+  const pt = document.getElementById("pre-toggle");
+  if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(); };
+
+  document.querySelectorAll("[data-preset]").forEach((b) => {
+    b.onclick = () => {
+      const p = (u.chain?.presets || []).find((x) => x.id === b.dataset.preset);
+      if (!p) return;
+      // Replaces rather than appends: these are whole structures, and
+      // stacking two of them silently makes a third thing you did not pick.
+      u.legs = p.legs.map((l) => ({ ...l, strike: l.strike ?? "", expiry: l.expiry ?? "" }));
+      render();
+      analysePosition(tab);
+      document.querySelector(".posbody")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
   });
 
   document.querySelectorAll("[data-unit]").forEach((b) => {
@@ -1076,6 +1137,7 @@ const SOURCES = {
   ownership: "13F filings via Yahoo Finance",
   short: "Exchange short-interest reports",
   filings: "SEC EDGAR &middot; official, unedited",
+  calendar: "Federal Reserve, BEA and company filings &middot; dates only, not forecasts",
   news: "Yahoo, Google News and Finnhub, deduplicated",
   unique: "Cross-referenced across every article read",
   corroborated: "Claims matched across two or more outlets",
@@ -1144,8 +1206,8 @@ const REGIONS = [
                                               "unusual", "greeks", "chain"] },
   { id: "business", label: "Business", keys: ["profile", "financials", "valuation", "earnings",
                                               "analysts", "ownership", "short", "filings"] },
-  { id: "news",     label: "News",     keys: ["news", "unique", "corroborated", "stories",
-                                              "social", "pipeline"] },
+  { id: "news",     label: "News",     keys: ["calendar", "news", "unique", "corroborated",
+                                              "stories", "social", "pipeline"] },
 ];
 
 /* Which region a panel belongs to, by reading order. The packer uses this to
@@ -1868,6 +1930,113 @@ function unusualTile(o) {
     `<div class="prose" style="font-size:12px;margin-bottom:5px">Volume far above open interest means today's trading is new positioning, not existing holders swapping.</div>` +
       rows.slice(0, 7).map((r) => kv(esc(r.contract || ""),
         `${nf(r.vol_oi_ratio, 1)}&times; <span class="unit">${big(r.volume)}v/${big(r.open_interest)}oi</span>`, "warn")).join("")
+  );
+}
+
+/* ---- what is already on the calendar --------------------------------
+ *
+ * Every other panel here is about what has already happened. This one is
+ * the only one about what is scheduled to, and it exists to answer one
+ * question before you pick an expiry: is something known coming first?
+ *
+ * Which is why the list is split at your expiry date rather than simply
+ * running in date order. "There is a Fed meeting on the 28th" is trivia.
+ * "There is a Fed meeting eight days before your option expires" is the
+ * trade. The split does that comparison for you, so the panel is read
+ * once and acted on rather than read and then worked out.
+ */
+const EV_DATE = (iso) => {
+  const d = new Date(iso + "T12:00:00");
+  return d.toLocaleDateString("en-GB",
+    { weekday: "short", day: "numeric", month: "short" });
+};
+
+const EV_WHEN = (n) => (n === 0 ? "today" : n === 1 ? "tomorrow" : `in ${n} days`);
+
+function eventsTile(d, tab) {
+  const ev = d.events?.events || [];
+  if (!ev.length) return "";
+
+  const o = d.options;
+  const exp = o?.available
+    ? o.expiries[Math.min(tab.ui.expiryIdx, o.expiries.length - 1)] : null;
+  const expiry = exp?.expiry || null;
+
+  const before = expiry ? ev.filter((e) => e.date <= expiry) : ev;
+  const after = expiry ? ev.filter((e) => e.date > expiry) : [];
+  const big = before.filter((e) => e.weight === 3);
+  const earn = ev.find((e) => e.kind === "earnings");
+
+  /* The verdict. Written as a sentence because the answer to "should I
+   * wait" is a sentence, and a reader who has to assemble it from a list
+   * of dates has been handed the work the panel was supposed to do. */
+  let verdict;
+  if (!expiry) {
+    verdict = `The next thing on the calendar is <b>${esc(ev[0].title)}</b>,
+      ${EV_WHEN(ev[0].days)}.`;
+  } else if (!big.length) {
+    // The useful half of "nothing is coming" is what comes next, and
+    // whether one more week of expiry would reach it. That is the actual
+    // decision -- wait or not -- so the panel makes it rather than
+    // leaving the reader to compare two dates by eye.
+    const next = after.find((e) => e.weight === 3);
+    verdict = `Nothing major is scheduled before your <b>${esc(expiry)}</b> option expires.
+      Whatever moves it will be news, not the calendar.`
+      + (next ? ` The next one is <b>${esc(next.title)}</b>,
+          ${EV_WHEN(next.days)} &mdash; an expiry after <b>${EV_DATE(next.date)}</b>
+          would cover it.` : "");
+  } else {
+    // Titles stay as written. Lower-casing them to fit the sentence turned
+    // "(PCE)" into "(pce)", which is a different thing entirely.
+    const names = big.map((e) => e.title);
+    const list = names.length === 1 ? names[0]
+      : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+    verdict = `Your <b>${esc(expiry)}</b> option has to get through
+      <b>${big.length}</b> scheduled event${big.length > 1 ? "s" : ""} first &mdash;
+      ${esc(list)}. Each one can move the price on the day, so the option is
+      carrying that risk whether you wanted it or not.`;
+  }
+
+  /* Earnings is the one date that dominates a single stock, so it gets
+   * said outright in both directions. Missing it by three days is a
+   * mistake people make once and remember, and it is entirely avoidable
+   * -- the next expiry out costs a little more and contains the event. */
+  let note = "";
+  if (earn && expiry) {
+    note = earn.date <= expiry
+      ? `<div class="evflag">Earnings land <b>${EV_WHEN(earn.days)}</b>, before this expiry.
+         Options are priced up for it, and that extra value disappears the morning
+         after &mdash; being right about the direction may still lose money.</div>`
+      : `<div class="evflag">Earnings are <b>${EV_DATE(earn.date)}</b>, <b>after</b> this
+         expiry. If the report is what you are trading, this option expires before it
+         happens and a later expiry is the one you want.</div>`;
+  }
+
+  const row = (e) => `<div class="evrow ${e.confirmed ? "" : "est"} ${e.scope}">
+      <span class="evd">${EV_DATE(e.date)}</span>
+      <span class="evn">${esc(e.title)}${e.confirmed ? ""
+        : `<em title="${esc(e.why)}">${e.approx ? "around this date" : "usual timing"}</em>`}</span>
+      <span class="evx">${EV_WHEN(e.days)}</span>
+      ${e.weight === 3 || e.scope === "company"
+        ? `<span class="evy">${esc(e.why)}</span>` : ""}
+    </div>`;
+
+  return tile(
+    "calendar", "elastic e-filed", "w2 h3", "What is coming",
+    `<div class="prose">${verdict}</div>
+     ${note}
+     ${before.length ? `<div class="evhead">${expiry
+        ? `before your ${esc(expiry)} expiry` : "next up"}</div>
+        ${before.map(row).join("")}` : ""}
+     ${after.length ? `<div class="evhead">${!expiry ? "later"
+        : before.length ? "after it"
+        : `all after your ${esc(expiry)} expiry`}</div>
+        ${after.slice(0, before.length ? 5 : 8).map(row).join("")}` : ""}
+     <div class="evfoot">Dates from the Federal Reserve and the BEA.
+       The inflation and jobs reports are marked where the exact day is not
+       confirmed &mdash; the agency that publishes them blocks automated
+       requests, so those two are shown at their usual timing.</div>`,
+    expiry && big.length ? `${big.length} before expiry` : ""
   );
 }
 
@@ -2881,6 +3050,7 @@ function renderDashboard(d, tab) {
     shortTile(d.fundamentals),
     filingsTile(d.filings),
 
+    eventsTile(d, tab),
     newsTile(d.news),
     uniqueTile(d.crossref),
     corroboratedTile(d.crossref),

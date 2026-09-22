@@ -30,8 +30,9 @@ from crossref.cluster import cluster  # noqa: E402
 from extract.tiered import available_tiers, extract  # noqa: E402
 from fanout import bounded_map, fanout  # noqa: E402
 import position as position_engine  # noqa: E402
+import presets as preset_engine  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
-from sources import deep, news_rss, options, quotes, sec_edgar, symbols  # noqa: E402
+from sources import deep, events, news_rss, options, quotes, sec_edgar, symbols  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -319,6 +320,8 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
         "puts": board.get("puts") or [],
         "spot_quoted": round(spot_quoted, 4) if spot_quoted else None,
         "spot_source": spot_source,
+        "presets": preset_engine.build(calls, puts, board.get("expiry"),
+                                       spot, ref / 100.0, rate, div),
         "fair_basis": basis if not vol else "custom",
         "fair_vol": round(ref, 2),
         "fair_label": ref_label,
@@ -430,6 +433,36 @@ def live(symbol: str) -> Dict[str, Any]:
         "options": results["options"].data if results["options"].ok else None,
         "ms": int((time.monotonic() - started) * 1000),
     }
+
+
+def _events(symbol, earnings, fundamentals):
+    """The calendar, or nothing. Never enough to fail the page over."""
+    try:
+        return events.upcoming(symbol, horizon=180, earnings=earnings,
+                               fundamentals=fundamentals)
+    except Exception as exc:                       # noqa: BLE001
+        return {"events": [], "error": str(exc)}
+
+
+@app.get("/api/events")
+def market_events(horizon: int = 180) -> Dict[str, Any]:
+    """The market-wide calendar on its own, with no ticker attached."""
+    return events.upcoming(None, horizon=horizon)
+
+
+def _events(symbol, earnings, fundamentals):
+    """The calendar, or nothing. Never enough to fail the whole page."""
+    try:
+        return events.upcoming(symbol, horizon=180, earnings=earnings,
+                               fundamentals=fundamentals)
+    except Exception as exc:                       # noqa: BLE001
+        return {"events": [], "error": str(exc)}
+
+
+@app.get("/api/events")
+def market_events(horizon: int = 180) -> Dict[str, Any]:
+    """The market-wide calendar on its own, with no ticker attached."""
+    return events.upcoming(None, horizon=horizon)
 
 
 @app.get("/api/ticker/{symbol}")
@@ -559,6 +592,16 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
             "failed": len(to_fetch) - len(usable),
             "articles": feed,
         },
+        "events": _events(
+            symbol,
+            stage1["earnings"].data if stage1["earnings"].ok else None,
+            stage1["fundamentals"].data if stage1["fundamentals"].ok else None,
+        ),
+        "events": _events(
+            symbol,
+            stage1["earnings"].data if stage1["earnings"].ok else None,
+            stage1["fundamentals"].data if stage1["fundamentals"].ok else None,
+        ),
         "crossref": crossref,
         "diagnostics": {
             "total_ms": int((time.monotonic() - started) * 1000),

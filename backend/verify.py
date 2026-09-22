@@ -279,6 +279,130 @@ except Exception as exc:
     RESULTS.append((False, "universe filter", f"could not run: {exc}"))
 
 
+section("Event calendar parses to what the publishers actually say")
+
+try:
+    import collections
+    from datetime import date as _d
+    from sources import events as EV
+
+    # The Fed holds exactly eight regularly scheduled meetings a year, and
+    # has for decades. It is the sharpest available check on the parser:
+    # a year that comes back with seven means a month-straddling meeting
+    # was dropped, and nine means a notation vote was counted as a rate
+    # decision. Both were real bugs found by this check.
+    meetings = EV._fomc()
+    per_year = collections.Counter(r["date"][:4] for r in meetings)
+    full = {y: n for y, n in per_year.items() if y not in (min(per_year), max(per_year))}
+    wrong = {y: n for y, n in full.items() if n != 8}
+    RESULTS.append((not wrong, "FOMC: eight scheduled meetings a year",
+                    f"{len(full)} full years all correct" if not wrong else f"off: {wrong}"))
+
+    weekend = [r["date"] for r in meetings if _d.fromisoformat(r["date"]).weekday() > 4]
+    RESULTS.append((not weekend, "FOMC: no decision lands on a weekend",
+                    "none" if not weekend else str(weekend[:3])))
+
+    dupes = [d for d, n in collections.Counter(r["date"] for r in meetings).items() if n > 1]
+    RESULTS.append((not dupes, "FOMC: no date parsed twice",
+                    "none" if not dupes else str(dupes[:3])))
+
+    # 1 February 2023 and 1 November 2023 are the two decisions that fell in
+    # a different month from the one the meeting started in. If the parser
+    # regresses on abbreviated month labels, these are the dates that vanish.
+    got = {r["date"] for r in meetings}
+    straddle = [d for d in ("2023-02-01", "2023-11-01") if d not in got]
+    RESULTS.append((not straddle, "FOMC: month-straddling meetings kept",
+                    "both present" if not straddle else f"lost {straddle}"))
+
+    # The estimated releases are the only dates here Quipu made up, so they
+    # are held to the rules they claim to follow.
+    est = [e for e in EV._expected_bls(200) if not e["confirmed"]]
+    jobs = [e for e in est if e["kind"] == "jobs"]
+    bad = [e["date"] for e in jobs if _d.fromisoformat(e["date"]).weekday() != 4]
+    RESULTS.append((not bad, "jobs estimate always lands on a Friday",
+                    f"{len(jobs)} checked" if not bad else f"not Friday: {bad}"))
+
+    cpi = [e for e in est if e["kind"] == "inflation"]
+    out = [e["date"] for e in cpi if not 10 <= _d.fromisoformat(e["date"]).day <= 15]
+    RESULTS.append((not out, "CPI estimate stays in its 10th-15th window",
+                    f"{len(cpi)} checked" if not out else f"outside: {out}"))
+
+    weekend2 = [e["date"] for e in est if _d.fromisoformat(e["date"]).weekday() > 4]
+    RESULTS.append((not weekend2, "no estimated release on a weekend",
+                    "none" if not weekend2 else str(weekend2[:3])))
+
+    holiday = [e["date"] for e in est
+               if _d.fromisoformat(e["date"]) in EV._holidays(_d.fromisoformat(e["date"]).year)]
+    RESULTS.append((not holiday, "no estimated release on a market holiday",
+                    "none" if not holiday else str(holiday[:3])))
+
+    # An estimate must never sit next to the confirmed version of the same
+    # release: CPI and PCE are both inflation, and keying the merge on the
+    # subject rather than the release silently deleted the CPI estimate.
+    merged = EV.upcoming(None, horizon=150)["events"]
+    seen = collections.Counter((e["title"], e["date"][:7]) for e in merged)
+    clash = [k for k, n in seen.items() if n > 1]
+    RESULTS.append((not clash, "no release appears twice in one month",
+                    f"{len(merged)} events" if not clash else str(clash[:3])))
+
+    months = {e["date"][:7] for e in merged}
+    cpi_months = {e["date"][:7] for e in merged if "CPI" in e["title"]}
+    gap = sorted(months - cpi_months)[:-1]      # the final month is cut short
+    RESULTS.append((not gap, "an inflation report in every whole month",
+                    f"{len(cpi_months)} months" if not gap else f"missing {gap}"))
+
+    # BEA publishes county-level GDP for the year before last under a
+    # title containing "GDP". Flagging that as a market event told the
+    # reader to expect a growth number that was not coming.
+    skipped = EV._bea_row("GDP by County and Personal Income by County, 2025")
+    RESULTS.append((skipped is None, "regional BEA detail is not an event",
+                    "county GDP skipped" if skipped is None else f"kept as {skipped[0]}"))
+
+    adv = EV._bea_row("GDP (Advance Estimate), 3rd Quarter 2026")
+    RESULTS.append((adv is not None and adv[2] == 2,
+                    "the GDP that moves markets is kept",
+                    adv[0] if adv else "advance estimate dropped"))
+
+    third = EV._bea_row("GDP (Third Estimate), Industries, 2nd Quarter 2026")
+    RESULTS.append((third is not None and third[2] == 1,
+                    "stale GDP revisions are down-weighted",
+                    third[0] if third else "final estimate dropped"))
+
+    order = [e["date"] for e in merged]
+    RESULTS.append((order == sorted(order), "calendar comes back in date order",
+                    "sorted" if order == sorted(order) else "out of order"))
+except Exception as exc:
+    RESULTS.append((False, "event calendar", f"could not run: {exc}"))
+
+section("Source files carry no corrupted escapes")
+
+# A patch once wrote literal backspace bytes where a regex word boundary
+# was meant. The pattern still compiled, still looked correct in an
+# editor, and matched nothing -- which silently emptied a whole section
+# of the calendar. Cheap to check, invisible otherwise.
+try:
+    import os as _os
+
+    found = []
+    for root, dirs, files in _os.walk(Path(__file__).resolve().parent.parent):
+        dirs[:] = [d for d in dirs
+                   if d not in (".venv", "__pycache__", ".git", "node_modules", "cache")]
+        for name in files:
+            if not name.endswith((".py", ".js", ".css", ".html")):
+                continue
+            path = _os.path.join(root, name)
+            try:
+                raw = open(path, "rb").read()
+            except OSError:
+                continue
+            for code in (0x07, 0x08, 0x0B, 0x0C, 0x1B):
+                if bytes([code]) in raw:
+                    found.append(f"{name}:{hex(code)}")
+    RESULTS.append((not found, "no stray control bytes in source",
+                    "clean" if not found else ", ".join(sorted(set(found))[:4])))
+except Exception as exc:
+    RESULTS.append((False, "control byte scan", f"could not run: {exc}"))
+
 # ------------------------------------------------------------------ report
 if __name__ == "__main__":
     passed = failed = 0

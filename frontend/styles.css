@@ -241,7 +241,7 @@ body {
    rows shaded. Anyone who has opened a broker's chain can read this
    without being told, which is the entire argument for it -- the previous
    version invented a layout and then had to explain itself in a footnote. */
-.chainwrap { max-width: 1320px; margin: 0 auto; padding: 0 16px 18px; }
+.chainwrap { max-width: 1320px; margin: 0 auto; padding: 0 112px 18px 16px; }
 
 .expbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -331,15 +331,75 @@ span.q.px { color: var(--rule2); }
 .pos.l { background: var(--text); color: var(--black); }
 .pos.s { box-shadow: inset 0 0 0 1px var(--text); color: var(--text); }
 
-/* Where the stock is, across the board. */
+/* Where the stock is, across the board.
+   The line stays -- which rungs are above and below the money is the one
+   thing you read a chain for. The label moved out into the right margin,
+   because centred it sat directly on top of the strike column and you had
+   to look past the price to read the strike it was marking. */
 .spotrow {
-  position: relative; height: 0; border-top: 1px solid var(--text);
-  display: flex; justify-content: center;
+  position: relative; height: 0; border-top: 1px dashed var(--text);
 }
 .spotrow span {
-  position: relative; top: -8px; background: var(--black);
-  padding: 0 10px; font-family: var(--mono); font-size: 11px; color: var(--text);
+  position: absolute; right: -104px; top: -9px; white-space: nowrap;
+  font-family: var(--mono); font-size: 11px; color: var(--text);
+  display: flex; align-items: center; gap: 6px;
 }
+.spotrow span::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--text);
+}
+
+/* ---- ready-made setups ----
+   Cards rather than a list, because you scan these comparing one against
+   another: the odds sit in the same place on every card so the eye can run
+   down them, and the payoff sentence sits underneath so the trade-off --
+   likely and small against unlikely and large -- shows up as a pattern
+   across the row instead of something you have to work out per card. */
+.presets { padding: 4px 0 16px; }
+.pregrid {
+  display: grid; gap: 1px; background: var(--rule);
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+}
+.pcard {
+  display: flex; flex-direction: column; gap: 5px; text-align: left;
+  background: var(--panel); border: none; cursor: pointer;
+  padding: 13px 15px 12px; font-family: var(--ui); color: var(--text2);
+  transition: background .12s ease;
+}
+.pcard:hover { background: var(--raised); }
+
+/* The odds, in the same spot on every card. */
+.pcard .odds { display: flex; align-items: baseline; gap: 6px; }
+.pcard .odds b {
+  font-family: var(--mono); font-size: 21px; font-weight: 500;
+  color: var(--text); line-height: 1;
+}
+.pcard .odds i {
+  font-style: normal; font-size: 9px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--faint);
+}
+
+.pcard .pname { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.pcard .pview { font-size: 11.5px; line-height: 1.45; color: var(--text2); }
+.pcard .psum { font-size: 10.5px; line-height: 1.55; color: var(--faint); }
+.pcard .psum b { color: var(--text2); font-weight: 500; font-family: var(--mono); }
+.pcard .plegs {
+  font-family: var(--mono); font-size: 10px; color: var(--rule2);
+  margin-top: auto; padding-top: 6px;
+}
+.pcard .puse {
+  font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--faint); opacity: 0; transition: opacity .12s ease;
+}
+.pcard:hover .puse { opacity: 1; color: var(--text); }
+
+.plink {
+  background: none; border: none; cursor: pointer; padding: 0;
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--text2);
+}
+.plink:hover { color: var(--text); }
 
 .cfoot {
   padding: 12px 2px 0; max-width: 92ch;
@@ -348,6 +408,10 @@ span.q.px { color: var(--rule2); }
 .cfoot b { color: var(--text2); }
 
 @media (max-width: 1200px) {
+  .chainwrap { padding-right: 16px; }
+  .spotrow span {
+    right: 0; top: -8px; background: var(--black); padding-left: 8px;
+  }
   .cside { grid-template-columns: repeat(7, 1fr); }
   .q { font-size: 11px; padding: 4px 3px; }
   .chead .q { font-size: 7.5px; letter-spacing: .04em; }
@@ -1102,3 +1166,59 @@ a { color: inherit; text-decoration: none; }
 .mtabs button.on { color: var(--text); border-bottom-color: var(--text); }
 .mtabs .spacer { flex: 1; }
 .mtabs .note { align-self: center; font-family: var(--mono); font-size: 10px; color: var(--faint); padding-right: 2px; }
+
+
+/* ---- what is coming ----
+   A date list that is read top to bottom once, so everything is on a
+   fixed four-part grid: when, what, how far off, and why it matters.
+   Estimated dates are drawn dashed, which is the same thing the top rule
+   of a panel does elsewhere -- line weight is how this app says "lean on
+   this less", and a calendar entry is no different. */
+.evhead {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  padding: 13px 0 5px; border-bottom: 1px solid var(--rule); margin-bottom: 3px;
+}
+.evrow {
+  display: grid; grid-template-columns: 76px 1fr auto;
+  gap: 4px 10px; padding: 6px 0; align-items: baseline;
+  border-bottom: 1px solid var(--hline);
+}
+.evd {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text);
+  white-space: nowrap;
+}
+.evn { font-size: 12px; color: var(--text); }
+.evx {
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  white-space: nowrap; text-align: right;
+}
+/* The reason sits under the name, in the name's column, so the date
+   column stays a clean edge to run an eye down. */
+.evy {
+  grid-column: 2 / -1; font-size: 10.5px; line-height: 1.5; color: var(--faint);
+}
+
+/* Not confirmed: the date is the estimate, so the date is what goes
+   dashed, and the row says which kind of estimate it is in words. */
+.evrow.est .evd {
+  border-bottom: 1px dashed var(--rule2); color: var(--text2);
+}
+.evn em {
+  font-style: normal; font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  margin-left: 7px; border-bottom: 1px dashed var(--rule2); cursor: help;
+}
+/* A company date outranks a market-wide one for a single stock. */
+.evrow.company .evd, .evrow.company .evn { color: var(--text); font-weight: 600; }
+
+.evflag {
+  margin-top: 9px; padding: 9px 11px; background: var(--sunk);
+  border-left: 2px solid var(--text);
+  font-size: 11.5px; line-height: 1.55; color: var(--text2);
+}
+.evflag b { color: var(--text); font-weight: 600; }
+
+.evfoot {
+  padding-top: 11px; font-size: 10px; line-height: 1.5; color: var(--faint);
+}

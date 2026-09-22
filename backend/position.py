@@ -381,6 +381,8 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         x = lo + (hi - lo) * i / 60
         curve.append({"s": round(x, 2), "pl": round(payoff_at(legs, x), 2)})
 
+    pop = _chance_of_profit(legs, spot, vol, rate, div_yield, bes)
+
     nearest = min((l for l in legs if l["expiry"]), key=lambda l: l["expiry"], default=None)
     days_left = None
     if nearest:
@@ -402,6 +404,7 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "greeks": {k: round(v, 4) for k, v in greeks.items()},
         "share_equivalent": round(greeks["delta"], 1),
         "breakevens": bes,
+        "chance": pop,
         "days_left": days_left,
         "curve": curve,
         **ext,
@@ -577,7 +580,9 @@ def describe(a: Dict[str, Any], name: Optional[str] = None,
     g = a["greeks"]
 
     # ---- what you hold, what it cost, where it stands
-    bits: List[str] = [f"You are in a <b>{s['name'].lower()}</b> on {who}."]
+    name = s["name"].lower()
+    article = "an" if name[:1] in "aeiou" else "a"
+    bits: List[str] = [f"You are in {article} <b>{name}</b> on {who}."]
 
     if cost > 0:
         bits.append(f"It cost you <b>{_usd(cost)}</b> to put on and is worth "
@@ -673,3 +678,49 @@ def _outside(a: Dict[str, Any]) -> bool:
     target = (min(bes) + max(bes)) / 2
     mid = min(c, key=lambda p: abs(p["s"] - target))
     return mid["pl"] < 0
+
+
+def _chance_of_profit(legs: List[Dict[str, Any]], spot: float, vol: float,
+                      rate: float, div_yield: float,
+                      bes: List[float]) -> Optional[float]:
+    """The odds this finishes profitable, under the same lognormal the
+    prices already assume.
+
+    The break-evens cut the price line into regions, and a payoff that is
+    piecewise linear cannot change sign inside one. So: work out the sign
+    of each region by evaluating the middle of it, then add up the
+    probability mass of the regions that pay.
+
+    This is a RISK-NEUTRAL probability -- the drift is (r - q - v^2/2), not
+    whatever you think the stock will do. It is the market's own number,
+    which is what makes it consistent with the prices on the rest of the
+    page, and it is not a forecast.
+    """
+    if not bes or not vol or not spot:
+        return None
+    expiries = [l["expiry"] for l in legs if l["expiry"]]
+    if not expiries:
+        return None
+    years = _years(min(expiries))
+    if not years or years <= 0:
+        return None
+
+    q = div_yield or 0.0
+    drift = (rate - q - 0.5 * vol * vol) * years
+    sd = vol * math.sqrt(years)
+    if sd <= 0:
+        return None
+
+    def above(k: float) -> float:
+        if k <= 0:
+            return 1.0
+        return O._norm_cdf((math.log(spot / k) + drift) / sd)
+
+    edges = [0.0] + sorted(bes) + [float("inf")]
+    total = 0.0
+    for lo, hi in zip(edges, edges[1:]):
+        mid = (lo + hi) / 2 if hi != float("inf") else lo * 1.5 + 1.0
+        if payoff_at(legs, mid) <= 0:
+            continue
+        total += (1.0 if lo <= 0 else above(lo)) - (0.0 if hi == float("inf") else above(hi))
+    return round(max(0.0, min(1.0, total)) * 100, 1)
