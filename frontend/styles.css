@@ -57,6 +57,26 @@
   --rule2:  #3A3A3E;
   --up:     #F2F2F0;   /* used inline where a claim is corroborated */
 
+  /* THE ONE PLACE COLOUR IS ALLOWED
+   *
+   * Everything else here is monochrome on purpose: colour that carries
+   * no information is noise in an instrument. These three carry
+   * information -- they say WHICH LINE IS WHICH, and nothing else.
+   *
+   * Three dashed grey lines over a candle chart are three dashed grey
+   * lines. The dash patterns were meant to tell them apart and do not,
+   * at 1px over a busy price series, which is why the 200-day looked
+   * missing when it was simply indistinguishable.
+   *
+   * Muted and close in luminance so none of them shouts over the price,
+   * and each is keyed to a dot on its own button so the mapping is
+   * readable rather than remembered. They appear only when the line is
+   * switched on, so the default chart stays black and white. Colour
+   * never encodes direction or sentiment anywhere in this app. */
+  --ma20:   #C08A4E;   /* sand */
+  --ma50:   #5C9EAD;   /* teal */
+  --ma200:  #9C87C4;   /* mauve */
+
   --mast:   "Bodoni Moda", Georgia, serif;
   /* GFS Didot, from the Greek Font Society -- a Greek Didone that also cuts
      Latin. Used for the name alone, nowhere else. */
@@ -1605,3 +1625,12 @@ a { color: inherit; text-decoration: none; }
 .indsplit {
   margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hline);
 }
+
+
+/* A dot on the button in the line's own colour, so the mapping between
+   the control and the mark on the chart is visible rather than learned. */
+.cseg button .swatch {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 5px; vertical-align: 1px;
+}
+.cseg button.off-range { opacity: .45; }

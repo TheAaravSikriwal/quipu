@@ -1213,7 +1213,7 @@ function wirePosition(tab) {
   });
 
   const pt = document.getElementById("pre-toggle");
-  if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(); };
+  if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(true); };
 
   document.querySelectorAll("[data-preset]").forEach((b) => {
     b.onclick = () => {
@@ -1233,7 +1233,7 @@ function wirePosition(tab) {
     };
   });
   const pb = document.getElementById("pre-back");
-  if (pb) pb.onclick = () => { u.preset = null; u.legs = []; tab.data = null; render(); };
+  if (pb) pb.onclick = () => { u.preset = null; u.legs = []; tab.data = null; render(true); };
 
   document.querySelectorAll("[data-use]").forEach((b) => {
     b.onclick = () => {
@@ -1259,7 +1259,7 @@ function wirePosition(tab) {
     b.onclick = () => {
       if ((u.unit || "cash") === b.dataset.unit) return;
       u.unit = b.dataset.unit;
-      render();        // no refetch: both numbers are already on every row
+      render(true);    // no refetch: both numbers are already on every row
     };
   });
 
@@ -2025,7 +2025,7 @@ function priceChartTile(d, tab) {
        <div class="cseg">
          ${btn("candles", ui.candles, `data-ptool="candles"`)}
          ${btn("log", ui.log, `data-ptool="log"`)}
-         ${[20, 50, 200].map((p) => btn(String(p), ui.mas[p], `data-pma="${p}"`)).join("")}
+         ${[20, 50, 200].map((p) => `<button data-pma="${p}" class="${ui.mas[p] ? "on" : ""}"><i class="swatch" style="background:var(--ma${p})"></i>${p}</button>`).join("")}
        </div>
        <div class="cseg">
          ${btn("bands", ui.bands, `data-ptool="bands"`)}
@@ -4108,7 +4108,7 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
         // to see one is a puzzle, not an interface.
         ui.crosses = on;
         if (on) { ui.mas[50] = true; ui.mas[200] = true; }
-        render();
+        render(true);
       }
       else { ui.log = on; chart()?.setLog(on); }
     };
@@ -4121,6 +4121,10 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
       b.classList.toggle("on", on);
       ui.mas[p] = on;
       chart()?.setMa(p, on);
+      // A 200-day average on a six-month range draws nothing, and a
+      // lit button over an unchanged chart reads as broken. The note
+      // says why, so it has to be repainted from here too.
+      paintIndicatorNote(tab, chart(), root);
     };
   });
 
@@ -4140,7 +4144,7 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
         // A full re-render, because the panel changes height to make
         // room. Setting it on the chart alone left the pane trying to
         // draw inside the old one and showing nothing.
-        if (keyPrefix === "grid") render();
+        if (keyPrefix === "grid") render(true);
         else { chart()?.setOsc(next); paintIndicatorNote(tab, chart(), root); }
       };
     });
@@ -4156,7 +4160,11 @@ function paintIndicatorNote(tab, chart, root = document) {
   const host = root.querySelector("[data-pind]");
   if (!host) return;
   const ui = tab.ui.priceOpts || {};
-  if ((!ui.osc && !ui.crosses) || !chart?.readings) { host.innerHTML = ""; return; }
+  const anyMa = [20, 50, 200].some((n) => ui.mas?.[n]);
+  if ((!ui.osc && !ui.crosses && !anyMa) || !chart?.readings) {
+    host.innerHTML = "";
+    return;
+  }
 
   const r = chart.readings();
 
@@ -4167,6 +4175,24 @@ function paintIndicatorNote(tab, chart, root = document) {
    * A golden cross is the opposite and is read as strength. Labelling
    * either one wrong would be the exact failure this app exists to
    * avoid, so the panel says which is which and what it means. */
+  /* An average nobody can draw.
+   *
+   * A 200-day average needs 200 days. On a six-month range there is no
+   * such number, so the line is genuinely absent -- and a toggle that
+   * lights up while nothing appears on the chart reads as broken
+   * rather than as a fact about the window you picked. */
+  let missing = "";
+  if (r.have) {
+    const gone = [20, 50, 200].filter((n) => ui.mas[n] && !r.have[n]);
+    if (gone.length) {
+      missing = `<span class="indname">not drawn</span>
+        The ${gone.map((n) => `<b>${n}-day</b>`).join(" and ")} average
+        ${gone.length > 1 ? "need" : "needs"} ${gone.map((n) => n).join(" and ")}
+        sessions of history and this range holds <b>${r.bars}</b>.
+        Pick a longer range to see ${gone.length > 1 ? "them" : "it"}.`;
+    }
+  }
+
   let crossNote = "";
   if (ui.crosses) {
     if (!r.cross && r.above == null) {
@@ -4193,8 +4219,16 @@ function paintIndicatorNote(tab, chart, root = document) {
         strong.</span>`;
     }
   }
-  if (!ui.osc) { host.innerHTML = crossNote; return; }
-  const tail = crossNote ? `<div class="indsplit">${crossNote}</div>` : "";
+  // Stack whichever notes apply, each ruled off from the last so two
+  // different subjects do not read as one run-on sentence.
+  const wrap = (x) => `<div class="indsplit">${x}</div>`;
+  const extras = [crossNote, missing].filter(Boolean);
+  if (!ui.osc) {
+    host.innerHTML = extras.length
+      ? extras[0] + extras.slice(1).map(wrap).join("") : "";
+    return;
+  }
+  const tail = extras.map(wrap).join("");
   if (ui.osc === "rsi") {
     if (r.rsi == null) { host.innerHTML = ""; return; }
     const v = r.rsi;
@@ -4604,8 +4638,6 @@ function wireDashboard(tab) {
   wireChainRows(tab);
   wireModelTabs(tab);
 
-  // Click a panel to enlarge it -- but not when the click was meant for a
-  // link or a control inside it.
   // The calendar's own switch, stopped from reaching the tile beneath
   // it -- clicking a tile zooms it, and a tab that also zoomed would be
   // a control that does two things at once.
@@ -4615,7 +4647,7 @@ function wireDashboard(tab) {
       const t = current();
       if (!t) return;
       t.ui.calSide = b.dataset.calside;
-      render();
+      render(true);
     };
   });
 

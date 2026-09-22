@@ -21,6 +21,10 @@
 
 const PAD = { left: 8, right: 56, top: 10, bottom: 20 };
 
+//: The only colours in the app, and they carry exactly one fact: which
+//: line is which. Held in the stylesheet so the palette is in one place.
+const MA_INK = { 20: "--ma20", 50: "--ma50", 200: "--ma200" };
+
 /* Read the palette from CSS rather than repeating hex values here. The chart
  * colours drifted from the design system last time they were hard-coded. */
 const ink = (name, fallback) => {
@@ -400,9 +404,12 @@ function makeChart(host, opts) {
       }));
     }
 
-    // Moving averages, dashed at three weights so they read as annotation
-    // rather than as a second price series.
-    const dashes = { 20: "2 2", 50: "5 3", 200: "9 4" };
+    // Moving averages. Each in its own colour, because three dashed grey
+    // lines over a candle chart are three dashed grey lines -- the dash
+    // patterns were meant to separate them and do not at this weight,
+    // which is why the 200-day read as missing rather than as present
+    // and indistinguishable. Solid now: the colour does the separating,
+    // so the dashes were only breaking the line up.
     for (const period of [20, 50, 200]) {
       if (!mas[period]) continue;
       const series = sma(all, period);
@@ -413,8 +420,9 @@ function makeChart(host, opts) {
       }
       if (pts.length > 1) {
         svg.appendChild(el("polyline", {
-          points: pts.join(" "), fill: "none", stroke: dim,
-          "stroke-width": 1.2, "stroke-dasharray": dashes[period],
+          points: pts.join(" "), fill: "none",
+          stroke: ink(MA_INK[period], "#A3A3A0"), "stroke-width": 1.3,
+          "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke",
         }));
       }
     }
@@ -755,7 +763,15 @@ function makeChart(host, opts) {
       const xs = crossovers(all, 50, 200);
       const last = xs.length ? xs[xs.length - 1] : null;
       const f = sma(all, 50), sl = sma(all, 200);
+      // Which averages exist over the data actually loaded. A 200-day
+      // average needs 200 days; on a six-month range there is no such
+      // number, and drawing nothing without saying so looks like a
+      // broken chart rather than a fact about the window.
+      const have = {};
+      for (const period of [20, 50, 200]) have[period] = all.length >= period;
       return {
+        bars: all.length,
+        have,
         rsi: r[i] == null ? null : Math.round(r[i] * 10) / 10,
         macd: m.line[i] == null ? null : m.line[i],
         macd_signal: m.signal[i] == null ? null : m.signal[i],
