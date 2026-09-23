@@ -1515,7 +1515,10 @@ function renderAnalysis(tab) {
         ${chip("of what is at risk",
           d.pl_pct == null ? "--" : calc(signed(d.pl_pct, 0), d.working?.pl_pct), plCls)}
         ${chip("worth if closed now", money(d.value_now, 0))}
-        ${chip("break-even", (d.breakevens || []).map((b) => money(b)).join("  /  ") || "--")}
+        ${chip("break-even", (d.breakevens || []).length
+          ? d.breakevens.map((b, i) =>
+              calc(money(b), d.breakeven_working?.[i])).join("  /  ")
+          : "--")}
         ${chip("chance of making money", d.chance == null ? "--" : nf(d.chance, 0) + "%")}
         ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
       </div>
@@ -1529,11 +1532,17 @@ function renderAnalysis(tab) {
 
       <h4>The same thing, as figures</h4>
       <div class="pstats">
-        ${chip("behaves like owning", nf(d.share_equivalent, 0) + " shares")}
+        ${chip("behaves like owning",
+          calc(nf(d.share_equivalent, 0) + " shares", d.greek_working?.delta))}
         ${chip("gain per $1 rise", money(d.greeks.delta, 0))}
-        ${chip("and that grows by", nf(d.greeks.gamma, 1) + " shares / $1")}
-        ${chip("time, each day", (d.greeks.theta >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.theta)), d.greeks.theta >= 0 ? "up" : "down")}
-        ${chip("if volatility rises 1pt", (d.greeks.vega >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.vega)))}
+        ${chip("and that grows by",
+          calc(nf(d.greeks.gamma, 1) + " shares / $1", d.greek_working?.gamma))}
+        ${chip("time, each day",
+          calc((d.greeks.theta >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.theta)),
+               d.greek_working?.theta), d.greeks.theta >= 0 ? "up" : "down")}
+        ${chip("if volatility rises 1pt",
+          calc((d.greeks.vega >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.vega)),
+               d.greek_working?.vega))}
       </div>
 
       <h4>Each leg</h4>

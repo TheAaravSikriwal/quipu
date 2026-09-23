@@ -483,6 +483,8 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "greeks": {k: round(v, 4) for k, v in greeks.items()},
         "share_equivalent": round(greeks["delta"], 1),
         "breakevens": bes,
+        "breakeven_working": _breakeven_working(bes, legs, cost),
+        "greek_working": _greek_working(legs, spot, vol, rate, div_yield),
         "chance": pop,
         "needs": _needs(pay, spot, bes, curve),
         "valued_at": at_expiry,
@@ -893,6 +895,83 @@ def _needs(pay, spot: float, bes: List[float],
 
 def _dollars(v: Optional[float]) -> str:
     return "--" if v is None else f"${v:,.2f}"
+
+
+def _greek_working(legs: List[Dict[str, Any]], spot: float, vol: float,
+                   rate: float, div_yield: float) -> Dict[str, Any]:
+    """The arithmetic behind each greek, for the position's first option.
+
+    Position greeks are sums across legs, and a sum of five products is
+    not a thing anyone reads. What a reader wants is what ONE of them
+    is and where it came from, so the working is for the leading option
+    leg -- the whole position's figure is that, scaled by size and
+    added up, which the panel already says in words.
+    """
+    import working as W                                   # noqa: PLC0415
+
+    leg = next((l for l in legs if l["kind"] != "stock" and l["strike"]), None)
+    if not leg:
+        return {}
+    years = _years(leg["expiry"])
+    if not years:
+        return {}
+
+    is_call = leg["kind"] == "call"
+    out = {"strike": leg["strike"], "kind": leg["kind"], "expiry": leg["expiry"]}
+    for name in ("delta", "gamma", "theta", "vega", "rho"):
+        w = W.greek(name, spot, leg["strike"], years, vol, rate, is_call, div_yield)
+        if w:
+            out[name] = w
+    out["price"] = W.option_price(spot, leg["strike"], years, vol, rate,
+                                  is_call, div_yield)
+    return out
+
+
+def _breakeven_working(bes: List[float], legs: List[Dict[str, Any]],
+                       cost: float) -> List[Dict[str, Any]]:
+    """The arithmetic behind each break-even, where there is any.
+
+    The engine finds these by scanning the payoff and bisecting,
+    because the closed form differs for every structure in the
+    taxonomy. But the ANSWER is usually one simple sum: the strike the
+    payoff bends at, plus or minus what the position cost per share.
+
+    That claim is only made where it holds. Each candidate strike is
+    tried and the sum is kept only if it reproduces the level the scan
+    already found, to within a cent. Where nothing reconstructs it --
+    a butterfly, a ratio, anything bending more than once on the way
+    -- the panel says the level was solved for rather than dressing up
+    a bisection as arithmetic.
+    """
+    import working as W                                   # noqa: PLC0415
+
+    # Per share of the UNDERLYING, not per leg. A vertical is two
+    # contracts and still covers a hundred shares, so dividing by the
+    # number of legs halved the cost and put the break-even in the
+    # wrong place on everything except a single option.
+    lots = max((l["qty"] for l in legs if l["kind"] != "stock"), default=1) or 1
+    per_share = cost / (MULT * lots)
+    strikes = sorted({l["strike"] for l in legs if l["strike"]})
+
+    out = []
+    for be in bes:
+        best = None
+        for k in strikes:
+            for upward in (True, False):
+                # Magnitude here, direction from the flag. A credit
+                # carries a negative cost, so adding it moved the level
+                # the wrong way -- and printed "95 + 3 = 92", which is
+                # an arithmetic error sitting in a tooltip whose entire
+                # job is showing arithmetic.
+                level = k + abs(per_share) if upward else k - abs(per_share)
+                if abs(level - be) < 0.01:
+                    best = (k, upward)
+                    break
+            if best:
+                break
+        out.append(W.breakeven_from(be, best[0], per_share, best[1]) if best
+                   else W.breakeven_solved(be))
+    return out
 
 
 def _chance_of_profit(pay, legs: List[Dict[str, Any]], spot: float, vol: float,

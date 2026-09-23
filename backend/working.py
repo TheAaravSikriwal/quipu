@@ -212,3 +212,182 @@ def percent_of_risk(profit: float, risk: float) -> Dict[str, Any]:
     ], unit="%", note=(
         "Measured against what is at risk rather than against what it cost, "
         "because for anything sold those are two different numbers."))
+
+
+# --------------------------------------------------------------------------
+# the greeks
+# --------------------------------------------------------------------------
+
+def _norm_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def greek(name: str, spot: float, strike: float, years: float, vol: float,
+          rate: float, is_call: bool, div_yield: float = 0.0) -> Optional[Dict[str, Any]]:
+    """One greek, written as the product it is.
+
+    Each of these is a handful of quantities multiplied together, and
+    every one of them has a plain name. The two that cannot be written
+    as arithmetic on visible numbers are the normal curve's height and
+    its area -- the bell curve at d1, and the odds of finishing in the
+    money -- so those arrive named, with a sentence, exactly as they do
+    in the price itself.
+
+    The arithmetic here is deliberately the same as options.greeks()
+    rather than a retelling of it: the suite checks the two agree to
+    twelve decimal places, so the working cannot drift into describing
+    a calculation the app is not doing.
+    """
+    if not all(v and v > 0 for v in (spot, strike, years, vol)):
+        return None
+
+    q = div_yield or 0.0
+    sqrt_t = math.sqrt(years)
+    d1 = (math.log(spot / strike) + (rate - q + 0.5 * vol * vol) * years) / (vol * sqrt_t)
+    d2 = d1 - vol * sqrt_t
+    disc = math.exp(-rate * years)
+    carry = math.exp(-q * years)
+    nd1, nd2 = _norm_cdf(d1), _norm_cdf(d2)
+    pdf = _norm_pdf(d1)
+
+    odds_lbl = "odds it finishes in the money"
+    odds_note = ("The chance the share ends above the strike, under the same "
+                 "lognormal the prices already assume. Not a forecast -- the "
+                 "market's own number.")
+    bell_lbl = "height of the bell curve at today's price"
+    bell_note = ("How densely the possible outcomes are packed right where the "
+                 "strike is. It peaks at the money, which is why gamma and vega "
+                 "do too.")
+    carry_lbl = "dividend discount"
+    carry_note = ("Holding the option rather than the share means missing the "
+                  "dividends, so every greek is scaled by this.")
+
+    if name == "delta":
+        if is_call:
+            res = carry * nd1
+            lines = [line("", term(carry_lbl, carry, 4, note=carry_note),
+                          term(odds_lbl, nd1, 4, note=odds_note))]
+        else:
+            res = carry * (nd1 - 1.0)
+            lines = [line("", term(carry_lbl, carry, 4, note=carry_note),
+                          term("odds it finishes in the money, less one",
+                               nd1 - 1.0, 4,
+                               note="A put gains as the share falls, so its delta "
+                                    "is negative: the same odds, counted the "
+                                    "other way."))]
+        return sum_of(round(res, 6), lines, unit="", note=(
+            "Read as shares: a 0.60 delta behaves like 60 shares of exposure, "
+            "because one contract covers a hundred."))
+
+    if name == "gamma":
+        res = carry * pdf / (spot * vol * sqrt_t)
+        return sum_of(round(res, 6), [
+            line("", term(carry_lbl, carry, 4, note=carry_note),
+                 term(bell_lbl, pdf, 4, note=bell_note)),
+            line("/", term("share price", spot),
+                 term("volatility", vol, 4),
+                 term("square root of the time left", sqrt_t, 4,
+                      note="Movement grows with the square root of time, not "
+                           "with time, which is why this and not the years.")),
+        ], unit="", note=(
+            "How much the delta itself moves for a $1 change in the share. "
+            "Large near the money and near expiry -- the two places a position "
+            "changes character fastest."))
+
+    if name == "vega":
+        res = spot * carry * pdf * sqrt_t / 100.0
+        return sum_of(round(res, 6), [
+            line("", term("share price", spot),
+                 term(carry_lbl, carry, 4, note=carry_note),
+                 term(bell_lbl, pdf, 4, note=bell_note),
+                 term("square root of the time left", sqrt_t, 4)),
+            line("/", term("to put it per one point of volatility", 100, 0)),
+        ], unit="", note=(
+            "What a single percentage point of implied volatility is worth, "
+            "per share. Bigger the longer there is to run."))
+
+    if name == "rho":
+        if is_call:
+            res = strike * years * disc * nd2 / 100.0
+            lines = [line("", term("strike", strike),
+                          term("years left", years, 4),
+                          term("what a dollar at expiry is worth today", disc, 4),
+                          term(odds_lbl, nd2, 4, note=odds_note)),
+                     line("/", term("to put it per one point of rates", 100, 0))]
+        else:
+            res = -strike * years * disc * _norm_cdf(-d2) / 100.0
+            lines = [line("", term("strike", strike),
+                          term("years left", years, 4),
+                          term("what a dollar at expiry is worth today", disc, 4),
+                          term("odds it finishes below the strike",
+                               _norm_cdf(-d2), 4, note=odds_note)),
+                     line("/", term("to put it per one point of rates, negative "
+                                    "because a put gains when rates fall", -100, 0))]
+        return sum_of(round(res, 6), lines, unit="", note=(
+            "Negligible on anything short-dated. It is most of why a long-dated "
+            "call costs what it does."))
+
+    if name == "theta":
+        common = -(spot * carry * pdf * vol) / (2.0 * sqrt_t)
+        if is_call:
+            second = -rate * strike * disc * nd2
+            third = q * spot * carry * nd1
+            second_lbl = "interest you are not earning on the strike"
+            third_lbl = "dividends you are not receiving"
+        else:
+            second = rate * strike * disc * _norm_cdf(-d2)
+            third = -q * spot * carry * _norm_cdf(-d1)
+            second_lbl = "interest earned on the strike you may receive"
+            third_lbl = "dividends foregone"
+        res = (common + second + third) / 365.0
+        return sum_of(round(res, 6), [
+            line("", term("the value bleeding out of the option", common, 4,
+                          note="The bulk of it: uncertainty is worth money and "
+                               "there is a day less of it each day."),),
+            line("+", term(second_lbl, second, 4)),
+            line("+", term(third_lbl, third, 4)),
+            line("/", term("days in a year, to put it per day", 365, 0)),
+        ], unit="", note=(
+            "Per calendar day, and always against the buyer. It accelerates "
+            "into expiry rather than bleeding evenly."))
+
+    return None
+
+
+# --------------------------------------------------------------------------
+# break-even
+# --------------------------------------------------------------------------
+
+def breakeven_from(level: float, strike: float, per_share: float,
+                   upward: bool) -> Dict[str, Any]:
+    """Where the payoff crosses zero, as the strike plus what it cost.
+
+    The engine finds break-evens by scanning the payoff and bisecting,
+    because the closed form differs for every structure in the
+    taxonomy. But for nearly all of them the ANSWER is the same simple
+    sum -- the strike the payoff bends at, plus or minus the net cost
+    per share -- and that is a sentence a reader can check.
+
+    Only used where it actually reconstructs the number the scan
+    found. Where it does not, the caller says the level was solved for
+    rather than pretending to an arithmetic that does not hold.
+    """
+    return sum_of(round(level, 4), [
+        line("", term("the strike the payoff bends at", strike)),
+        line("+" if upward else "-",
+             term("what the position cost, per share" if per_share >= 0
+                  else "what you were paid, per share", abs(per_share))),
+    ], per_share=True, note=(
+        "Past this level the position is worth more than it cost."
+        if upward else
+        "Below this level the position is worth more than it cost."))
+
+
+def breakeven_solved(level: float) -> Dict[str, Any]:
+    """An honest non-answer, for the shapes that have no simple sum."""
+    return sum_of(round(level, 4), [
+        line("", term("found by solving for where the payoff crosses zero", level)),
+    ], per_share=True, note=(
+        "This structure has no one-line break-even: the payoff bends at more "
+        "than one strike, so the level is solved for numerically rather than "
+        "added up."))

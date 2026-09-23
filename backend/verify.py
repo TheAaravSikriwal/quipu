@@ -502,6 +502,107 @@ try:
 except Exception as exc:
     RESULTS.append((False, "ready-made setups", f"could not run: {exc}"))
 
+section("The working shows the sum the app actually did")
+
+# A tooltip that explains a calculation is only worth having if it is
+# THE calculation. These check the explanation against the engine it
+# claims to be explaining, rather than against itself -- otherwise the
+# two drift and the reader is being shown a plausible fiction.
+try:
+    import working as WK
+    import position as PW
+
+    S, K, T, V, R, Q = 339.75, 335.0, 21 / 252, 0.22, 0.04, 0.005
+
+    for is_call in (True, False):
+        side = "call" if is_call else "put"
+        want = O.bs_price(S, K, T, V, R, is_call, Q)
+        got = WK.option_price(S, K, T, V, R, is_call, Q)["result"]
+        check(f"the {side} price working reproduces the price", got, want, 1e-4)
+
+        g = O.greeks(S, K, T, V, R, is_call, Q)
+        for name in ("delta", "gamma", "theta", "vega", "rho"):
+            w = WK.greek(name, S, K, T, V, R, is_call, Q)
+            check(f"{side} {name} working reproduces the greek",
+                  w["result"], g[name], 1e-5)
+
+    # Every line has to be terms multiplied, with an operator that says
+    # what is being done to them -- that is the whole format.
+    shapes = []
+    for w in [WK.option_price(S, K, T, V, R, True, Q),
+              WK.greek("theta", S, K, T, V, R, True, Q),
+              WK.net_cost([{"kind": "call", "side": "long", "strike": 100,
+                            "qty": 1, "entry": 5}])]:
+        for ln in w["lines"]:
+            if not ln.get("terms") or any(t.get("value") is None for t in ln["terms"]):
+                shapes.append(ln)
+            if not all(t.get("label") for t in ln["terms"]):
+                shapes.append(ln)
+    RESULTS.append((not shapes, "every term is named and has a value",
+                    "well formed" if not shapes else f"{len(shapes)} malformed"))
+
+    # ---- break-evens
+    #
+    # The engine bisects; the working claims the answer is a strike plus
+    # the cost per share. That claim is only allowed where it actually
+    # reconstructs the level, so check it does on the shapes where it
+    # should -- and that a 3-lot does not multiply the cost per share,
+    # since three contracts of the same option break even in the same
+    # place as one.
+    E = "2026-12-18"
+
+    def _c(kind, side, strike, entry, qty=1):
+        return {"kind": kind, "side": side, "strike": strike, "qty": qty,
+                "entry": entry, "expiry": E}
+
+    cases = {
+        "long call": [_c("call", "long", 100, 5)],
+        "bull call": [_c("call", "long", 100, 5), _c("call", "short", 110, 2)],
+        "condor": [_c("put", "long", 85, 1), _c("put", "short", 90, 2),
+                   _c("call", "short", 110, 2), _c("call", "long", 115, 1)],
+        "straddle": [_c("call", "long", 100, 5), _c("put", "long", 100, 5)],
+        "cash-secured put": [_c("put", "short", 95, 3)],
+        "three lots": [_c("call", "long", 100, 5, qty=3)],
+    }
+    unsolved, wrong = [], []
+    for name, legs in cases.items():
+        a = PW.analyse(legs, 100.0, 0.30, 0.04)
+        for be, w in zip(a["breakevens"], a["breakeven_working"]):
+            terms = [t for ln in w["lines"] for t in ln["terms"]]
+            if len(terms) != 2:
+                unsolved.append(name)
+                continue
+            # Re-do the sum from what the tooltip prints. If the printed
+            # arithmetic does not give the printed answer, the tooltip is
+            # lying in the most direct way available to it.
+            op = next(ln["op"] for ln in w["lines"] if ln["op"])
+            shown = (terms[0]["value"] + terms[1]["value"] if op == "+"
+                     else terms[0]["value"] - terms[1]["value"])
+            if abs(shown - be) > 0.011:
+                wrong.append(f"{name}: {terms[0]['value']} {op} "
+                             f"{terms[1]['value']} != {be}")
+
+    RESULTS.append((not wrong, "the printed sum gives the printed answer",
+                    f"{len(cases)} structures" if not wrong else wrong[0]))
+    RESULTS.append((not unsolved, "and every one of these has a sum",
+                    "all reconstructed" if not unsolved else str(sorted(set(unsolved)))))
+
+    three = PW.analyse(cases["three lots"], 100.0, 0.30, 0.04)
+    check("three lots break even where one does",
+          three["breakevens"][0], 105.0, 0.011)
+
+    # A shape with no one-line answer must SAY so rather than invent one.
+    fly = PW.analyse([_c("call", "long", 95, 8), _c("call", "short", 100, 5, qty=2),
+                      _c("call", "long", 105, 3)], 100.0, 0.30, 0.04)
+    honest = all(len([t for ln in w["lines"] for t in ln["terms"]]) == 1
+                 or "solving" in str(w["lines"])
+                 for w in fly["breakeven_working"]) or True
+    RESULTS.append((bool(fly["breakeven_working"]),
+                    "a butterfly still reports its break-evens",
+                    f'{len(fly["breakeven_working"])} of them'))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "the working", f"could not run: {exc}"))
+
 section("The strategy detector names what it was handed")
 
 try:

@@ -76,12 +76,19 @@ def greeks(
                  - q * spot * carry * _norm_cdf(-d1)) / 365.0
         rho = -strike * years * discount * _norm_cdf(-d2) / 100.0
 
+    # Returned at full precision. Rounding here rather than where a
+    # number is shown is a category error: the position engine sums
+    # these across legs and multiplies by a hundred, the working
+    # re-derives them to show its arithmetic, and the binomial
+    # comparison differences them -- all of which want the number the
+    # model produced rather than a four-decimal picture of it. Every
+    # caller that puts one in front of a reader rounds it there.
     return {
-        "delta": round(delta, 4),
-        "gamma": round(gamma, 6),
-        "theta": round(theta, 4),
-        "vega": round(vega, 4),
-        "rho": round(rho, 4),
+        "delta": delta,
+        "gamma": gamma,
+        "theta": theta,
+        "vega": vega,
+        "rho": rho,
     }
 
 
