@@ -398,7 +398,7 @@ function patchLive(tab) {
   });
 
   reWireGreeksTile(tab);
-  wireChainRows(tab);
+  wireTileControls(tab);
   renderTabs();
 
   // Today's bars grow through the session. Only the 1D frame can have
@@ -3440,10 +3440,18 @@ const DETAIL = {
         <div class="cseg">
           ${btn("candles", ui.candles, `data-ztool="candles"`)}
           ${btn("log", ui.log, `data-ztool="log"`)}
-          ${[20, 50, 200].map((p) => btn(String(p), ui.mas[p], `data-zma="${p}"`)).join("")}
+          ${[20, 50, 200].map((p) => `<button data-zma="${p}" class="${ui.mas[p] ? "on" : ""}">
+            <i class="swatch" style="background:var(--ma${p})"></i>${p}</button>`).join("")}
+        </div>
+        <div class="cseg">
+          ${btn("bands", ui.bands, `data-ztool="bands"`)}
+          ${btn("50/200 cross", ui.crosses, `data-ztool="crosses"`)}
+          ${btn("RSI", ui.osc === "rsi", `data-zosc="rsi"`)}
+          ${btn("MACD", ui.osc === "macd", `data-zosc="macd"`)}
         </div>
       </div>
       <div class="qchart-host zoomchart" data-zprice style="height:460px"></div>
+      <div class="indnote" data-pind></div>
       <div class="cstats" data-zstats></div>
       <div class="qchart-hint" style="opacity:.8">drag to zoom &middot; shift-drag to pan &middot;
         scroll to scale &middot; double-click to reset</div>
@@ -3666,11 +3674,19 @@ const DETAIL = {
     if (!o?.available) return `<div class="prose">No listed options.</div>`;
     const exp = o.expiries[Math.min(tab.ui.expiryIdx, o.expiries.length - 1)];
     const spot = o.spot || d.quote?.price;
+    /* The same rows as the grid's picker, and selectable the same way.
+     * They were a read-only table: clicking a strike in the tile chose
+     * it, clicking what looks like the same row in the opened panel did
+     * nothing at all. An interface that answers in one place and not
+     * the other is worse than one that never answers. */
+    const chosen = tab.ui.strike;
     const side = (label, book) => `<h4>${label} &mdash; ${esc(exp.expiry)} (${exp.days_to_expiry}d)</h4>
       <div class="row head" style="grid-template-columns:64px 58px 58px 52px 58px 64px 58px 58px 66px">
         <span>strike</span><span>mark</span><span>last</span><span>iv</span><span>delta</span>
         <span>gamma</span><span>theta</span><span>vega</span><span>open int</span></div>
-      ${book.map((r) => `<div class="row ${Math.abs(r.strike - spot) < 0.01 ? "sel" : ""}"
+      ${book.map((r) => `<div class="row chain ${
+          (chosen != null ? r.strike === chosen : Math.abs(r.strike - spot) < 0.01) ? "sel" : ""}"
+          data-strike="${r.strike}"
           style="grid-template-columns:64px 58px 58px 52px 58px 64px 58px 58px 66px">
           <span>${nf(r.strike, 1)}${r.itm ? "*" : ""}</span><span>${nf(r.mark ?? r.last, 2)}</span>
           <span>${nf(r.last, 2)}</span><span>${r.iv ? nf(r.iv, 0) : "--"}</span>
@@ -4659,7 +4675,10 @@ function mountPriceChart(tab, host, keyPrefix, statsSel, keepZoom = true) {
   // toggle is clicked: changing the range or a live refresh both mount a
   // new chart, and a stale "RSI 71" under a different window is worse
   // than none at all.
-  paintIndicatorNote(tab, chart);
+  // The panel and the grid each have their own note element. Write to
+  // the one belonging to this chart, not to whichever comes first in
+  // the document.
+  paintIndicatorNote(tab, chart, host.closest("#overlay") || document);
   return chart;
 }
 
@@ -4743,7 +4762,12 @@ function wirePriceControls(tab, scope, attrs, host, statsSel, keyPrefix) {
  * the whole argument of this app is that a number should arrive with its
  * interpretation attached rather than assume the reader supplies one. */
 function paintIndicatorNote(tab, chart, root = document) {
-  const host = root.querySelector("[data-pind]");
+  /* Scoped to the root it was given, and the root defaults to whichever
+   * one the chart is actually in. Looking it up on `document` found the
+   * grid's note first, so switching an indicator inside an opened panel
+   * silently updated the copy behind the panel and left the one in
+   * front of you blank. */
+  const host = (root.querySelector ? root : document).querySelector("[data-pind]");
   if (!host) return;
   const ui = tab.ui.priceOpts || {};
   const anyMa = [20, 50, 200].some((n) => ui.mas?.[n]);
@@ -4860,7 +4884,8 @@ function mountZoomCharts(tab) {
     mountPriceChart(tab, zHost, "zoom", "[data-zstats]");
     wirePriceControls(
       tab, document.querySelector(".zoom"),
-      { range: "data-zrange", tool: "data-ztool", ma: "data-zma" },
+      { range: "data-zrange", tool: "data-ztool", ma: "data-zma",
+        osc: "data-zosc" },
       () => document.querySelector("[data-zprice]"), "[data-zstats]", "zoom"
     );
   }
@@ -5221,21 +5246,9 @@ function wireDashboard(tab) {
     repaintGreeks(tab);
   });
 
-  wireChainRows(tab);
-  wireModelTabs(tab);
-
-  // The calendar's own switch, stopped from reaching the tile beneath
-  // it -- clicking a tile zooms it, and a tab that also zoomed would be
-  // a control that does two things at once.
-  document.querySelectorAll("[data-calside]").forEach((b) => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const t = current();
-      if (!t) return;
-      t.ui.calSide = b.dataset.calside;
-      render(true);
-    };
-  });
+  // Every control a tile body can hold, wired in one place so the grid
+  // and the opened panel cannot drift apart.
+  wireTileControls(tab);
 
   document.querySelectorAll(".tile[data-tile]").forEach((el) => {
     el.onclick = (e) => {
@@ -5255,6 +5268,10 @@ function wireZoom(tab) {
   const close = document.getElementById("zoom-close");
   if (close) close.onclick = () => closeZoom(tab);
   overlay.onclick = (e) => { if (!e.target.closest("#zoombox")) closeZoom(tab); };
+
+  // The same controls the grid gets. Without this every button inside a
+  // panel that was not explicitly listed below is inert.
+  wireTileControls(tab, overlay);
 
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onchange = fn; };
   on("gkz-exp", (e) => { tab.ui.expiryIdx = Number(e.target.value); tab.ui.strike = null; repaintGreeks(tab); });
@@ -5299,21 +5316,63 @@ function setTileBody(id) {
   if (badge) badge.innerHTML = BADGES[id] || "";
 }
 
-function wireModelTabs(tab) {
-  document.querySelectorAll(".mtabs button[data-model]").forEach((el) => {
+/* Everything a TILE BODY can contain, wired inside one given root.
+ *
+ * The close-up is built outside the render cycle -- openZoom appends it
+ * straight to the viewport and calls a handful of wiring functions by
+ * hand -- so a control added to a tile went on working in the grid and
+ * was quietly dead in the panel. The calendar's two tabs did nothing at
+ * all when opened, which is exactly the kind of failure that makes a
+ * reader stop trusting the whole interface.
+ *
+ * So both paths call this, with `document` for the grid and the overlay
+ * for the panel. Anything new belongs here rather than in either
+ * caller, and then it cannot be wired in one place and not the other.
+ */
+function wireTileControls(tab, root = document) {
+  root.querySelectorAll(".mtabs button[data-model]").forEach((el) => {
     el.onclick = (e) => {
       e.stopPropagation();
       tab.ui.model = el.dataset.model;
       repaintGreeks(tab);
     };
   });
-}
 
-function wireChainRows(tab) {
-  document.querySelectorAll(".chain[data-strike]").forEach((el) => {
-    el.onclick = (e) => { e.stopPropagation(); tab.ui.strike = Number(el.dataset.strike); repaintGreeks(tab); };
+  root.querySelectorAll(".chain[data-strike]").forEach((el) => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      tab.ui.strike = Number(el.dataset.strike);
+      repaintGreeks(tab);
+    };
+  });
+
+  root.querySelectorAll("[data-calside]").forEach((b) => {
+    b.onclick = (e) => {
+      // Stopped from reaching the tile beneath: clicking a tile opens
+      // it, and a tab that also opened it would do two things at once.
+      e.stopPropagation();
+      const t = current();
+      if (!t) return;
+      t.ui.calSide = b.dataset.calside;
+      if (t.ui.zoom === "calendar") {
+        // Inside the panel, repaint the panel rather than the page --
+        // a full render rebuilds the grid underneath and leaves the
+        // open panel showing the version it was opened with.
+        eventsTile(t.data, t);                 // regenerates BODIES.calendar
+        setTileBody("calendar");
+        const inner = document.querySelector(".zoom .inner");
+        if (inner) {
+          inner.innerHTML = BODIES.calendar;
+          gloss(inner);
+          wireTileControls(t, inner);
+        }
+      } else {
+        render(true);
+      }
+    };
   });
 }
+
 
 /** Redraw only what a greeks selection affects: that tile, the chain, and the
  *  open panel if it happens to be showing either of them. */
@@ -5325,8 +5384,7 @@ function repaintGreeks(tab) {
   setTileBody("greeks");
   setTileBody("chain");
   setTileBody("probability");
-  wireChainRows(tab);
-  wireModelTabs(tab);
+  wireTileControls(tab);
   reWireGreeksTile(tab);
 
   const inner = document.querySelector(".zoom .inner");

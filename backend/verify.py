@@ -225,6 +225,25 @@ try:
     RESULTS.append((0 <= dd <= 100 and dd >= (1 - year.iloc[-1] / year.max()) * 100 - 1e-6,
                     "AAPL drawdown is sane", f"{dd:.2f}%"))
 
+    # A trailing bar with no price in it.
+    #
+    # Yahoo emits a placeholder row for the current session before it
+    # has a close. Left in, every positional lookup shifts by one and
+    # the last close is NaN -- so price, the distance from every moving
+    # average and most of the row go NaN with it, and the symbol fails
+    # the price gate and vanishes from the rankings. It happens on some
+    # days and not others, which is the worst way for a bug to arrive.
+    stub = raw.copy()
+    stub.loc[stub.index[-1] + pd.Timedelta(days=1), :] = np.nan
+    m2 = SC.measure(stub)
+    check("a trailing empty bar does not become the price",
+          m2.loc["AAPL", "price"], m.loc["AAPL", "price"], 1e-9)
+    check("nor shift the momentum window",
+          m2.loc["AAPL", "mom_12_1"], m.loc["AAPL", "mom_12_1"], 1e-9)
+    RESULTS.append((bool(np.isfinite(m2.loc["AAPL", "from_200"])),
+                    "nor leave the moving averages undefined",
+                    f'{m2.loc["AAPL", "from_200"]:.2f}%'))
+
     # R-squared is a proportion.
     r2 = m.loc["AAPL", "trend_r2"]
     RESULTS.append((0 <= r2 <= 1, "trend R^2 within [0,1]", f"{r2:.3f}"))

@@ -144,6 +144,21 @@ def measure(frame: pd.DataFrame) -> pd.DataFrame:
     close = frame["Close"].dropna(axis=1, how="all")
     if close.empty:
         return pd.DataFrame()
+
+    # Drop trailing rows that carry no close for anything.
+    #
+    # Yahoo emits a placeholder bar for the current session before it
+    # has a price in it. Left in place, close.iloc[-1] is NaN -- so the
+    # price, the distance from every moving average and most of the row
+    # go NaN with it, the symbol silently fails the price gate and
+    # disappears from the rankings. It also shifts every positional
+    # lookup by one, so the twelve-month momentum quietly measures a
+    # different year than it claims to.
+    while len(close) and bool(close.iloc[-1].isna().all()):
+        close = close.iloc[:-1]
+    if close.empty:
+        return pd.DataFrame()
+    frame = frame.loc[close.index]
     high, low = frame["High"][close.columns], frame["Low"][close.columns]
     volume = frame["Volume"][close.columns]
 
