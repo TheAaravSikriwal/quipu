@@ -527,21 +527,6 @@ def live(symbol: str) -> Dict[str, Any]:
     }
 
 
-def _events(symbol, earnings, fundamentals):
-    """The calendar, or nothing. Never enough to fail the page over."""
-    try:
-        return events.upcoming(symbol, horizon=180, earnings=earnings,
-                               fundamentals=fundamentals)
-    except Exception as exc:                       # noqa: BLE001
-        return {"events": [], "error": str(exc)}
-
-
-@app.get("/api/events")
-def market_events(horizon: int = 180) -> Dict[str, Any]:
-    """The market-wide calendar on its own, with no ticker attached."""
-    return events.upcoming(None, horizon=horizon)
-
-
 def _events(symbol, earnings, fundamentals, dividends=None, filings=None):
     """The calendar, or nothing. Never enough to fail the whole page."""
     try:

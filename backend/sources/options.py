@@ -607,7 +607,24 @@ def fetch_options(symbol: str, max_expiries: int = 4,
         listed = []
         refused = "ratelimit" in type(exc).__name__.lower() or "429" in str(exc)
 
-    expiries = [only] if (only and only in listed) else listed[:max_expiries]
+    if only and only in listed:
+        expiries = [only]
+    else:
+        # Skip a board that expires today unless it was asked for by name.
+        #
+        # With no sessions left there is no time for volatility to act
+        # in, so every implied vol solved off it is noise: Apple's
+        # expiring board came back with an at-the-money reading of
+        # 3.19% and a deep in-the-money call at 368%, both of which are
+        # arithmetic on a time-to-expiry that has been floored to
+        # something non-zero purely to avoid dividing by it.
+        #
+        # The expiry is still listed and still selectable -- someone
+        # closing a position today needs it -- it is just not what the
+        # board opens on.
+        today = datetime.now(timezone.utc).date().isoformat()
+        future = [e for e in listed if e > today] or listed
+        expiries = future[:max_expiries]
     if not expiries:
         return {
             "available": False,

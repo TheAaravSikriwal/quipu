@@ -968,6 +968,68 @@ try:
 except Exception as exc:
     RESULTS.append((False, "filed accounts", f"could not run: {exc}"))
 
+section("The board opens on an expiry that has time left in it")
+
+# An option expiring today has no sessions left, so there is no time
+# for volatility to act in and every implied vol solved off it is
+# noise. Apple's expiring board came back with an at-the-money reading
+# of 3.19% and a deep in-the-money call at 368% -- both arithmetic on a
+# time-to-expiry that had been floored to something non-zero purely to
+# avoid dividing by it.
+#
+# The expiry stays listed and selectable, because someone closing a
+# position today needs it. It is just not what the board opens on.
+try:
+    from datetime import date as _date
+
+    board = O.fetch_options("AAPL", max_expiries=1, div_yield=0.0)
+    if not board.get("available"):
+        RESULTS.append((None, "  [SKIP] option board -- " + str(board.get("reason"))[:40], ""))
+    else:
+        exp = board["expiries"][0]
+        RESULTS.append((exp["trading_days"] >= 1,
+                        "the default board has at least one session left",
+                        f'{exp["expiry"]}, {exp["trading_days"]} trading days'))
+
+        atm = (exp.get("stats") or {}).get("atm_iv")
+        RESULTS.append((atm is not None and 5 < atm < 200,
+                        "and its at-the-money volatility is a real number",
+                        f"{atm}%"))
+
+        # Asking for the expiring board by name must still return it --
+        # skipping it by default is a choice about where to start, not
+        # a refusal to show it.
+        listed = board.get("all_expiries") or []
+        today = _date.today().isoformat()
+        past = [e for e in listed if e <= today]
+        if past:
+            named = O.fetch_options("AAPL", max_expiries=1, div_yield=0.0, only=past[0])
+            RESULTS.append((named.get("available")
+                            and named["expiries"][0]["expiry"] == past[0],
+                            "but asking for today's board by name still returns it",
+                            past[0]))
+        else:
+            RESULTS.append((True, "no board expires today", "nothing to skip"))
+
+        # The gap the new column shows is a subtraction, so it has to be
+        # the subtraction: implied for THIS strike less the one realised
+        # figure for the share.
+        import statistics as _st
+        import app as _APP
+        rv = (_APP._realised_vol("AAPL") or {}).get("rv20")
+        near = sorted((c for c in exp["calls"] if c.get("iv")),
+                      key=lambda c: abs(c["strike"] - (board.get("spot") or 0)))[:5]
+        RESULTS.append((bool(rv is not None and near),
+                        "realised volatility is available to compare against",
+                        f"{rv}% over 20 sessions"))
+        if rv and near:
+            spread = _st.mean(abs(c["iv"] - rv) for c in near)
+            RESULTS.append((spread < 25,
+                            "near-the-money implied sits near realised",
+                            f"mean gap {spread:.1f} points across {len(near)} strikes"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "option board default", f"could not run: {exc}"))
+
 section("A fund reports what is actually in it")
 
 try:
@@ -1197,6 +1259,56 @@ try:
 except Exception as exc:
     RESULTS.append((False, "duplicate key scan", f"could not run: {exc}"))
 
+section("Nothing in the backend is defined twice")
+
+# A patch applied twice left two `_events` and two `@app.get("/api/events")`
+# sitting fifteen lines apart. Python keeps the LAST function definition
+# and FastAPI serves the FIRST matching route, so the two halves of the
+# duplicate disagreed about which copy was live -- and the stale
+# three-argument `_events` above the real one read like the truth to
+# anyone scrolling past it.
+#
+# It happened to be harmless because the bodies agreed. The next one
+# will not be, so it gets caught by shape rather than by luck.
+try:
+    shadowed, routes = [], []
+    root = Path(__file__).resolve().parent
+    for name in sorted(_os.listdir(root)):
+        if not name.endswith(".py"):
+            continue
+        try:
+            tree = _ast.parse(open(_os.path.join(root, name), encoding="utf-8").read())
+        except (OSError, SyntaxError):
+            continue
+
+        # Top-level defs only: a method repeated across two classes is
+        # fine, two defs of the same name in one module is not.
+        seen = _c.Counter(n.name for n in tree.body
+                          if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)))
+        shadowed += [f"{name}:{fn}" for fn, n in seen.items() if n > 1]
+
+        for node in tree.body:
+            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if (isinstance(dec, _ast.Call)
+                        and isinstance(dec.func, _ast.Attribute)
+                        and dec.args
+                        and isinstance(dec.args[0], _ast.Constant)
+                        and isinstance(dec.args[0].value, str)
+                        and dec.args[0].value.startswith("/")):
+                    routes.append(f"{dec.func.attr.upper()} {dec.args[0].value}")
+
+    RESULTS.append((not shadowed, "no function is defined twice in one module",
+                    "clean" if not shadowed else ", ".join(shadowed[:4])))
+
+    dup_routes = [r for r, n in _c.Counter(routes).items() if n > 1]
+    RESULTS.append((not dup_routes, "no URL is registered by two handlers",
+                    f"{len(routes)} routes, all distinct" if not dup_routes
+                    else ", ".join(dup_routes[:4])))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "duplicate definition scan", f"could not run: {exc}"))
+
 section("Source files carry no corrupted escapes")
 
 # A patch once wrote literal backspace bytes where a regex word boundary
@@ -1296,9 +1408,23 @@ if __name__ == "__main__":
         if ok is None:
             print(f"\n{name}\n{'-' * len(name)}")
             continue
-        mark = "PASS" if ok else "FAIL"
+        # `A and B` returns B in Python, so an entry written as
+        # `x is not None and some_list` puts a LIST here rather than a
+        # bool -- and `passed += ok` then killed the whole run with a
+        # TypeError after most of it had already printed. Coerced, so a
+        # sloppy entry fails loudly as itself instead of taking the
+        # summary down with it.
+        good = bool(ok)
+        # numpy's bool comes back from every pandas comparison and
+        # coerces exactly like the builtin, so it is not worth naming.
+        # A list or a dict here is the real tell: it means the entry was
+        # written `x is not None and some_list`, and Python's `and`
+        # returned the list rather than a verdict.
+        if isinstance(ok, (list, dict, tuple, set, str)):
+            detail = f"{detail}  (result was a {type(ok).__name__}, not a verdict)"
+        mark = "PASS" if good else "FAIL"
         print(f"  [{mark}] {name:<42} {detail}")
-        passed += ok
-        failed += not ok
+        passed += good
+        failed += not good
     print(f"\n{passed} passed, {failed} failed")
     sys.exit(1 if failed else 0)

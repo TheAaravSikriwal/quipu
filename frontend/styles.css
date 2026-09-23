@@ -308,7 +308,7 @@ body {
   border-bottom: 1px solid var(--hline);
 }
 .cside {
-  display: grid; grid-template-columns: repeat(7, 1fr);
+  display: grid; grid-template-columns: repeat(8, 1fr);
   align-items: stretch;
 }
 
@@ -458,7 +458,7 @@ span.q.px { color: var(--rule2); }
   .spotrow span {
     right: 0; top: -8px; background: var(--black); padding-left: 8px;
   }
-  .cside { grid-template-columns: repeat(7, 1fr); }
+  .cside { grid-template-columns: repeat(8, 1fr); }
   .q { font-size: 11px; padding: 4px 3px; }
   .chead .q { font-size: 7.5px; letter-spacing: .04em; }
 }
@@ -2129,3 +2129,11 @@ a { color: inherit; text-decoration: none; }
   margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--hline);
   font-size: 10.5px; line-height: 1.5; color: var(--faint);
 }
+
+
+/* Implied against realised, per strike. Same washed-out pair the rest
+   of the board uses for dear and cheap, and the sign is printed in
+   front of the number so the colour is never the only cue. */
+.q.ivhv.dear  { color: var(--neg); }
+.q.ivhv.cheap { color: var(--pos); }
+.q.ivhv.flat  { color: var(--rule2); }

@@ -972,9 +972,15 @@ function renderLadder(tab, withPresets = true) {
   const inVol = u.unit === "vol";
   const num = (v, dp = 2) => (v == null ? "&ndash;" : nf(v, dp));
 
+  // What the stock has actually done, over the window the panel names.
+  // One figure for the whole board -- it is a property of the share,
+  // not of any strike -- so it is stated once in the bar and only the
+  // gap is repeated down the rows.
+  const hv = c.realised?.rv20 ?? null;
+
   const side = (r, kind, strike, itm) => {
     if (!r) return `<span class="q oi">&ndash;</span><span class="q">&ndash;</span>
-      <span class="q">&ndash;</span><span class="q">&ndash;</span>
+      <span class="q">&ndash;</span><span class="q">&ndash;</span><span class="q">&ndash;</span>
       <span class="q edge">&ndash;</span><span class="q px">&ndash;</span><span class="q px">&ndash;</span>`;
     const ed = inVol ? r.edge_vol : r.edge;
     const edCls = ed == null ? "" : (ed > (inVol ? 0.2 : 0.02) ? "dear"
@@ -986,6 +992,17 @@ function renderLadder(tab, withPresets = true) {
       `<span class="q oi" title="${big(r.open_interest)} contracts open">${big(r.open_interest)}</span>`,
       `<span class="q">${big(r.volume)}</span>`,
       `<span class="q">${r.iv == null ? "&ndash;" : nf(r.iv, 1)}</span>`,
+      // Implied against what the stock has actually been doing. One
+      // number per strike, because implied volatility varies across
+      // the board and realised does not -- the gap is the thing that
+      // differs, so the gap is what gets the column.
+      (() => {
+        const gap = (r.iv == null || hv == null) ? null : r.iv - hv;
+        const cls = gap == null ? "" : gap > 1.5 ? "dear" : gap < -1.5 ? "cheap" : "flat";
+        return `<span class="q ivhv ${cls}" title="${r.iv == null || hv == null ? ""
+          : `implied ${nf(r.iv, 1)}% against realised ${nf(hv, 1)}%`}">${
+          gap == null ? "&ndash;" : (gap > 0 ? "+" : "\u2212") + nf(Math.abs(gap), 1)}</span>`;
+      })(),
       `<span class="q">${r.delta == null ? "&ndash;" : nf(Math.abs(r.delta), 2)}</span>`,
       `<span class="q edge ${edCls}" title="${r.fair == null ? "" : `worth ${money(r.fair)} at the reference`}">${edTxt}</span>`,
       bid ? `<button class="q px sell" data-add="short|${kind}|${strike}|${bid}"
@@ -996,7 +1013,10 @@ function renderLadder(tab, withPresets = true) {
           : `<span class="q px">&ndash;</span>`,
     ];
     // Puts mirror: bid and ask stay next to the strike on both sides.
-    return (kind === "put" ? cells.slice(5).concat(cells.slice(0, 5).reverse())
+    // Six informational cells now, not five, so the split moves with it
+    // -- hard-coding the old index put the bid and ask in the middle of
+    // the put side and the open interest against the strike.
+    return (kind === "put" ? cells.slice(6).concat(cells.slice(0, 6).reverse())
                            : cells).join("");
   };
 
@@ -1022,10 +1042,10 @@ function renderLadder(tab, withPresets = true) {
         </div>`;
   }).join("");
 
-  const callHead = ["open int", "volume", "impl vol", "delta",
+  const callHead = ["open int", "volume", "impl vol", "iv \u2212 hv", "delta",
                     inVol ? "vs fair" : "vs fair $", "bid", "ask"];
-  const putHead = ["bid", "ask", inVol ? "vs fair" : "vs fair $",
-                   "delta", "impl vol", "volume", "open int"];
+  const putHead = ["bid", "ask", inVol ? "vs fair" : "vs fair $", "delta",
+                   "iv \u2212 hv", "impl vol", "volume", "open int"];
 
   return `<div class="chainwrap">
     <div class="expbar">
@@ -1042,7 +1062,9 @@ function renderLadder(tab, withPresets = true) {
         <button data-unit="cash" class="${(u.unit || "cash") === "cash" ? "on" : ""}">in $</button>
         <button data-unit="vol" class="${u.unit === "vol" ? "on" : ""}">in vol pts</button>
       </div>
-      <span class="exphint">click an <b>ask</b> to buy &middot; click a <b>bid</b> to sell</span>
+      <span class="exphint">${hv == null ? ""
+        : `realised <b>${nf(hv, 1)}%</b> over 20 sessions &middot; `}click an
+        <b>ask</b> to buy &middot; click a <b>bid</b> to sell</span>
     </div>
 
     ${withPresets ? renderPresets(tab, c) : ""}
@@ -1061,6 +1083,13 @@ function renderLadder(tab, withPresets = true) {
       ${body}
     </div>
     <div class="cfoot">
+      <b>iv &minus; hv</b> is this strike&rsquo;s implied volatility less what the
+      share has actually done over the last twenty sessions, in points. Positive
+      means the option is priced for more movement than the stock has been
+      producing, which favours selling it; negative, the reverse. It is not a
+      verdict &mdash; implied volatility is about the future and realised is
+      about the past, and a gap is often there for a reason that has not
+      happened yet.
       <b>vs fair</b> is what the contract costs over (+) or under (&minus;) the same
       option valued at ${esc(c.fair_label || "the reference")} volatility${inVol
         ? ", in points of volatility &mdash; the unit that compares across strikes, "
