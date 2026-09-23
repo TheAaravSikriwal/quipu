@@ -650,7 +650,16 @@ def fetch_options(symbol: str, max_expiries: int = 4,
             continue
 
         expiry_dt = datetime.strptime(expiry, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        days = max((expiry_dt - now).days, 0)
+
+        # Counted between DATES, the same way trading_days counts them.
+        #
+        # Subtracting a live timestamp from midnight-UTC on the expiry
+        # date and truncating lost most of a day: a board two dates out
+        # came back as "1d" next to a trading-day count of 2, because
+        # one of them measured from midnight and the other from now.
+        # The panel printed the smaller one, so an option with two
+        # sessions left read as expiring tomorrow.
+        days = max((expiry_dt.date() - now.date()).days, 0)
         # Time in TRADING days, as the reference dashboards measure it. A
         # weekend carries no decay in this convention, which matters a lot on
         # a three-day option and not at all on a one-year one.

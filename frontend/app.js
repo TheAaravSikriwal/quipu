@@ -2540,8 +2540,25 @@ function volatilityTile(d) {
 
   if (iv == null && hv60 == null) return "";
 
-  const spread = iv != null && hv60 != null ? iv - hv60 : null;
-  const scale = Math.max(iv || 0, hv60 || 0, 40) * 1.35;
+  // Which realised window the verdict is measured against.
+  //
+  // This tile used to compare implied against the SIXTY-day figure
+  // while the option board compared it against the TWENTY-day one, and
+  // neither said so. On Apple that put "options cheap, -5.7" directly
+  // above a board calling the same contracts +1.5 dear: one comparison,
+  // two windows, opposite answers, no way for a reader to tell why.
+  //
+  // Twenty sessions wins because it is the nearer description of what
+  // the share is doing now, and because a board a few days from expiry
+  // has no business being judged against a quarter of history. Sixty
+  // stays on screen underneath -- on Apple it reads 28.9% against 21.8%,
+  // which is not noise, it is an old shock still inside the window, and
+  // that is worth seeing rather than hiding.
+  const hv = hv20 ?? hv60;
+  const hvWin = hv20 != null ? "20" : "60";
+
+  const spread = iv != null && hv != null ? iv - hv : null;
+  const scale = Math.max(iv || 0, hv60 || 0, hv20 || 0, 40) * 1.35;
 
   const bar = (label, value, cls) => `
     <div class="volbar">
@@ -2553,13 +2570,14 @@ function volatilityTile(d) {
   return tile(
     "vol", "elastic e-derived m-heavy t-hero", "w2 h3", "Implied vs realised",
     `<div class="figure ${spread > 0 ? "down" : "up"}">${spread == null ? "--" : (spread > 0 ? "+" : "") + nf(spread, 1)}</div>
-     <div class="unitline">points of premium in the options</div>
+     <div class="unitline">points of premium in the options${
+       hv == null ? "" : `, against ${hvWin} sessions of realised`}</div>
      ${iv != null ? bar("Implied &mdash; what options charge", iv, "iv") : ""}
-     ${hv60 != null ? bar("Realised &mdash; what the stock did", hv60, "hv") : ""}
+     ${hv != null ? bar(`Realised &mdash; what the stock did, ${hvWin} sessions`, hv, "hv") : ""}
      ${kv("implied, at the money", pct(iv, 1))}
-     ${kv("realised, 20 days", pct(hv20, 1))}
+     ${kv(`realised, 20 days${hvWin === "20" ? " &mdash; the one compared" : ""}`, pct(hv20, 1))}
      ${kv("realised, 60 days", pct(hv60, 1))}
-     ${kv("ratio", spread == null ? "--" : nf(iv / hv60, 2) + "×", spread > 8 ? "down" : spread < -5 ? "up" : "")}
+     ${kv("ratio", spread == null ? "--" : nf(iv / hv, 2) + "×", spread > 8 ? "down" : spread < -5 ? "up" : "")}
      ${kv("average day", pct(v?.avg_daily_move_pct, 2))}
      ${kv("biggest day, 90d", `${signed(v?.biggest_up_day_pct, 1)} / ${signed(v?.biggest_down_day_pct, 1)}`)}
      <div class="dim" style="font-size:11.5px;margin-top:6px">Click for what this means</div>`,

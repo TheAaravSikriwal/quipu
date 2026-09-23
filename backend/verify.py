@@ -1030,6 +1030,41 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "option board default", f"could not run: {exc}"))
 
+section("Calendar days and sessions agree with each other")
+
+# There cannot be more trading sessions left than there are days left.
+# The two counts were measured from different starting points -- one
+# from midnight UTC on the expiry date, one from the current instant --
+# so a board two dates away reported 1 calendar day and 2 sessions, and
+# the panel printed the smaller one. An option with two sessions left
+# read as expiring tomorrow.
+try:
+    from datetime import date as _d2
+
+    bad, checked = [], 0
+    board = O.fetch_options("AAPL", max_expiries=6, div_yield=0.0)
+    for e in board.get("expiries") or []:
+        checked += 1
+        cal, td = e.get("days_to_expiry"), e.get("trading_days")
+        if cal is None or td is None:
+            bad.append(f'{e["expiry"]}: missing a count')
+            continue
+        if td > cal:
+            bad.append(f'{e["expiry"]}: {td} sessions but only {cal} days')
+        # And the calendar gap must be the real gap between the dates.
+        want = (_d2.fromisoformat(e["expiry"]) - _d2.today()).days
+        if cal != max(want, 0):
+            bad.append(f'{e["expiry"]}: says {cal} days, dates give {want}')
+
+    if not checked:
+        RESULTS.append((None, "  [SKIP] no board to count days on", ""))
+    else:
+        RESULTS.append((not bad, "sessions left never exceed days left",
+                        f"{checked} expiries agree" if not bad
+                        else "; ".join(bad[:3])))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "day counting", f"could not run: {exc}"))
+
 section("A fund reports what is actually in it")
 
 try:
