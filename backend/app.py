@@ -32,7 +32,7 @@ from fanout import bounded_map, fanout  # noqa: E402
 import position as position_engine  # noqa: E402
 import presets as preset_engine  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
-from sources import deep, events, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
+from sources import deep, events, holdings, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -531,6 +531,7 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                 "filings": lambda: sec_edgar.fetch_filings(symbol),
                 "sec": lambda: sec_xbrl.fetch(symbol, sec_edgar.lookup_cik),
                 "edgar_cal": lambda: sec_edgar.fetch_calendar(symbol),
+                "holdings": lambda: holdings.fetch(symbol),
                 "social": lambda: news_rss.stocktwits(symbol),
                 "profile": lambda: deep.fetch_profile(symbol),
                 "financials": lambda: deep.fetch_financials(symbol),
@@ -627,6 +628,7 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
         "options": stage1["options"].data if stage1["options"].ok else None,
         "filings": stage1["filings"].data if stage1["filings"].ok else None,
         "sec": stage1["sec"].data if stage1["sec"].ok else None,
+        "holdings": stage1["holdings"].data if stage1["holdings"].ok else None,
         "social": stage1["social"].data if stage1["social"].ok else None,
         "profile": stage1["profile"].data if stage1["profile"].ok else None,
         "financials": stage1["financials"].data if stage1["financials"].ok else None,

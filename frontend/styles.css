@@ -2019,3 +2019,44 @@ a { color: inherit; text-decoration: none; }
 .cfhint { font-size: 10.5px; color: var(--faint); }
 .cfact { margin-top: 12px; margin-bottom: 0; }
 .cfact .bookadd, .cfact .bookclose { justify-self: start; }
+
+/* ---- what is inside a fund ----
+   A list you read down and click into. Ticker on a fixed left edge so
+   the eye can run the column; weight right-aligned in tabular figures
+   so the big positions stand out by shape before you read a number. */
+.hsect { padding: 4px 0 12px; }
+.hsrow {
+  display: grid; grid-template-columns: 132px 1fr 46px;
+  gap: 10px; align-items: center; padding: 3px 0;
+}
+.hsn { font-size: 11px; color: var(--text2); text-transform: capitalize; }
+.hsbar { height: 4px; background: var(--sunk); border-radius: 2px; overflow: hidden; }
+.hsbar i { display: block; height: 100%; background: var(--c-filed); }
+.hsv {
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint); text-align: right;
+}
+
+.hlist { border-top: 1px solid var(--rule); }
+.hrow {
+  display: grid; width: 100%; text-align: left;
+  grid-template-columns: 62px 1fr 60px; gap: 10px; align-items: baseline;
+  background: none; border: none; border-bottom: 1px solid var(--hline);
+  padding: 6px 2px; cursor: pointer; font-family: var(--ui);
+  transition: background .1s ease;
+}
+.hrow:hover { background: var(--raised); }
+.hrow .hsym {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--text);
+}
+.hrow .hname {
+  font-size: 11px; color: var(--text2); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.hrow .hw {
+  font-family: var(--mono); font-size: 11px; color: var(--text2);
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.hrow:hover .hname, .hrow:hover .hw { color: var(--text); }
+.hmore {
+  padding: 8px 2px 0; font-size: 10.5px; color: var(--faint);
+}

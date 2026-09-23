@@ -867,6 +867,67 @@ try:
 except Exception as exc:
     RESULTS.append((False, "filed accounts", f"could not run: {exc}"))
 
+section("A fund reports what is actually in it")
+
+try:
+    from sources import holdings as HD
+
+    spy = HD.fetch("SPY")
+    RESULTS.append((spy.get("complete") and spy.get("count", 0) > 450,
+                    "SPY gives its whole book, not the top ten",
+                    f'{spy.get("count")} holdings, complete={spy.get("complete")}'))
+
+    # The weights have to add to the fund. A file read with the wrong
+    # header row, or with the cash line dropped, still produces a
+    # plausible-looking list -- this is what catches that.
+    cov = spy.get("covered") or 0
+    RESULTS.append((98 <= cov <= 102, "and they add up to the whole of it",
+                    f"{cov}%"))
+
+    # Nothing is worth more than the fund.
+    over = [h["symbol"] for h in spy.get("holdings", [])
+            if (h.get("weight") or 0) > 100 or (h.get("weight") or 0) < 0]
+    RESULTS.append((not over, "no holding is impossible",
+                    "all between 0 and 100%" if not over else str(over[:3])))
+
+    # Ordered by size, because the panel is read from the top down.
+    ws = [h.get("weight") or 0 for h in spy.get("holdings", [])]
+    RESULTS.append((ws == sorted(ws, reverse=True), "biggest first",
+                    f"{len(ws)} rows in order"))
+
+    # Symbols must be in the form the rest of the app uses, or clicking
+    # one opens a tab that cannot load. BRK.B is BRK-B everywhere else.
+    dotted = [h["symbol"] for h in spy.get("holdings", []) if "." in h["symbol"]]
+    RESULTS.append((not dotted, "symbols are in the app's own form",
+                    "no dots left" if not dotted else str(dotted[:3])))
+
+    # The top ten fallback, which must say that is what it is. Claiming
+    # ten names are the whole of a fund would be the one genuinely
+    # misleading thing this panel could do.
+    qqq = HD.fetch("QQQ")
+    RESULTS.append((qqq.get("is_fund") and not qqq.get("complete")
+                    and 20 < (qqq.get("covered") or 0) < 90,
+                    "a partial list is marked partial",
+                    f'{qqq.get("count")} holdings = {qqq.get("covered")}% of QQQ'))
+
+    # And the weights are in one unit. Yahoo publishes fractions and the
+    # issuer publishes percentages; mixing them silently divides one
+    # source by a hundred.
+    big_y = max((h.get("weight") or 0) for h in qqq.get("holdings", [])) if qqq.get("holdings") else 0
+    RESULTS.append((1 < big_y < 100, "both sources report percentages",
+                    f"QQQ largest {big_y:.2f}%"))
+
+    # A share is not a fund, and a bullion trust holds no companies.
+    RESULTS.append((HD.fetch("AAPL").get("is_fund") is False,
+                    "a company is not reported as a fund", "AAPL"))
+    gld = HD.fetch("GLD")
+    RESULTS.append((gld.get("is_fund") and not gld.get("available")
+                    and bool(gld.get("reason")),
+                    "a fund holding no shares says so rather than showing nothing",
+                    (gld.get("reason") or "")[:44]))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "fund holdings", f"could not run: {exc}"))
+
 section("Every endpoint prices dividends the same way")
 
 # Two models exist: a continuous yield, and the escrowed model that

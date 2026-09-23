@@ -1999,6 +1999,7 @@ const SOURCES = {
   unusual: "Yahoo chains &middot; volume against open interest",
   greeks: "Black-Scholes, computed here from live quotes",
   profile: "Company filings via Yahoo Finance",
+  holdings: "The issuer's own daily file where there is one, Yahoo otherwise",
   financials: "Annual reports via Yahoo Finance",
   secfin: "SEC EDGAR &middot; XBRL, exactly as filed",
   secmargins: "Computed here from the filed figures",
@@ -2075,7 +2076,7 @@ const REGIONS = [
   { id: "price",    label: "Price",    keys: ["quote", "price", "returns", "volume"] },
   { id: "options",  label: "Options",  keys: ["vol", "options", "optionstory", "probability",
                                               "unusual", "greeks", "chain"] },
-  { id: "business", label: "Business", keys: ["profile", "secfin", "secmargins", "financials",
+  { id: "business", label: "Business", keys: ["profile", "holdings", "secfin", "secmargins", "financials",
                                               "valuation", "earnings", "analysts", "ownership",
                                               "short", "filings"] },
   { id: "news",     label: "News",     keys: ["calendar", "news", "unique",
@@ -3059,6 +3060,72 @@ function storiesTile(xr) {
         <div class="meta">${s.size} article${s.size > 1 ? "s" : ""}<span class="dot">&bull;</span>${esc(s.first_seen.publisher || "?")}</div>
         <div class="hl" style="font-size:13px">${esc((s.headline || "untitled").slice(0, 110))}</div></div>`).join(""),
     `${stories.length} events`
+  );
+}
+
+/* ---- what is inside a fund ------------------------------------------
+ *
+ * Searching an ETF and being shown a price is close to useless. The
+ * basket IS the thing you are buying, and the two questions are always
+ * what is in it and how much of it is one name.
+ *
+ * Every row is a way into that company: clicking one opens it in its
+ * own tab, because "what is SPY" nearly always becomes "what is the
+ * 8% of SPY that is NVIDIA".
+ */
+function holdingsTile(d) {
+  const h = d.holdings;
+  if (!h?.is_fund) return "";
+
+  if (!h.available) {
+    return tile("holdings", "e-filed", "w2 h1", "What is inside it",
+      `<div class="dim">${esc(h.reason || "No holdings published.")}</div>`);
+  }
+
+  const rows = h.holdings || [];
+  const top = rows.slice(0, 60);
+  const most = rows[0];
+
+  /* How much of the fund one name is. A reader looking at a sector
+   * fund should find out in the first sentence that a quarter of it is
+   * a single company, because that is the difference between a basket
+   * and a proxy for one stock. */
+  const lead = h.complete
+    ? `All <b>${h.count}</b> holdings, from the issuer&rsquo;s own file${
+        h.as_of ? ` dated ${esc(h.as_of)}` : ""}.`
+    : `The largest <b>${h.count}</b>, which is
+       <b>${nf(h.covered, 0)}%</b> of the fund. The issuer does not publish a
+       full list anywhere we can read, so the rest is not shown.`;
+  const concentration = most && most.weight
+    ? ` The biggest single holding is <b>${esc(most.symbol)}</b> at
+        <b>${nf(most.weight, 1)}%</b>${most.weight > 15
+          ? " &mdash; a large enough share that this fund will track that one company closely."
+          : "."}`
+    : "";
+
+  return tile(
+    "holdings", "elastic e-filed", "w2 h3", "What is inside it",
+    `<div class="prose">${lead}${concentration}</div>
+     ${h.sectors?.length ? `<div class="hsect">
+       ${h.sectors.slice(0, 5).map((x) => `<div class="hsrow">
+          <span class="hsn">${esc(x.sector)}</span>
+          <span class="hsbar"><i style="width:${Math.min(x.weight, 100)}%"></i></span>
+          <span class="hsv">${nf(x.weight, 1)}%</span>
+        </div>`).join("")}
+     </div>` : ""}
+     <div class="hlist">
+       ${top.map((x) => `<button class="hrow" data-hold="${esc(x.symbol)}"
+           title="Open ${esc(x.symbol)} in its own tab">
+          <span class="hsym">${esc(x.symbol)}</span>
+          <span class="hname">${esc(x.name)}</span>
+          <span class="hw">${x.weight == null ? "&ndash;" : nf(x.weight, 2) + "%"}</span>
+        </button>`).join("")}
+     </div>
+     ${rows.length > top.length
+        ? `<div class="hmore">and ${rows.length - top.length} smaller holdings</div>` : ""}
+     <div class="fnote">Click any of them to open that company in its own tab.
+       ${h.source ? `List from ${esc(h.source)}.` : ""}</div>`,
+    h.complete ? `${h.count} holdings` : `top ${h.count}`
   );
 }
 
@@ -4174,6 +4241,7 @@ function renderDashboard(d, tab) {
     chainTile(d, tab),
 
     profileTile(d.profile),
+    holdingsTile(d),
     secFinTile(d),
     secMarginsTile(d),
     financialsTile(d.financials),
@@ -5330,6 +5398,17 @@ function setTileBody(id) {
  * caller, and then it cannot be wired in one place and not the other.
  */
 function wireTileControls(tab, root = document) {
+  /* A holding is a way into that company, not a label. "What is SPY"
+   * nearly always becomes "what is the 8% of SPY that is NVIDIA", and
+   * a new tab is the right answer because the fund is still the thing
+   * you were reading. */
+  root.querySelectorAll("[data-hold]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      newTab(b.dataset.hold);
+    };
+  });
+
   root.querySelectorAll(".mtabs button[data-model]").forEach((el) => {
     el.onclick = (e) => {
       e.stopPropagation();
