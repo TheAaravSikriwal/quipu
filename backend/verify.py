@@ -975,6 +975,42 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "dividend model consistency", f"could not run: {exc}"))
 
+section("No two scripts declare the same global")
+
+# Every frontend file is a classic script, so they all share one scope.
+# Two files declaring `calc` at the top level is not a warning and not
+# a shadow -- it is a SyntaxError at parse time, and the whole page
+# renders blank with one line in a console nobody has open. Cheap to
+# check, and the failure is total.
+try:
+    import re as _re
+    import collections as _c
+
+    root = Path(__file__).resolve().parent.parent / "frontend"
+    files = ["chart.js", "greeks.js", "glossary.js", "working.js",
+             "ledger.js", "app.js"]
+    seen = _c.defaultdict(list)
+    checked = []
+    for name in files:
+        path = root / name
+        if not path.exists():
+            continue
+        src = path.read_text(encoding="utf-8")
+        # A file wrapped in an IIFE leaks nothing and is exempt.
+        if _re.search(r"^\(function \(\) \{", src, _re.M) and src.rstrip().endswith("}());"):
+            continue
+        checked.append(name)
+        for m in _re.finditer(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)",
+                              src, _re.M):
+            seen[m.group(1)].append(name)
+
+    clash = {k: sorted(set(v)) for k, v in seen.items() if len(set(v)) > 1}
+    RESULTS.append((not clash, "no name is declared by two scripts",
+                    f"{len(checked)} unwrapped files" if not clash
+                    else "; ".join(f"{k} in {v}" for k, v in list(clash.items())[:2])))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "global collisions", f"could not run: {exc}"))
+
 section("No dict literal quietly overwrites itself")
 
 # A patch once inserted a new "events" key next to the old one instead of

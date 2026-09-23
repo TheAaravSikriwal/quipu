@@ -2060,3 +2060,72 @@ a { color: inherit; text-decoration: none; }
 .hmore {
   padding: 8px 2px 0; font-size: 10.5px; color: var(--faint);
 }
+
+/* ---- a number with a derivation behind it ----
+   Marked, not shouted. A dotted underline in the DERIVED colour, the
+   same hue the evidence classes already use for "this was computed",
+   so the mark means the same thing wherever it appears. Only numbers
+   this app worked out are marked -- a quoted price has no arithmetic
+   and marking it would promise something and then waste the hover. */
+.calc {
+  border-bottom: 1px dotted var(--c-derived);
+  cursor: help;
+}
+.calc:hover { color: var(--text); border-bottom-style: solid; }
+
+.calctip {
+  position: fixed; left: 0; top: 0; z-index: 200;
+  width: 420px; max-width: calc(100vw - 20px);
+  background: var(--panel); border: 1px solid var(--c-derived);
+  padding: 12px 14px 13px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .65);
+  /* No animation and no transition, for the same reason the glossary
+     tip has none: a running one overrides the inline transform this is
+     positioned by, and under a throttled compositor it never advances. */
+}
+.calctip h6 {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  margin: 0 0 9px; padding-bottom: 7px; border-bottom: 1px solid var(--rule);
+}
+
+/* The sum. One row per line, sign in its own narrow column so the
+   operators stack and it reads down as arithmetic rather than across
+   as prose. */
+.wrow {
+  display: grid; grid-template-columns: 16px 1fr auto;
+  gap: 8px; align-items: baseline; padding: 3px 0;
+}
+.wsign {
+  font-family: var(--mono); font-size: 13px; color: var(--text2); text-align: center;
+}
+.wterms { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.wt { display: inline-flex; align-items: baseline; gap: 5px; }
+.wt i {
+  font-style: normal; font-size: 11px; color: var(--text2);
+}
+.wt b {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 500; color: var(--text);
+}
+.wop { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.wgives {
+  font-family: var(--mono); font-size: 11.5px; color: var(--faint);
+  text-align: right; white-space: nowrap;
+}
+.wrow.wtotal {
+  margin-top: 5px; padding-top: 7px; border-top: 1px solid var(--rule);
+}
+.wrow.wtotal .wterms {
+  font-family: var(--mono); font-size: 15px; color: var(--text);
+}
+.wrow.wx100 .wgives { color: var(--text); font-size: 13px; }
+.wrow.wfloor .wterms i { color: var(--faint); }
+
+.wnote {
+  margin-top: 7px; font-size: 10.5px; line-height: 1.5; color: var(--faint);
+}
+.wnote b { color: var(--text2); font-weight: 500; }
+.wfoot {
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--hline);
+  font-size: 10.5px; line-height: 1.5; color: var(--faint);
+}

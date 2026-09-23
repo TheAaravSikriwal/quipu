@@ -31,6 +31,7 @@ from extract.tiered import available_tiers, extract  # noqa: E402
 from fanout import bounded_map, fanout  # noqa: E402
 import position as position_engine  # noqa: E402
 import presets as preset_engine  # noqa: E402
+import working as show_working  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
 from sources import deep, events, holdings, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
 
@@ -360,6 +361,42 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
     }
 
 
+@app.post("/api/working")
+def working(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """How one price was arrived at, written out as the sum it is.
+
+    Takes the inputs rather than fetching them: the client already has
+    the spot, the strike and the volatility off the board it is looking
+    at, so this is arithmetic with no network in it and it can be asked
+    again every time the selection changes.
+
+    It lives on the server rather than being reimplemented in the
+    browser so that there is one Black-Scholes in this codebase. A
+    second copy would agree on the day it was written.
+    """
+    kind = str(payload.get("kind") or "option")
+
+    def f(name, default=0.0):
+        try:
+            return float(payload.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    if kind == "option":
+        return show_working.option_price(
+            f("spot"), f("strike"), f("years"), f("vol"), f("rate"),
+            bool(payload.get("is_call", True)), f("div_yield"))
+    if kind == "intrinsic":
+        return show_working.intrinsic(f("spot"), f("strike"),
+                                      bool(payload.get("is_call", True)))
+    if kind == "edge":
+        return show_working.edge(f("market"), f("fair"))
+    if kind == "breakeven":
+        return show_working.breakeven_single(
+            f("strike"), f("premium"), bool(payload.get("is_call", True)))
+    raise HTTPException(status_code=400, detail=f"unknown working: {kind}")
+
+
 @app.post("/api/position")
 def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Analyse a trade that is already on.
@@ -427,6 +464,19 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     analysis["vol_used"] = round(vol * 100, 2)
     analysis["rate"] = round(rate * 100, 3)
     analysis["div_yield"] = round(div * 100, 3)
+
+    # The three figures a reader is most likely to want to check, each
+    # written out as the sum it is. They are computed here rather than
+    # described here: the same numbers that went into the analysis go
+    # into the working, so the two cannot disagree.
+    risk = analysis.get("risk")
+    analysis["working"] = {
+        "net_cost": show_working.net_cost(legs),
+        "profit": show_working.profit_now(analysis.get("value_now") or 0.0,
+                                          analysis.get("net_cost") or 0.0),
+        "pl_pct": (show_working.percent_of_risk(analysis.get("pl") or 0.0, risk)
+                   if risk else None),
+    }
     analysis["earnings"] = earnings
     analysis["marks_live"] = sum(
         1 for l in analysis["legs"]

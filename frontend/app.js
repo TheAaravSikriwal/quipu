@@ -820,7 +820,8 @@ function moneyBlock(a, symbol, spot) {
     <div class="mnygrid">
       <div class="mnycol today">
         <div class="mnylab">${credit ? "you receive today" : "you pay today"}</div>
-        <div class="mnybig">${credit ? "+" : "&minus;"}${money(paid)}</div>
+        <div class="mnybig">${credit ? "+" : "&minus;"}${
+          calc(money(paid), a.working?.net_cost)}</div>
         <div class="mnywhy">${credit
           ? "Cash arrives in your account now &mdash; but it is not yours to keep until this is closed or expires."
           : "Cash leaves your account now. This is the whole of what you have committed."}</div>
@@ -1509,8 +1510,10 @@ function renderAnalysis(tab) {
       </div>` : ""}
 
       <div class="pstats">
-        ${chip("profit / loss right now", (d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), plCls)}
-        ${chip("of what is at risk", d.pl_pct == null ? "--" : signed(d.pl_pct, 0), plCls)}
+        ${chip("profit / loss right now",
+          calc((d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), d.working?.profit), plCls)}
+        ${chip("of what is at risk",
+          d.pl_pct == null ? "--" : calc(signed(d.pl_pct, 0), d.working?.pl_pct), plCls)}
         ${chip("worth if closed now", money(d.value_now, 0))}
         ${chip("break-even", (d.breakevens || []).map((b) => money(b)).join("  /  ") || "--")}
         ${chip("chance of making money", d.chance == null ? "--" : nf(d.chance, 0) + "%")}
@@ -2034,6 +2037,13 @@ function tile(id, cls, span, title, body, badge = "") {
        ${badge ? `<span class="badge">${badge}</span>` : ""}</h3>
      <div class="body">${body}</div></div>`;
 }
+
+/* A number with its arithmetic attached, for the hover. Falls back to
+ * the plain number when there is no working -- a figure that was read
+ * off a quote has no derivation, and marking it would promise one. */
+const calc = (formatted, working) =>
+  (working ? window.QUIPU_WORKING.calc(formatted, working) : formatted);
+const WK = () => window.QUIPU_WORKING.WK;
 
 const kv = (label, value, cls = "") =>
   `<div class="kv"><span>${label}</span><span class="${cls}">${value}</span></div>`;
@@ -3252,7 +3262,17 @@ function secFinTile(d) {
        ${line("earnings per share", "eps_diluted", (v) => v == null ? "&ndash;" : `$${nf(v, 2)}`)}
        ${line("cash from operations", "operating_cash_flow")}
        ${line("capital spending", "capex")}
-       ${line("free cash flow", "free_cash_flow")}
+       <div class="fr">
+         <span class="fl">free cash flow</span>
+         ${rows.map((r) => `<span class="fv">${
+           (r.operating_cash_flow != null && r.capex != null)
+             ? calc(BIG(r.free_cash_flow), WK().sum(r.free_cash_flow, [
+                 WK().line("", [WK().term("cash from operations", r.operating_cash_flow, 0)]),
+                 WK().line("-", [WK().term("spent on plant and equipment", r.capex, 0)]),
+               ], "$", "What is left after keeping the business running -- the "
+                     + "money dividends and buybacks are actually paid from."))
+             : BIG(r.free_cash_flow)}</span>`).join("")}
+       </div>
        <div class="fr fgap"></div>
        ${line("cash on hand", "cash")}
        ${line("total assets", "assets")}
@@ -3296,6 +3316,37 @@ function secFinTile(d) {
   );
 }
 
+/* Each ratio here is one filed figure over another, and both are in
+ * the table directly above. The working names them, so a margin stops
+ * being a number the app asserts and becomes a division the reader can
+ * see -- and check against the statement it came from. */
+const RATIO_OF = {
+  gross_margin:   ["gross_profit", "gross profit", "revenue", "revenue"],
+  operating_margin: ["operating_income", "operating income", "revenue", "revenue"],
+  net_margin:     ["net_income", "net income", "revenue", "revenue"],
+  roe:            ["net_income", "net income", "equity", "shareholders equity"],
+  current_ratio:  ["assets_current", "assets due within a year",
+                   "liabilities_current", "bills due within a year"],
+  debt_to_equity: ["long_term_debt", "long-term debt", "equity", "shareholders equity"],
+};
+
+function ratioWorking(row, key, asPct) {
+  const spec = RATIO_OF[key];
+  if (!spec || row[key] == null) return null;
+  const [tk, tl, bk, bl] = spec;
+  const top = row[tk], bot = row[bk];
+  if (top == null || bot == null) return null;
+
+  const W = WK();
+  const lines = [
+    W.line("", [W.term(tl, top, 0)]),
+    W.line("/", [W.term(bl, bot, 0)]),
+  ];
+  if (asPct) lines.push(W.line("x", [W.term("to make it a percentage", 100, 0)]));
+  return W.sum(asPct ? row[key] * 100 : row[key], lines,
+               asPct ? "%" : "", "Both figures are from the filing above.");
+}
+
 function secMarginsTile(d) {
   const x = d.sec;
   const rows = (x?.annual || []).slice(-5);
@@ -3304,7 +3355,8 @@ function secMarginsTile(d) {
 
   const line = (label, key) => `<div class="fr">
       <span class="fl">${label}</span>
-      ${rows.map((r) => `<span class="fv">${PCT1(r[key])}</span>`).join("")}
+      ${rows.map((r) => `<span class="fv">${
+        calc(PCT1(r[key]), ratioWorking(r, key, true))}</span>`).join("")}
     </div>`;
 
   return tile(
@@ -3319,10 +3371,12 @@ function secMarginsTile(d) {
        <div class="fr fgap"></div>
        <div class="fr"><span class="fl">current ratio</span>
          ${rows.map((r) => `<span class="fv">${r.current_ratio == null ? "&ndash;"
-            : nf(r.current_ratio, 2)}</span>`).join("")}</div>
+            : calc(nf(r.current_ratio, 2), ratioWorking(r, "current_ratio", false))
+          }</span>`).join("")}</div>
        <div class="fr"><span class="fl">long-term debt to equity</span>
          ${rows.map((r) => `<span class="fv">${r.debt_to_equity == null ? "&ndash;"
-            : nf(r.debt_to_equity, 2)}</span>`).join("")}</div>
+            : calc(nf(r.debt_to_equity, 2), ratioWorking(r, "debt_to_equity", false))
+          }</span>`).join("")}</div>
      </div>
      <div class="fnote">Worked out here from the filed figures above, so each one
        can be checked against the filing rather than taken on trust. Gross margin
