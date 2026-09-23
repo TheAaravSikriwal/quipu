@@ -587,10 +587,38 @@ def fetch_options(symbol: str, max_expiries: int = 4,
     its own request, so fetching four to show one is three wasted seconds.
     """
     ticker = yf.Ticker(symbol)
-    listed = list(ticker.options or [])
+
+    # An empty list means two completely different things, and saying
+    # the wrong one is worse than saying nothing.
+    #
+    # Yahoo rate-limits hard, and yfinance swallows the 401 and the 429
+    # and hands back an empty list either way. Reported as "no listed
+    # options" that becomes a claim about the COMPANY -- and Apple was
+    # being told it has no options, which is not a thing a reader should
+    # ever be told by a tool that is simply being throttled.
+    #
+    # So the refusal is caught where it can be, and where it cannot the
+    # message covers both possibilities rather than picking the one that
+    # happens to be wrong.
+    refused = False
+    try:
+        listed = list(ticker.options or [])
+    except Exception as exc:                               # noqa: BLE001
+        listed = []
+        refused = "ratelimit" in type(exc).__name__.lower() or "429" in str(exc)
+
     expiries = [only] if (only and only in listed) else listed[:max_expiries]
     if not expiries:
-        return {"available": False, "reason": "no listed options", "expiries": []}
+        return {
+            "available": False,
+            "reason": ("the data provider is rate-limiting us, so no chain came "
+                       "back \u2014 this is not a fact about the company"
+                       if refused else
+                       "no chain came back: either nothing is listed on it, or "
+                       "the data provider declined the request"),
+            "refused": bool(refused),
+            "expiries": [],
+        }
 
     info = ticker.info or {}
     spot = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0.0)

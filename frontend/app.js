@@ -132,7 +132,12 @@ async function loadScreen(tab) {
     tab.error = String(err.message || err);
   }
   tab.loading = false;
-  if (state.active === tab.id) render();
+  // Keep the scroll. While the first scan runs this function re-renders
+  // every four seconds, and without this the list snapped back to the
+  // top each time -- so scrolling during a scan looked like a scrollbar
+  // that did not work, when it was working and then being undone a
+  // moment later.
+  if (state.active === tab.id) render(true);
 
   // The first scan of ten thousand stocks takes about three minutes. Rather
   // than block on it, the tab shows its progress and asks again.
@@ -260,7 +265,7 @@ async function analysePosition(tab) {
   // being built is not written until it is added, so abandoning a
   // half-assembled spread leaves no trace of it.
   if (tab.ui.editing) commitTrade(tab, tab.ui.editing);
-  if (state.active === tab.id) render();
+  if (state.active === tab.id) render(true);
 }
 
 function renderPositionStatus(tab) {
@@ -639,7 +644,7 @@ async function loadChain(tab, expiry) {
   const u = tab.ui;
   if (!u.symbol) return;
   u.chainLoading = true;
-  render();
+  render(true);
   try {
     const p = new URLSearchParams();
     if (expiry) p.set("expiry", expiry);
@@ -655,7 +660,7 @@ async function loadChain(tab, expiry) {
     u.chainError = String(err.message || err);
   }
   u.chainLoading = false;
-  render();
+  render(true);
   if (u.legs.some((l) => l.strike || l.kind === "stock")) analysePosition(tab);
 }
 
@@ -1833,7 +1838,7 @@ function wirePosition(tab) {
       e.stopPropagation();
       const [side, kind, strike, px] = b.dataset.add.split("|");
       u.legs.push({ kind, side, strike, qty: 1, entry: px, expiry: u.expiry });
-      render();
+      render(true);
       analysePosition(tab);
     };
   });
@@ -1842,7 +1847,7 @@ function wirePosition(tab) {
   if (addStock) addStock.onclick = () => {
     u.legs.push({ kind: "stock", side: "long", strike: "", qty: 100,
                   entry: u.chain?.spot ? String(u.chain.spot) : "", expiry: "" });
-    render();
+    render(true);
     analysePosition(tab);
   };
 
@@ -1861,7 +1866,7 @@ function wirePosition(tab) {
     const drop = row.querySelector("[data-drop]");
     if (drop) drop.onclick = () => {
       u.legs.splice(i, 1);
-      render();
+      render(true);
       if (u.legs.length) analysePosition(tab); else { tab.data = null; render(); }
     };
   });
@@ -1999,7 +2004,7 @@ function wireFinder(tab) {
     b.onclick = () => {
       if (b.dataset.frank === tab.ui.rank) return;
       tab.ui.rank = b.dataset.frank;
-      render();
+      render(true);
       loadScreen(tab);
     };
   });
@@ -2648,7 +2653,8 @@ function greeksTile(d, tab) {
   if (!o?.available || !o.expiries?.length) {
     return tile(
     "greeks", "elastic e-derived m-heavy", "w3 h2", "The greeks, in plain English",
-      `<div class="prose">This security has no listed options, so there are no greeks to explain.</div>`);
+      `<div class="prose">${esc(o?.reason
+        || "No option chain came back, so there are no greeks to explain.")}</div>`);
   }
   const ui = tab.ui;
   const exp = o.expiries[Math.min(ui.expiryIdx, o.expiries.length - 1)];
