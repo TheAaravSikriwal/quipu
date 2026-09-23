@@ -867,6 +867,53 @@ try:
 except Exception as exc:
     RESULTS.append((False, "filed accounts", f"could not run: {exc}"))
 
+section("Every endpoint prices dividends the same way")
+
+# Two models exist: a continuous yield, and the escrowed model that
+# subtracts the dividends actually due before expiry. Whichever is used
+# has to be used EVERYWHERE, because otherwise one option has two fair
+# values depending on which endpoint you asked -- and the two disagree
+# by a quarter on a short-dated contract across an ex-date.
+#
+# /api/position and /api/live were never given the schedule, so the
+# trade log and the fifteen-second refresh were on the continuous
+# yield while the board and the ticker page were on discrete
+# dividends. Checked statically, because the call sites are what drift.
+try:
+    import ast as _ast
+
+    src = (Path(__file__).resolve().parent / "app.py").read_text(encoding="utf-8")
+    tree = _ast.parse(src)
+
+    bare = []
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Call):
+            continue
+        fn = node.func
+        name = getattr(fn, "attr", None) or getattr(fn, "id", None)
+        if name != "fetch_options":
+            continue
+        kw = {k.arg for k in node.keywords}
+        if "dividends" not in kw:
+            bare.append(node.lineno)
+    RESULTS.append((not bare, "every fetch_options is given the dividend schedule",
+                    "all call sites" if not bare else f"missing at lines {bare}"))
+
+    # And the yield itself is a decimal fraction, not a percentage
+    # number. Yahoo publishes 0.32 meaning 0.32%, and reading that as
+    # 32% would be wrong by a factor of a hundred on exactly the
+    # low-yield mega-caps most likely to be looked up.
+    import app as APP
+
+    y = APP._div_yield("KO")
+    RESULTS.append((0.005 < y < 0.08,
+                    "the dividend yield is a fraction, not a percent",
+                    f"KO {y:.4f} = {y * 100:.2f}%"))
+    RESULTS.append((APP._div_yield("TSLA") == 0.0,
+                    "a non-payer yields exactly zero", "TSLA 0.0"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "dividend model consistency", f"could not run: {exc}"))
+
 section("No dict literal quietly overwrites itself")
 
 # A patch once inserted a new "events" key next to the old one instead of

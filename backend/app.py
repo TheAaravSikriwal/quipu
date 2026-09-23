@@ -387,7 +387,13 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     marks: Dict[str, float] = {}
     atm_iv = None
     try:
-        chains = options.fetch_options(symbol, max_expiries=8, div_yield=div)
+        # The same dividend model the board is priced under. Without the
+        # schedule this fell back to the continuous yield while /api/chain
+        # used discrete dividends, so one option had two fair values
+        # depending on which endpoint asked -- and the position engine,
+        # which is what the trade log totals, was on the less exact one.
+        chains = options.fetch_options(symbol, max_expiries=8, div_yield=div,
+                                       dividends=_div_schedule(symbol))
         for exp in (chains.get("expiries") or []):
             if exp["expiry"] not in wanted:
                 continue
@@ -447,8 +453,14 @@ def live(symbol: str) -> Dict[str, Any]:
                 "quote": lambda: quotes.fetch_quote(symbol),
                 "intraday": lambda: quotes.fetch_intraday(symbol),
                 "series_1d": lambda: quotes.fetch_series_live(symbol),
+                # The refresh overwrites the options the page was built
+                # with, so it has to price them the same way. It did not,
+                # which meant the ticker page quietly switched from
+                # discrete dividends to a continuous yield fifteen
+                # seconds after it loaded.
                 "options": lambda: options.fetch_options(
-                    symbol, max_expiries=2, div_yield=_div_yield(symbol)),
+                    symbol, max_expiries=2, div_yield=_div_yield(symbol),
+                    dividends=_div_schedule(symbol)),
             },
             timeout_s=30,
         )
