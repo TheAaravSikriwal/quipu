@@ -336,8 +336,67 @@ body {
 .cside.puts .q { text-align: left; }
 .cside.puts .chead .q { text-align: left; }
 
-/* In the money, shaded, as every chain shades it. */
-.cside.itm { background: rgba(242, 242, 240, .04); }
+/* ---- the three zones ----
+
+   A chain is read by where the money is, and this board had only one of
+   the three marked -- with a four-percent wash that was invisible on
+   anything but a good monitor. The strike nearest the share price, which
+   is the row every other strike is compared against, had no mark at all.
+
+   The shading runs down one side of the board and up the other, because
+   a call is in the money BELOW the share price and a put above it. That
+   inversion is the thing people get wrong, so each side says which way
+   it runs rather than leaving the shading to imply it. */
+
+.cside.itm {
+  background: rgba(242, 242, 240, .075);
+  box-shadow: inset 0 0 0 1px rgba(242, 242, 240, .035);
+}
+.cside.itm .q { color: var(--text); }
+.cside.otm .q.oi { color: var(--rule2); }
+
+/* At the money: ruled above and below so it reads as a landmark rather
+   than as another shaded row. */
+.crow.atm {
+  background: rgba(242, 242, 240, .03);
+  border-top: 1px solid var(--rule2);
+  border-bottom: 1px solid var(--rule2);
+}
+/* Ringed rather than labelled. A word here has nowhere to go: the
+   strike column is 96px and an absolutely positioned "atm" spilled
+   straight into the put side's bid. The ring costs no horizontal room,
+   and the key underneath says what it means. */
+.crow.atm .cstrike b {
+  color: var(--text); font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--rule2);
+  border-radius: 3px; padding: 3px 10px;
+}
+
+/* Which direction each side runs, stated on the side it applies to. */
+.mny-dir {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  font-style: normal; margin-left: 9px;
+}
+.cside.puts .hd .mny-dir { margin: 0 9px 0 0; }
+
+/* The key. Shading is not a language anyone is born knowing. */
+.mnykey { display: inline-flex; align-items: center; gap: 12px; }
+.mnykey b {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.mnykey b::before {
+  content: ""; width: 11px; height: 11px; border-radius: 2px;
+  border: 1px solid var(--rule);
+}
+.mnykey .k-itm::before { background: rgba(242, 242, 240, .12); }
+/* Matches the ring drawn around the at-the-money strike itself. */
+.mnykey .k-atm::before {
+  background: transparent; border-color: var(--rule2); border-radius: 3px;
+}
+.mnykey .k-otm::before { background: transparent; }
 
 .q.oi { color: var(--faint); }
 

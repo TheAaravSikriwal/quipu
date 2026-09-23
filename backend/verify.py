@@ -1231,6 +1231,63 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "sum evaluation", f"could not run: {exc}"))
 
+section("The board agrees with itself about where the money is")
+
+# The chain is shaded by comparing each strike to the share price, and
+# elsewhere the same contracts are labelled "(ITM)" from a flag the data
+# provider sends. Two sources for one fact: if they ever disagree, the
+# board shades a row that the strike dropdown calls out-of-the-money,
+# and there is no way for a reader to tell which is lying.
+#
+# They can legitimately differ for a strike sitting BETWEEN the quoted
+# price and the one the board is priced off -- those are different
+# numbers on purpose, because the quote lags the options tape -- so that
+# gap is allowed for and anything outside it is a real disagreement.
+try:
+    board = O.fetch_options("AAPL", max_expiries=2, div_yield=0.0)
+    if not board.get("available"):
+        RESULTS.append((None, "  [SKIP] moneyness -- " + str(board.get("reason"))[:40], ""))
+    else:
+        spot = board.get("spot") or 0.0
+        quoted = board.get("spot_quoted") or spot
+        edge = abs(spot - quoted)
+
+        rows = disagree = boundary = 0
+        for exp in board.get("expiries") or []:
+            for kind, side in (("call", exp["calls"]), ("put", exp["puts"])):
+                for r in side:
+                    k = r.get("strike")
+                    if k is None or r.get("itm") is None:
+                        continue
+                    rows += 1
+                    want = (k < spot) if kind == "call" else (k > spot)
+                    if bool(r["itm"]) == want:
+                        continue
+                    # Inside the gap between the two prices, either
+                    # answer is defensible.
+                    if abs(k - spot) <= edge + 0.005:
+                        boundary += 1
+                    else:
+                        disagree += 1
+
+        RESULTS.append((rows > 0 and disagree == 0,
+                        "shading and the provider's flag say the same thing",
+                        f"{rows} contracts, {disagree} disagree"
+                        + (f", {boundary} inside the quote gap" if boundary else "")))
+
+        # And the at-the-money strike has to be one of the listed ones,
+        # not a price halfway between two rungs of the ladder.
+        strikes = sorted({r["strike"] for exp in board["expiries"]
+                          for r in exp["calls"] if r.get("strike") is not None})
+        if strikes:
+            atm = min(strikes, key=lambda k: abs(k - spot))
+            RESULTS.append((atm in strikes and
+                            all(abs(atm - spot) <= abs(k - spot) for k in strikes),
+                            "at-the-money is the nearest listed strike",
+                            f"{atm} against a share price of {round(spot, 2)}"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "moneyness", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

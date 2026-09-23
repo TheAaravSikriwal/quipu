@@ -1058,6 +1058,18 @@ function renderLadder(tab, withPresets = true) {
     .filter((x, i, arr) => arr.findIndex((y) => y.r.strike === x.r.strike) === i)
     .sort((a, b) => a.r.strike - b.r.strike).map((x) => x.r);
 
+  /* At the money is the listed strike closest to the share price.
+   *
+   * Not a band and not a rule of thumb: the board has a finite ladder
+   * of strikes and exactly one of them is nearest. That is the row the
+   * whole chain is read outward from -- it carries the volatility every
+   * other strike is compared against -- and it was the only landmark on
+   * the board with no mark on it at all. */
+  const atmStrike = rows.length
+    ? rows.reduce((best, r) =>
+        Math.abs(r.strike - spot) < Math.abs(best.strike - spot) ? r : best).strike
+    : null;
+
   const inVol = u.unit === "vol";
   const num = (v, dp = 2) => (v == null ? "&ndash;" : nf(v, dp));
 
@@ -1122,11 +1134,17 @@ function renderLadder(tab, withPresets = true) {
      * below is the point of it -- but the label sits out in the margin. */
     return (crossed
       ? `<div class="spotrow"><span>${esc(u.symbol)} ${money(spot)}</span></div>` : "")
-      + `<div class="crow${hc || hp ? " mine" : ""}">
-          <div class="cside calls ${row.strike < spot ? "itm" : ""}">
+      + `<div class="crow${hc || hp ? " mine" : ""}${
+            row.strike === atmStrike ? " atm" : ""}">
+          <div class="cside calls ${row.strike < spot ? "itm" : "otm"}">
             ${side(row.call, "call", row.strike, row.strike < spot)}</div>
-          <div class="cstrike">${badge(hc)}<b>${nf(row.strike, row.strike % 1 ? 1 : 0)}</b>${badge(hp)}</div>
-          <div class="cside puts ${row.strike > spot ? "itm" : ""}">
+          <div class="cstrike" title="${row.strike === atmStrike
+            ? "At the money: the listed strike nearest " + money(spot)
+            : row.strike < spot
+              ? "Calls here are in the money, puts are out"
+              : "Puts here are in the money, calls are out"}">${badge(hc)}<b>${
+            nf(row.strike, row.strike % 1 ? 1 : 0)}</b>${badge(hp)}</div>
+          <div class="cside puts ${row.strike > spot ? "itm" : "otm"}">
             ${side(row.put, "put", row.strike, row.strike > spot)}</div>
         </div>`;
   }).join("");
@@ -1151,6 +1169,11 @@ function renderLadder(tab, withPresets = true) {
         <button data-unit="cash" class="${(u.unit || "cash") === "cash" ? "on" : ""}">in $</button>
         <button data-unit="vol" class="${u.unit === "vol" ? "on" : ""}">in vol pts</button>
       </div>
+      <span class="mnykey">
+        <b class="k-itm">in the money</b>
+        <b class="k-atm">at the money</b>
+        <b class="k-otm">out of the money</b>
+      </span>
       <span class="exphint">${hv == null ? ""
         : `realised <b>${nf(hv, 1)}%</b> over 20 sessions &middot; `}click an
         <b>ask</b> to buy &middot; click a <b>bid</b> to sell</span>
@@ -1160,9 +1183,11 @@ function renderLadder(tab, withPresets = true) {
 
     <div class="chain">
       <div class="crow chead2">
-        <div class="cside calls"><span class="hd">calls</span></div>
+        <div class="cside calls"><span class="hd">calls
+          <i class="mny-dir">in the money below ${money(spot)} &darr;</i></span></div>
         <div class="cstrike"></div>
-        <div class="cside puts"><span class="hd">puts</span></div>
+        <div class="cside puts"><span class="hd">puts
+          <i class="mny-dir">&uarr; in the money above ${money(spot)}</i></span></div>
       </div>
       <div class="crow chead">
         <div class="cside calls">${callHead.map((h) => `<span class="q">${h}</span>`).join("")}</div>
@@ -1184,7 +1209,13 @@ function renderLadder(tab, withPresets = true) {
         ? ", in points of volatility &mdash; the unit that compares across strikes, "
           + "since a far out-of-the-money contract barely responds to volatility at all"
         : ", in dollars"}.
-      Shaded rows are in the money.
+      <b>Shaded cells are in the money</b> &mdash; already worth something if
+      today were expiry. Which side that is flips at the share price: a call is
+      in the money below ${money(spot)} and a put above it, so the shading runs
+      down one side of the board and up the other. The
+      <b>ruled row</b> is at the money, the listed strike nearest the share
+      price. Everything unshaded is out of the money and worth nothing at
+      expiry unless the price comes to it.
       ${c.spot_source && c.spot_source !== "quote"
         ? `Priced off <b>${money(c.spot)}</b>, read from ${esc(c.spot_source)} rather than the
            quoted ${money(c.spot_quoted)}: the quote lags the options tape, and using it put the
