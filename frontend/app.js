@@ -28,6 +28,27 @@ const nf = (v, d = 2) =>
     : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
 const money = (v, d = 2) => (v === null || v === undefined ? "--" : "$" + nf(v, d));
+/* A fraction shown as a percentage.
+ *
+ * Exists because `pct100(xNone)` is a trap: in JavaScript `null * 100`
+ * is 0, not null, so a missing value arrives at the formatter already
+ * converted into a real zero and prints as "0.0%". That is worse than
+ * a dash -- it asserts the thing was measured and came out at nothing.
+ * SPY was reporting a gross margin of 0.0%, which a fund does not have.
+ *
+ * Check first, multiply second.
+ */
+const pct100 = (v, d = 2) =>
+  (v === null || v === undefined || Number.isNaN(v) ? "--" : nf(v * 100, d) + "%");
+
+/* The same guard without the percent sign, for the places that put a
+ * fraction into a sentence as a count. Both of its callers are already
+ * protected by a filter further up, but the guard is a long way from
+ * the use -- and a rule that has to be remembered at a distance is one
+ * that gets broken by the next edit. */
+const x100 = (v, d = 2) =>
+  (v === null || v === undefined || Number.isNaN(v) ? "--" : nf(v * 100, d));
+
 const pct = (v, d = 2) => (v === null || v === undefined ? "--" : nf(v, d) + "%");
 const signed = (v, d = 1) => (v === null || v === undefined ? "--" : (v > 0 ? "+" : "") + nf(v, d) + "%");
 
@@ -2440,7 +2461,7 @@ function buildOptionStory(d, tab) {
        <b>${nf(Math.abs(atm.delta) * 100, 0)} shares</b>, so it gains roughly
        <b>${G.usd0(Math.abs(atm.delta) * 100)}</b> on the first dollar the stock rises. Its gamma
        of <b>${nf(atm.gamma, 4)}</b> is how fast that changes: every dollar higher adds about
-       <b>${nf(atm.gamma * 100, 1)} more shares</b> of exposure, and every dollar lower takes the
+       <b>${x100(atm.gamma, 1)} more shares</b> of exposure, and every dollar lower takes the
        same away. The position speeds up as it works and stalls as it fails.
        ${need ? `Put together: the stock has to travel about <b>${money(need)}</b>
         (${pct((need / spot) * 100, 1)}) in your favour over ${hzWord} just to break even against
@@ -2712,7 +2733,7 @@ function greeksTile(d, tab) {
          <b>${exp.trading_days} trading day${exp.trading_days === 1 ? "" : "s"}</b> that are left
          into <b>${bin.tree.steps} steps</b> of roughly <b>${bin.hours} market hours</b> each. At
          every step the price either rises <b>${nf(bin.tree.upPct, 2)}%</b> or falls
-         <b>${nf(bin.tree.downPct, 2)}%</b>, with a <b>${nf(bin.tree.p * 100, 1)}%</b> chance of
+         <b>${nf(bin.tree.downPct, 2)}%</b>, with a <b>${x100(bin.tree.p, 1)}%</b> chance of
          rising. Those numbers are not a forecast &mdash; they are chosen so the tree drifts at
          the risk-free rate, which is what makes the pricing fair rather than opinionated.</p>
          <p>It then walks <b>backwards from expiry</b>. At the last step every branch is worth
@@ -2743,7 +2764,7 @@ function greeksTile(d, tab) {
          <span>tree parameter</span><span>value</span></div>
        ${kv("up move per step", "&times;" + nf(bin.tree.u, 5))}
        ${kv("down move per step", "&times;" + nf(bin.tree.d, 5))}
-       ${kv("chance of an up step", pct(bin.tree.p * 100, 2))}
+       ${kv("chance of an up step", pct100(bin.tree.p, 2))}
        ${kv("american price", G.usd(bin.tree.price))}
        ${kv("european price", G.usd(bin.tree.euro))}
        ${kv("value of exercising early", G.usd(bin.tree.early))}`;
@@ -3429,15 +3450,18 @@ function valuationTile(f) {
       kv("PEG", nf(v.peg, 2)) + kv("price/sales", nf(v.price_to_sales, 1)) +
       kv("price/book", nf(v.price_to_book, 1)) + kv("EV/EBITDA", nf(v.ev_to_ebitda, 1)) +
       `<div style="margin-top:5px;border-top:1px solid var(--rule);padding-top:4px">` +
-      kv("gross margin", pct(h.gross_margin * 100, 1)) + kv("operating margin", pct(h.operating_margin * 100, 1)) +
-      kv("return on equity", pct(h.roe * 100, 1)) + kv("debt/equity", nf(h.debt_to_equity, 1)) +
-      kv("revenue growth", pct(g.revenue_growth * 100, 1), sign(g.revenue_growth)) + `</div>`
+      kv("gross margin", pct100(h.gross_margin, 1)) + kv("operating margin", pct100(h.operating_margin, 1)) +
+      kv("return on equity", pct100(h.roe, 1)) + kv("debt/equity", nf(h.debt_to_equity, 1)) +
+      kv("revenue growth", pct100(g.revenue_growth, 1), sign(g.revenue_growth)) + `</div>`
   );
 }
 
 function analystTile(f) {
   const a = f?.analysts;
-  if (!a) return "";
+  // Nobody covers a fund, and a panel of five dashes under a headline
+  // reading "--" is not an empty result -- it is a panel that should
+  // not be on the page at all. SPY was carrying one.
+  if (!a || !a.count || a.target_mean == null) return "";
   return tile(
     "analysts", "e-claimed t-mid", "w1 h2", "Analysts",
     `<div class="figure ${a.upside_pct > 0 ? "up" : "down"}">${signed(a.upside_pct)}</div>
@@ -3453,7 +3477,7 @@ function shortTile(f) {
   if (!s || s.short_pct_float === null) return "";
   return tile(
     "short", "e-filed t-mid", "w1 h2", "Short interest",
-    `<div class="figure ${s.short_pct_float * 100 > 10 ? "warn" : ""}">${pct(s.short_pct_float * 100, 2)}</div>
+    `<div class="figure ${s.short_pct_float * 100 > 10 ? "warn" : ""}">${pct100(s.short_pct_float, 2)}</div>
      <div class="unitline">of the free float</div>
      ${kv("shares short", big(s.shares_short))}${kv("days to cover", nf(s.short_ratio, 1))}
      ${kv("float", big(s.float_shares))}`
@@ -3942,14 +3966,14 @@ const DETAIL = {
         <div class="dexp-w">${why}</div></div>`).join("")}
       <h4>What you are buying</h4>
       ${statGrid([
-        ["gross margin", pct(h.gross_margin * 100, 1)],
-        ["operating margin", pct(h.operating_margin * 100, 1)],
-        ["return on equity", pct(h.roe * 100, 1)],
+        ["gross margin", pct100(h.gross_margin, 1)],
+        ["operating margin", pct100(h.operating_margin, 1)],
+        ["return on equity", pct100(h.roe, 1)],
         ["debt/equity", nf(h.debt_to_equity, 1)],
         ["current ratio", nf(h.current_ratio, 2)],
         ["free cash flow", h.free_cashflow ? "$" + big(h.free_cashflow) : "--"],
-        ["revenue growth", pct(g.revenue_growth * 100, 1), sign(g.revenue_growth)],
-        ["earnings growth", pct(g.earnings_growth * 100, 1), sign(g.earnings_growth)],
+        ["revenue growth", pct100(g.revenue_growth, 1), sign(g.revenue_growth)],
+        ["earnings growth", pct100(g.earnings_growth, 1), sign(g.earnings_growth)],
       ])}
       <div class="prose">A high multiple is not the same as expensive. It is a bet that the
       growth and the margins hold. The question these numbers pose is whether the price already
@@ -4032,7 +4056,7 @@ const DETAIL = {
     if (!s) return `<div class="prose">No short-interest data.</div>`;
     return `<h4>The bear side</h4>
       ${statGrid([
-        ["short interest", pct(s.short_pct_float * 100, 2)],
+        ["short interest", pct100(s.short_pct_float, 2)],
         ["shares short", big(s.shares_short)],
         ["days to cover", nf(s.short_ratio, 1)],
         ["free float", big(s.float_shares)],

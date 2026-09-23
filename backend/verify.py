@@ -1076,6 +1076,53 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "dividend model consistency", f"could not run: {exc}"))
 
+section("A missing number is never shown as a real one")
+
+# In JavaScript `null * 100` is 0, not null. So `pct(x * 100)` hands a
+# genuine zero to a formatter that would have printed a dash, and an
+# absent measurement becomes a confident "0.0%".
+#
+# SPY was reporting a gross margin of 0.0%, an operating margin of
+# 0.0% and a return on equity of 0.0%. A fund has none of those. That
+# is worse than a gap: it asserts the thing was measured and came out
+# at nothing. Scanned for, because the multiplication reads as
+# harmless everywhere it appears.
+try:
+    import re as _re
+
+    js = (Path(__file__).resolve().parent.parent / "frontend" / "app.js") \
+        .read_text(encoding="utf-8")
+
+    # Flag only the unguarded ones. A multiplication sitting after an
+    # explicit null test on the same value is fine, and so is the safe
+    # helper's own body -- the point is to catch the places where
+    # nothing checked at all.
+    unsafe = []
+    for m in _re.finditer(r"\b(?:pct|nf|money|signed)\(\s*([A-Za-z_][\w.?\[\]]*)"
+                          r"\s*\*\s*100\b", js):
+        name = m.group(1)
+        leaf = name.split(".")[-1].split("[")[0]
+        before = js[max(0, m.start() - 260):m.start()]
+        guarded = (
+            _re.search(_re.escape(name) + r"\s*===?\s*null", before)
+            or _re.search(r"\b" + _re.escape(leaf) + r"\s*===?\s*null", before)
+            or _re.search(r"\b" + _re.escape(leaf) + r"\s*\?", before)
+            or "v === null || v === undefined" in before
+        )
+        if not guarded:
+            unsafe.append(f"line {js[:m.start()].count(chr(10)) + 1}: {name}")
+
+    RESULTS.append((not unsafe, "no formatter is handed a null times a hundred",
+                    "clean" if not unsafe else f"{len(unsafe)}: {unsafe[:2]}"))
+
+    # And the safe helper checks before it multiplies, not after.
+    safe = _re.search(r"const pct100 = \(v, d = 2\) =>\s*\n?\s*\(v === null \|\| "
+                      r"v === undefined \|\| Number\.isNaN\(v\)", js)
+    RESULTS.append((bool(safe), "the percentage helper checks before multiplying",
+                    "pct100 guards first" if safe else "pct100 missing or reordered"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "null-times-100 scan", f"could not run: {exc}"))
+
 section("No two scripts declare the same global")
 
 # Every frontend file is a classic script, so they all share one scope.
