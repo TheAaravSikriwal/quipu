@@ -2137,3 +2137,88 @@ a { color: inherit; text-decoration: none; }
 .q.ivhv.dear  { color: var(--neg); }
 .q.ivhv.cheap { color: var(--pos); }
 .q.ivhv.flat  { color: var(--rule2); }
+
+
+/* ---- size, and the sums written out ----
+   The position workspace states what a trade costs and what it can do.
+   Two things were missing from it: any way to say how much of it you
+   want, and the arithmetic behind the three figures it puts in the
+   largest type on the page. */
+
+.mnysize {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 0 14px;
+}
+.mszlab {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+}
+.mszbtn {
+  width: 26px; height: 26px; padding: 0;
+  background: var(--raised); color: var(--text2);
+  border: 1px solid var(--rule); border-radius: 2px;
+  font-family: var(--mono); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.mszbtn:hover { background: var(--panel); color: var(--text); border-color: var(--rule2); }
+.mszin {
+  width: 58px; height: 26px; text-align: center;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--rule2); border-radius: 2px;
+  font-family: var(--mono); font-size: 14px;
+}
+.mszin:focus { outline: none; border-color: var(--text2); }
+.mszhint { font-size: 11px; color: var(--faint); }
+.mszhint b { color: var(--text2); font-family: var(--mono); }
+
+/* What is actually being bought, in the words an order would use. */
+.mnywhat { padding: 0 0 12px; }
+.mnylegs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.mnyleg {
+  font-family: var(--mono); font-size: 13px; color: var(--text2);
+  background: var(--raised); border: 1px solid var(--rule);
+  border-radius: 2px; padding: 4px 9px;
+}
+.mnyleg b { color: var(--text); font-weight: 600; }
+.mnyleg i { font-style: normal; color: var(--faint); font-size: 11px; }
+.mnyleg.long  { border-left: 2px solid var(--pos); }
+.mnyleg.short { border-left: 2px solid var(--neg); }
+
+/* Four columns is one too many to wrap gracefully at the old minimum. */
+.mnygrid.four { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+
+.mnymath { margin-top: 14px; }
+.mnymath > summary {
+  cursor: pointer; list-style: none;
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  padding: 4px 0;
+}
+.mnymath > summary::-webkit-details-marker { display: none; }
+.mnymath > summary::before { content: "− "; font-family: var(--mono); }
+.mnymath:not([open]) > summary::before { content: "+ "; }
+.mnymath > summary:hover { color: var(--text2); }
+.mnymathgrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1px; background: var(--rule);
+  border: 1px solid var(--rule); margin-top: 6px;
+}
+.mnymathpane { background: var(--panel); padding: 12px 14px 14px; }
+.mnymathpane h6 {
+  margin: 0 0 8px; font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+/* Inside a pane the sum is the content, not a tooltip, so it gets room. */
+.mnymathpane .wcalc { font-size: 12px; }
+
+/* The sum behind a step's headline figure, folded away by default:
+   the steps are a narrative, and three open sums between each
+   paragraph would break the thread they are there to carry. */
+.sworking { margin-top: 9px; }
+.sworking > summary {
+  cursor: pointer; list-style: none;
+  font-size: 10.5px; color: var(--faint); padding: 2px 0;
+}
+.sworking > summary::-webkit-details-marker { display: none; }
+.sworking > summary::before { content: "+ "; font-family: var(--mono); }
+.sworking[open] > summary::before { content: "− "; }
+.sworking > summary:hover { color: var(--text2); }

@@ -1030,6 +1030,207 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "option board default", f"could not run: {exc}"))
 
+section("Every big number on the position page shows its sum")
+
+# The page asked for these all along -- the chips call
+# calc(..., working.net_cost) and friends -- but the endpoint rebuilt
+# `working` with three keys on its way out and overwrote the five the
+# engine had produced. So "most you can make" and "most you can lose",
+# the two figures in the largest type, were the only ones on the page
+# with nothing behind them.
+try:
+    import working as W
+    import position as POS
+
+    legs = [{"kind": "call", "side": "long", "strike": 337.5, "qty": 2,
+             "entry": 2.50, "expiry": "2026-10-16"},
+            {"kind": "call", "side": "short", "strike": 342.5, "qty": 2,
+             "entry": 1.00, "expiry": "2026-10-16"}]
+    a = POS.analyse(legs, spot=337.0, vol=0.23, rate=0.04)
+    w = a.get("working") or {}
+
+    want = {"net_cost", "profit", "pl_pct", "max_profit", "max_loss"}
+    RESULTS.append((want <= set(w), "the five figures each carry their working",
+                    f"{len(want & set(w))} of {len(want)}"))
+
+    # A sum that does not come to the number printed above it is worse
+    # than no sum at all.
+    bad = []
+    for name, res in (("net_cost", a["net_cost"]),
+                      ("max_profit", a["max_profit"]),
+                      ("max_loss", a["max_loss"])):
+        x = w.get(name)
+        if x and abs(x["result"] - res) > 0.01:
+            bad.append(f"{name}: sum says {x['result']}, page says {res}")
+    RESULTS.append((not bad, "and each sum comes to the figure it explains",
+                    "all agree" if not bad else "; ".join(bad)))
+
+    # The legs are kept in two shapes -- side as +1/-1 inside, as
+    # "long"/"short" on the way out, with the hundred dropped. Reading
+    # the second as the first would price a contract as a single share.
+    internal = [{"kind": "call", "side": 1, "qty": 2, "entry": 2.5,
+                 "strike": 337.5, "mult": 100},
+                {"kind": "call", "side": -1, "qty": 2, "entry": 1.0,
+                 "strike": 342.5, "mult": 100}]
+    external = [{"kind": "call", "side": "long", "qty": 2, "entry": 2.5,
+                 "strike": 337.5},
+                {"kind": "call", "side": "short", "qty": 2, "entry": 1.0,
+                 "strike": 342.5}]
+    si = W.settlement(internal, 342.5, 300.0)
+    se = W.settlement(external, 342.5, 300.0)
+    RESULTS.append((abs(si["result"] - se["result"]) < 0.005,
+                    "both shapes of a leg settle to the same number",
+                    f'{si["result"]} and {se["result"]}'))
+
+    # Half of the maximum has to actually BE half of the maximum.
+    g = POS.guidance(a, 0.23, 0.04)
+    half = next((x for x in g if "half" in x["head"].lower()), None)
+    if not half:
+        RESULTS.append((None, "  [SKIP] no half-profit step on this position", ""))
+    else:
+        hw = half.get("working")
+        target = a["max_profit"] * 0.5
+        RESULTS.append((bool(hw) and abs(hw["result"] - target) < 1.0,
+                        "half the maximum is priced where it is reached",
+                        f'{half["figure"]} settles to '
+                        f'{hw["result"] if hw else "--"}, half is {target}'))
+
+    # Every step that shows a sum must have it come to the figure above it.
+    off = []
+    for step in g:
+        sw = step.get("working")
+        # A labelled sum deliberately explains something OTHER than the
+        # figure -- the half-profit step prints a price and proves it
+        # with the profit at that price -- so it is not compared here.
+        if not sw or step.get("working_label"):
+            continue
+        shown = "".join(c for c in str(step.get("figure") or "")
+                        if c.isdigit() or c in ".-")
+        try:
+            if shown and abs(abs(float(shown)) - abs(sw["result"])) > 1.0:
+                off.append(f'{step["head"]}: {step["figure"]} vs {sw["result"]}')
+        except ValueError:
+            pass
+    RESULTS.append((not off, "and every step agrees with its own arithmetic",
+                    "all agree" if not off else "; ".join(off[:2])))
+
+    # A strike is a name. 337.5 rounded to "$338" is a different
+    # contract, one that also exists and trades separately.
+    itm = [{"kind": "call", "side": "short", "strike": 337.5, "qty": 1,
+            "entry": 2.0, "expiry": "2026-10-16"}]
+    b = POS.analyse(itm, spot=345.0, vol=0.23, rate=0.04)
+    txt = " ".join(str(x.get("body", "")) + str(x.get("figure", ""))
+                   for x in POS.guidance(b, 0.23, 0.04))
+    RESULTS.append(("$338" not in txt, "a half-dollar strike keeps its half",
+                    "337.5 is not rounded to 338"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "position working", f"could not run: {exc}"))
+
+section("The printed rows add up to the printed total")
+
+# A sum is only worth showing if following it gives the answer above
+# it. The leading row of a sum carries no operator, so an unsigned
+# magnitude there reads as positive -- and a long call's theta is
+# negative while a short call's is positive, so the position sum
+# printed "34.75 + 33.47" under a total of -1.28. Every number in it
+# was right and the arithmetic was unfollowable.
+#
+# Evaluated the way a reader would: take the first row, then apply each
+# later row's operator to it.
+def _walk(w):
+    """Follow a sum the way it is written. None if it cannot be read."""
+    total = None
+    for ln in w.get("lines") or []:
+        v = ln.get("gives")
+        if v is None:
+            v = 1.0
+            for t in ln.get("terms") or []:
+                if t.get("value") is None:
+                    return None
+                v *= float(t["value"])
+        v = float(v)
+        op = ln.get("op") or ""
+        if total is None:
+            total = -v if op == "-" else v
+        elif op == "+":
+            total += v
+        elif op == "-":
+            total -= v
+        elif op == "x":
+            total *= v
+        elif op == "/":
+            total = total / v if v else None
+        elif op == "floor":
+            total = max(total, v)
+        else:
+            return None
+        if total is None:
+            return None
+    return total
+
+
+try:
+    import working as W
+    import position as POS
+
+    cases = [
+        ("bull call spread", [
+            {"kind": "call", "side": "long", "strike": 337.5, "qty": 2,
+             "entry": 2.50, "expiry": "2026-10-16"},
+            {"kind": "call", "side": "short", "strike": 342.5, "qty": 2,
+             "entry": 1.00, "expiry": "2026-10-16"}]),
+        ("cash-secured put", [
+            {"kind": "put", "side": "short", "strike": 330, "qty": 1,
+             "entry": 4.10, "expiry": "2026-10-16"}]),
+        ("covered call", [
+            {"kind": "stock", "side": "long", "strike": None, "qty": 100,
+             "entry": 337.0, "expiry": ""},
+            {"kind": "call", "side": "short", "strike": 345, "qty": 1,
+             "entry": 3.20, "expiry": "2026-10-16"}]),
+        ("long straddle", [
+            {"kind": "call", "side": "long", "strike": 337.5, "qty": 1,
+             "entry": 8.10, "expiry": "2026-10-16"},
+            {"kind": "put", "side": "long", "strike": 337.5, "qty": 1,
+             "entry": 7.90, "expiry": "2026-10-16"}]),
+    ]
+
+    broken, checked = [], 0
+    for label, legs in cases:
+        a = POS.analyse(legs, spot=337.0, vol=0.23, rate=0.04)
+        sums = dict(a.get("working") or {})
+        for i, bw in enumerate(a.get("breakeven_working") or []):
+            sums[f"breakeven[{i}]"] = bw
+        # greek_working carries the contract it describes -- strike,
+        # kind, expiry -- alongside the five sums, so only the entries
+        # that are sums are collected.
+        for k, gw in (a.get("greek_working") or {}).items():
+            if isinstance(gw, dict) and gw.get("lines"):
+                sums[f"greek.{k}"] = gw
+        for st in POS.guidance(a, 0.23, 0.04):
+            if st.get("working"):
+                sums[st["head"]] = st["working"]
+
+        for name, w in sums.items():
+            if not w or not w.get("lines"):
+                continue
+            checked += 1
+            got = _walk(w)
+            if got is None:
+                broken.append(f"{label}/{name}: cannot be followed")
+                continue
+            want = float(w["result"])
+            # A per-share sum states the share figure and prints the
+            # x100 line separately underneath it.
+            tol = max(0.02, abs(want) * 0.001)
+            if abs(got - want) > tol:
+                broken.append(f"{label}/{name}: rows give {got:.4f}, says {want}")
+
+    RESULTS.append((not broken, "every sum evaluates to the total it prints",
+                    f"{checked} sums across {len(cases)} positions"
+                    if not broken else "; ".join(broken[:3])))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "sum evaluation", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

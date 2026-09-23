@@ -444,6 +444,7 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
     pay, at_expiry = _payoff_fn(legs, vol, rate, div_yield)
 
     ext = _extremes(pay, strikes, spot)
+    where = _where_extreme(pay, strikes, spot)
     lo = max(0.01, min(min(strikes), spot) * 0.4)
     hi = max(max(strikes), spot) * 1.8
     bes = _breakevens(pay, lo, hi)
@@ -484,11 +485,17 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "share_equivalent": round(greeks["delta"], 1),
         "breakevens": bes,
         "breakeven_working": _breakeven_working(bes, legs, cost),
+        # The page has always ASKED for these -- the chips call
+        # calc(..., d.working?.net_cost) and friends -- but nothing ever
+        # built the dict, so every one of those hovers resolved to
+        # undefined and showed nothing. The numbers the reader most
+        # wants to check were the ones with no arithmetic behind them.
+        "working": _position_working(legs, cost, value_now, pl, risk, ext, where),
         "greek_working": _greek_working(legs, spot, vol, rate, div_yield),
         "chance": pop,
         "needs": _needs(pay, spot, bes, curve),
         "valued_at": at_expiry,
-        **_where_extreme(pay, strikes, spot),
+        **where,
         "days_left": days_left,
         "curve": curve,
         **ext,
@@ -506,8 +513,37 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
     occur for the position to work, which is the set of facts an exit
     decision is actually made from.
     """
-    out: List[Dict[str, str]] = []
-    add = lambda h, b, f="": out.append({"head": h, "body": b, "figure": f})
+    out: List[Dict[str, Any]] = []
+
+    # Each step leads with a figure in large type, and those figures were
+    # the only large numbers on the page a reader could not check. The
+    # sums already exist -- analyse() built them for the chips above --
+    # so the step carries the same object rather than a second copy of
+    # the arithmetic that could drift from it.
+    def add(h, b, f="", w=None, w_label=""):
+        """One step.
+
+        `w_label` is set when the sum does NOT come to the figure above
+        it. "Where half the profit is" prints a PRICE and its sum comes
+        to the profit at that price -- attaching that to the figure's
+        hover says $340.75 is derived from a sum ending in 350.00, which
+        it is not. Labelled instead, it reads as what it is: the proof
+        that the price named is the right one.
+        """
+        out.append({"head": h, "body": b, "figure": f,
+                    "working": w, "working_label": w_label})
+
+    # The same payoff the analysis was built from, rebuilt from the legs
+    # on their way out. Needed because the drawn curve is far too coarse
+    # to locate a price inside a narrow spread.
+    try:
+        _pay, _ = _payoff_fn([_norm(l) for l in a["legs"]], vol, rate, div_yield)
+    except Exception:                                      # noqa: BLE001
+        _pay = None
+
+    W = a.get("working") or {}
+    GW = a.get("greek_working") or {}
+    BW = a.get("breakeven_working") or []
 
     spot, pl = a["spot"], a["pl"]
     risk, mp = a.get("risk"), a.get("max_profit")
@@ -520,7 +556,8 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
                     f"can ever make.")
     add("Where you are",
         f"The position is {'up' if pl >= 0 else 'down'} <b>{_usd(abs(pl))}</b>."
-        f"{share}{captured}", f"{'+' if pl >= 0 else '-'}{_usd(abs(pl))}")
+        f"{share}{captured}", f"{'+' if pl >= 0 else '-'}{_usd(abs(pl))}",
+        W.get("profit"))
 
     # 2 -- the clock
     theta = a["greeks"]["theta"]
@@ -533,7 +570,10 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
             f"{'day' if theta < 0 else 'day in your favour'}.{run} "
             + ("Decay accelerates into expiry rather than running evenly."
                if theta < 0 else "Decay is working for you, which is the whole trade."),
-            f"{_usd(theta)}/day")
+            f"{_usd(theta)}/day",
+            # The position's theta, not the leading leg's. These are
+            # different numbers and the page prints the first.
+            __import__("working").greek_total("theta", a["legs"], theta))
 
     # 3 -- what still has to happen
     bes = a.get("breakevens") or []
@@ -547,7 +587,8 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
             + ("You are already past it." if inside
                else "The move has not happened yet.")
             + (f" The other side is ${max(bes):,.2f}." if len(bes) > 1 else ""),
-            f"${nearest:,.2f}")
+            f"${nearest:,.2f}",
+            BW[bes.index(nearest)] if bes.index(nearest) < len(BW) else None)
 
     # 4 -- the odds, on the model's terms
     if days and vol:
@@ -570,7 +611,11 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
                   and ((l["kind"] == "call" and spot > l["strike"])
                        or (l["kind"] == "put" and spot < l["strike"]))]
     if itm_shorts:
-        names = ", ".join(f"${l['strike']:,.0f} {l['kind']}" for l in itm_shorts)
+        # A strike is a name. Rounded to whole dollars the 337.5 call
+        # reads as "$338", which is a different contract that also exists.
+        names = ", ".join(
+            f"${l['strike']:,.2f}".rstrip("0").rstrip(".") + f" {l['kind']}"
+            for l in itm_shorts)
         add("Assignment is live",
             f"Your short {names} {'is' if len(itm_shorts) == 1 else 'are'} in the money. "
             f"American options can be exercised on any day, and the risk rises as "
@@ -598,7 +643,7 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
 
     # 7 -- the exits, as prices rather than advice
     if mp and mp > 0 and risk:
-        half = _price_for_pl(a, mp * 0.5)
+        half = _price_for_pl(a, mp * 0.5, _pay)
         if half:
             # The reason to take half differs by structure, so say the right
             # one: a credit trade is closed early to stop renting out risk
@@ -610,9 +655,15 @@ def guidance(a: Dict[str, Any], vol: float, rate: float,
                    "The second half of a debit trade's profit is the part that needs "
                    "the move to keep going, which is the part you are least likely "
                    "to be paid for.")
+            import working as W                        # noqa: PLC0415
             add("Where half the profit is",
                 f"Half of the maximum ({_usd(mp * 0.5)}) is reached around "
-                f"<b>${half:,.2f}</b>. {why}", f"${half:,.2f}")
+                f"<b>${half:,.2f}</b>. {why}", f"${half:,.2f}",
+                # The price is found by walking the payoff, same as the
+                # extremes are. Showing the settlement AT it is what makes
+                # "half the maximum" something a reader can verify.
+                W.settlement(a["legs"], half, a["net_cost"]),
+                f"what the position is worth at ${half:,.2f}")
     return out
 
 
@@ -629,15 +680,65 @@ def _profitable_now(a: Dict[str, Any], spot: float) -> bool:
     return False
 
 
-def _price_for_pl(a: Dict[str, Any], target: float) -> Optional[float]:
-    """The underlying price at which the payoff first reaches `target`."""
+def _price_for_pl(a: Dict[str, Any], target: float, pay=None) -> Optional[float]:
+    """The price nearest today's at which the payoff reaches `target`.
+
+    Solved against the payoff itself, not against the drawn curve.
+
+    The curve is sixty-one points for a chart, spread over a range that
+    runs from forty percent of spot to nearly twice it -- about eight
+    dollars a step on a $337 share. A five-dollar-wide spread does all
+    of its work inside ONE of those steps, so reading the answer off the
+    curve skipped the entire ramp and returned the first grid point past
+    it, which is already at the maximum.
+
+    That put "half of the maximum is reached around $343.54" on a
+    position whose half-way price is $340.75 -- and $343.54 is where it
+    makes the whole thing, not half. Every narrow spread was wrong the
+    same way, and the narrower the spread the worse it got.
+    """
+    if pay is None:
+        # No payoff to hand: fall back to the curve, which is coarse but
+        # is at least the same shape.
+        best, dist = None, None
+        for p in a["curve"]:
+            if p["pl"] >= target:
+                d = abs(p["s"] - a["spot"])
+                if dist is None or d < dist:
+                    best, dist = p["s"], d
+        return best
+
+    curve = a["curve"]
+    lo, hi = curve[0]["s"], curve[-1]["s"]
+    spot = a["spot"]
+
+    # Fine enough that no strike-to-strike stretch is skipped, then
+    # bisected so the answer is exact rather than merely close.
+    steps = 4000
+    prev_x, prev_y = lo, pay(lo)
     best, dist = None, None
-    for p in a["curve"]:
-        if p["pl"] >= target:
-            d = abs(p["s"] - a["spot"])
+    for i in range(1, steps + 1):
+        x = lo + (hi - lo) * i / steps
+        y = pay(x)
+        if (prev_y < target) != (y < target):
+            aa, bb = prev_x, x
+            for _ in range(60):
+                m = 0.5 * (aa + bb)
+                if (pay(aa) < target) != (pay(m) < target):
+                    bb = m
+                else:
+                    aa = m
+            cross = 0.5 * (aa + bb)
+            d = abs(cross - spot)
             if dist is None or d < dist:
-                best, dist = p["s"], d
-    return best
+                best, dist = round(cross, 2), d
+        prev_x, prev_y = x, y
+
+    if best is not None:
+        return best
+    # No crossing: the target is already met across the whole range, or
+    # never met anywhere in it.
+    return next((p["s"] for p in curve if p["pl"] >= target), None)
 
 
 # --------------------------------------------------------- in plain english
@@ -895,6 +996,56 @@ def _needs(pay, spot: float, bes: List[float],
 
 def _dollars(v: Optional[float]) -> str:
     return "--" if v is None else f"${v:,.2f}"
+
+
+def _extreme_price(regions: Optional[List[Dict[str, Any]]]) -> Optional[float]:
+    """One finishing price to illustrate an extreme that holds over a range.
+
+    A bull call spread makes its maximum anywhere at or above the short
+    strike, so there is no single price to show -- but there is a
+    natural one: the corner where the extreme is first reached. Picking
+    the far end instead would settle the arithmetic at four times spot
+    and read like a forecast of one.
+    """
+    if not regions:
+        return None
+    r = regions[0]
+    if r.get("to_inf"):
+        return r["lo"]
+    if r.get("to_zero"):
+        return r["hi"]
+    return r["lo"]
+
+
+def _position_working(legs: List[Dict[str, Any]], cost: float, value_now: float,
+                      pl: float, risk: Optional[float],
+                      ext: Dict[str, Any],
+                      where: Dict[str, Any]) -> Dict[str, Any]:
+    """The arithmetic behind the figures the page puts in large type.
+
+    Everything here is already computed elsewhere and shown as a
+    result. This is the same result written as the sum it came from, so
+    the reader can check it rather than trust it.
+    """
+    import working as W                                   # noqa: PLC0415
+
+    out: Dict[str, Any] = {
+        "net_cost": W.net_cost([
+            {"kind": l["kind"], "qty": l["qty"], "entry": l["entry"],
+             "strike": l["strike"], "side": "long" if l["side"] > 0 else "short"}
+            for l in legs]),
+        "profit": W.profit_now(round(value_now, 2), round(cost, 2)),
+    }
+    if risk:
+        out["pl_pct"] = W.percent_of_risk(round(pl, 2), round(risk, 2))
+
+    out["max_profit"] = W.settlement(
+        legs, _extreme_price(where.get("best_at")), cost,
+        ext.get("max_profit_unbounded"))
+    out["max_loss"] = W.settlement(
+        legs, _extreme_price(where.get("worst_at")), cost,
+        ext.get("max_loss_unbounded"))
+    return out
 
 
 def _greek_working(legs: List[Dict[str, Any]], spot: float, vol: float,

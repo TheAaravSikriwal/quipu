@@ -186,12 +186,17 @@ def net_cost(legs: List[Dict[str, Any]]) -> Dict[str, Any]:
         total += cash if buying else -cash
         what = ("shares" if l.get("kind") == "stock"
                 else f"{l.get('strike')} {l.get('kind')}")
+        # The sign belongs to the operator OR to the value, never to
+        # both. Carrying it in each printed the sale of a $200 leg as
+        # "- ... = -200.00", and a reader following the row subtracted a
+        # negative: a spread costing $300 read as 500 - (-200) = 700.
+        # The operator carries it; every value is a magnitude.
         lines.append(line(
-            "" if i == 0 else ("+" if buying else "-"),
+            ("" if buying else "-") if i == 0 else ("+" if buying else "-"),
             term(f"{'bought' if buying else 'sold'} {qty:g} {what} at", price),
             term("contracts x shares each" if mult == 100 else "shares",
                  qty * mult, 0),
-            gives=cash if buying else -cash))
+            gives=cash))
     return sum_of(round(total, 2), lines, note=(
         "Positive is money out of your account, negative is money in."))
 
@@ -212,6 +217,131 @@ def percent_of_risk(profit: float, risk: float) -> Dict[str, Any]:
     ], unit="%", note=(
         "Measured against what is at risk rather than against what it cost, "
         "because for anything sold those are two different numbers."))
+
+
+def _what(leg: Dict[str, Any]) -> str:
+    """How a leg reads in a sentence."""
+    if leg.get("kind") == "stock":
+        return "shares"
+    strike = leg.get("strike")
+    return f"${strike:g} {leg.get('kind')}" if strike is not None else str(leg.get("kind"))
+
+
+def settlement(legs: List[Dict[str, Any]], price: float, cost: float,
+               unbounded: bool = False) -> Optional[Dict[str, Any]]:
+    """What the position is worth if the share finishes at `price`.
+
+    The best and worst cases are not solved from a formula -- they are
+    found by walking the payoff across every strike and reading off the
+    highest and lowest points, because the closed form is different for
+    each of the twenty-eight structures and a scan is the same for all
+    of them.
+
+    So the arithmetic shown here is not the search. It is the settlement
+    at the price the search landed on, which is the thing worth seeing:
+    every leg exercised or abandoned, added up, less what it cost to
+    open. A reader can check that by hand, which is the whole point.
+
+    Takes legs in either shape the engine keeps them in. Internally
+    `side` is +1 or -1 and `mult` carries the hundred; on the way out to
+    the page `side` becomes "long"/"short" and `mult` is dropped. Both
+    forms reach this function, and reading the second one as the first
+    multiplied a string by a float -- or, worse, would have silently
+    priced an option contract as a single share.
+    """
+    if unbounded or price is None:
+        return None
+
+    lines, settle = [], 0.0
+    for leg in legs:
+        kind = leg.get("kind")
+        if kind == "stock":
+            value = price
+        elif kind == "call":
+            value = max(price - (leg.get("strike") or 0.0), 0.0)
+        else:
+            value = max((leg.get("strike") or 0.0) - price, 0.0)
+
+        raw = leg.get("side", 1)
+        side = (-1 if str(raw).lower().startswith("s") else 1)             if isinstance(raw, str) else (1 if raw > 0 else -1)
+        mult = leg.get("mult") or (1 if kind == "stock" else 100)
+        shares = abs(float(leg.get("qty") or 0)) * mult
+        cash = side * shares * value
+        settle += cash
+
+        held = "you own" if side > 0 else "you owe"
+        # A leg you owe is always subtracted, even when it settles at
+        # nothing -- "+ you owe ... 0.00" reads as a credit. The side
+        # decides the operator; the leading row still has to show a
+        # minus rather than leaving a short leg looking positive.
+        lines.append(line(
+            ("" if side > 0 else "-") if not lines
+            else ("+" if side > 0 else "-"),
+            term(f"{held} {_what(leg)}, worth", value,
+                 note=("Worth nothing at this price -- it expires unexercised."
+                       if value == 0 and kind != "stock" else "")),
+            term("shares", shares, 0),
+            gives=abs(cash)))
+
+    # A credit was money in, so closing the position gives it back to you
+    # rather than taking it away. Printing "- -300" would be arithmetically
+    # right and unreadable.
+    paid = cost >= 0
+    lines.append(line(
+        "-" if paid else "+",
+        term("what you paid to open it" if paid else "what you were paid to open it",
+             abs(cost)),
+        gives=abs(cost)))
+
+    return sum_of(round(settle - cost, 2), lines, note=(
+        f"Every leg settled at ${price:,.2f}, then the opening cost taken off. "
+        "This is the finishing price the payoff peaks at, not a forecast."))
+
+
+_GREEK_UNIT = {
+    "delta": "for every $1 the share moves",
+    "gamma": "of delta, for every $1 the share moves",
+    "theta": "a day",
+    "vega": "for every 1 point of volatility",
+    "rho": "for every 1 point of rates",
+}
+
+
+def greek_total(name: str, legs: List[Dict[str, Any]],
+                total: float) -> Optional[Dict[str, Any]]:
+    """A position greek as the sum of the legs that make it.
+
+    The per-contract working explains one option. A position is several,
+    and the figure the page prints is all of them added up with their
+    signs and sizes -- so a hover that showed the leading leg's number
+    disagreed with the number it was attached to. On a two-by-two
+    spread it read -0.18 under a printed $1.25.
+    """
+    rows, run = [], 0.0
+    for leg in legs:
+        per = leg.get(name)
+        if per is None:
+            continue
+        raw = leg.get("side", 1)
+        side = (-1 if str(raw).lower().startswith("s") else 1)             if isinstance(raw, str) else (1 if raw > 0 else -1)
+        mult = leg.get("mult") or (1 if leg.get("kind") == "stock" else 100)
+        units = side * abs(float(leg.get("qty") or 0)) * mult
+        cash = units * float(per)
+        run += cash
+        rows.append(line(
+            ("" if cash >= 0 else "-") if not rows
+            else ("+" if cash >= 0 else "-"),
+            term(f"{'long' if side > 0 else 'short'} "
+                 f"{abs(float(leg.get('qty') or 0)):g} {_what(leg)}, each share", per, 4),
+            term("shares", abs(units), 0),
+            gives=abs(cash)))
+
+    if not rows:
+        return None
+    return sum_of(round(run, 4), rows, note=(
+        f"Each leg's {name} is per share. Multiplied by the shares it "
+        f"controls and added up with its sign, that is {_GREEK_UNIT.get(name, '')}."
+    ).strip())
 
 
 # --------------------------------------------------------------------------

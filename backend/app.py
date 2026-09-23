@@ -465,18 +465,13 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     analysis["rate"] = round(rate * 100, 3)
     analysis["div_yield"] = round(div * 100, 3)
 
-    # The three figures a reader is most likely to want to check, each
-    # written out as the sum it is. They are computed here rather than
-    # described here: the same numbers that went into the analysis go
-    # into the working, so the two cannot disagree.
-    risk = analysis.get("risk")
-    analysis["working"] = {
-        "net_cost": show_working.net_cost(legs),
-        "profit": show_working.profit_now(analysis.get("value_now") or 0.0,
-                                          analysis.get("net_cost") or 0.0),
-        "pl_pct": (show_working.percent_of_risk(analysis.get("pl") or 0.0, risk)
-                   if risk else None),
-    }
+    # The working comes back from analyse() with the analysis it explains.
+    #
+    # It used to be rebuilt here as well, and the rebuild -- three keys
+    # where the engine produces five -- overwrote the richer one on its
+    # way out. So "most you can make" and "most you can lose", the two
+    # figures on the page in the largest type, were the only ones with
+    # no arithmetic behind them: it existed, and this line dropped it.
     analysis["earnings"] = earnings
     analysis["marks_live"] = sum(
         1 for l in analysis["legs"]

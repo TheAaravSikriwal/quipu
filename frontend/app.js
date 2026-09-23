@@ -28,6 +28,17 @@ const nf = (v, d = 2) =>
     : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
 const money = (v, d = 2) => (v === null || v === undefined ? "--" : "$" + nf(v, d));
+/* A strike, which is a NAME as much as a number.
+ *
+ * Rounded to whole dollars to keep leg lists tidy, the 337.5 call
+ * printed as "$338" -- a contract that exists, trades separately, and
+ * is not the one being bought. Half-dollar strikes are standard near
+ * the money on anything liquid, so this was wrong on most of them.
+ *
+ * Whole strikes still print whole: "$340 call", not "$340.00 call".
+ */
+const strikeOf = (v) => (v === null || v === undefined || v === "" ? "--"
+  : "$" + nf(Number(v), Number(v) % 1 === 0 ? 0 : 2).replace(/0$/, ""));
 /* A fraction shown as a percentage.
  *
  * Exists because `pct100(xNone)` is a trap: in JavaScript `null * 100`
@@ -227,9 +238,28 @@ function newPositionTab() {
   return tab;
 }
 
+/* The legs as they would actually be traded.
+ *
+ * A leg carries the shape of the position -- one long call against one
+ * short one is a spread whichever size it is put on in -- and `size`
+ * carries how much of it. Kept apart rather than multiplied into the
+ * legs themselves so the ratio survives: a 1x2 stays a 1x2 at every
+ * size, and stepping the size up and back down returns the exact
+ * quantities rather than something rounded twice.
+ *
+ * Everything that leaves the builder goes through here, so what is
+ * priced and what is written to the log cannot disagree about size.
+ */
+function sizedLegs(u) {
+  const n = Math.max(1, Math.round(Number(u.size) || 1));
+  return u.legs
+    .filter((l) => Number(l.qty) > 0
+      && (l.kind === "stock" ? l.entry !== "" : l.strike !== "" && l.expiry))
+    .map((l) => ({ ...l, qty: Number(l.qty) * n }));
+}
+
 async function analysePosition(tab) {
-  const legs = tab.ui.legs.filter((l) =>
-    Number(l.qty) > 0 && (l.kind === "stock" ? l.entry !== "" : l.strike !== "" && l.expiry));
+  const legs = sizedLegs(tab.ui);
   if (!tab.ui.symbol || !legs.length) { tab.data = null; render(); return; }
 
   /* Every click on the board fires one of these, and they take a couple of
@@ -772,7 +802,7 @@ function third(text) {
   return head + (/(s|sh|ch|x|z)$/.test(head) ? "es" : "s") + tail;
 }
 
-function moneyBlock(a, symbol, spot) {
+function moneyBlock(a, symbol, spot, size = 1) {
   const cost = a.net_cost || 0;
   const credit = cost < 0;
   const paid = Math.abs(cost);
@@ -833,6 +863,20 @@ function moneyBlock(a, symbol, spot) {
 
   const arrow = { up: "&uarr;", down: "&darr;", still: "&ndash;", move: "&harr;" }[n.dir] || "";
 
+  /* What is actually being bought, in the same words the order would
+   * use. The grid below says what it costs and what it can do; without
+   * this it never says what IT IS, and a reader had to reconstruct that
+   * from the leg table further down the page. */
+  const legLine = (l) => `<span class="mnyleg ${l.side}"><b>${
+    l.side === "long" ? "buy" : "sell"} ${nf(l.qty, 0)}</b> ${
+    l.kind === "stock" ? "shares"
+      : `${strikeOf(l.strike)} ${l.kind}${l.expiry ? ` <i>${esc(l.expiry)}</i>` : ""}`}</span>`;
+  const buying = (a.legs || []).map(legLine).join("");
+
+  const contracts = (a.legs || [])
+    .filter((l) => l.kind !== "stock")
+    .reduce((t, l) => t + (Number(l.qty) || 0), 0);
+
   return `
   <div class="mny">
     <div class="mnyneed ${esc(n.dir || "")}">
@@ -843,7 +887,23 @@ function moneyBlock(a, symbol, spot) {
               ${nf(Math.abs(n.move_pct), 1)}% from ${money(spot)}</i>` : ""}</span>
     </div>
 
-    <div class="mnygrid">
+    <div class="mnysize">
+      <span class="mszlab">size</span>
+      <button class="mszbtn" data-size="down" title="one less">&minus;</button>
+      <input class="mszin" id="pos-size" value="${size}" inputmode="numeric"
+             aria-label="how many of this structure to trade">
+      <button class="mszbtn" data-size="up" title="one more">+</button>
+      <span class="mszhint">&times; the structure below${
+        contracts ? ` &mdash; <b>${nf(contracts, 0)}</b> contract${contracts === 1 ? "" : "s"} in total` : ""
+      }. Every figure on this page moves with it.</span>
+    </div>
+
+    <div class="mnywhat">
+      <div class="mnylab">what you are buying</div>
+      <div class="mnylegs">${buying}</div>
+    </div>
+
+    <div class="mnygrid four">
       <div class="mnycol today">
         <div class="mnylab">${credit ? "you receive today" : "you pay today"}</div>
         <div class="mnybig">${credit ? "+" : "&minus;"}${
@@ -854,17 +914,46 @@ function moneyBlock(a, symbol, spot) {
       </div>
       <div class="mnycol best">
         <div class="mnylab">most you can make</div>
-        <div class="mnybig">${a.max_profit_unbounded ? "no cap" : "+" + money(mp)}</div>
+        <div class="mnybig">${a.max_profit_unbounded ? "no cap"
+          : "+" + calc(money(mp), a.working?.max_profit)}</div>
         <div class="mnywhy">${bestWhy}</div>
       </div>
       <div class="mnycol worst">
         <div class="mnylab">most you can lose</div>
-        <div class="mnybig">${a.max_loss_unbounded ? "no limit" : "&minus;" + money(ml)}</div>
+        <div class="mnybig">${a.max_loss_unbounded ? "no limit"
+          : "&minus;" + calc(money(ml), a.working?.max_loss)}</div>
         <div class="mnywhy">${worstWhy}</div>
       </div>
     </div>
     ${ratio ? `<div class="mnyratio">${ratio}</div>` : ""}
+    ${mnyMath(a)}
   </div>`;
+}
+
+/* The three sums, open on the page.
+ *
+ * Hovering a number to see where it came from works when you already
+ * suspect it. It does not work for the figure you are deciding on,
+ * which wants to be readable without being asked for -- so the
+ * arithmetic behind what you pay, what you can make and what you can
+ * lose is simply printed underneath them.
+ */
+function mnyMath(a) {
+  const w = a.working || {};
+  const panes = [
+    ["what you pay to open it", w.net_cost],
+    ["the most it can make", w.max_profit],
+    ["the most it can lose", w.max_loss],
+  ].filter(([, x]) => x && x.lines?.length);
+  if (!panes.length) return "";
+
+  return `<details class="mnymath" open>
+    <summary>the arithmetic behind those three numbers</summary>
+    <div class="mnymathgrid">
+      ${panes.map(([label, x]) => `<div class="mnymathpane">
+        <h6>${label}</h6>${wcalc(x)}</div>`).join("")}
+    </div>
+  </details>`;
 }
 
 /* One setup, opened up.
@@ -1399,8 +1488,7 @@ function settleTrade(tab, id, received) {
 /** Write the working position into the book, new or existing. */
 function commitTrade(tab, id = null) {
   const u = tab.ui;
-  const legs = u.legs.filter((l) =>
-    Number(l.qty) > 0 && (l.kind === "stock" ? l.entry !== "" : l.strike !== "" && l.expiry));
+  const legs = sizedLegs(u);
   if (!u.symbol || !legs.length) return null;
 
   const at = id ? u.book.findIndex((t) => t.id === id) : -1;
@@ -1557,7 +1645,7 @@ function renderAnalysis(tab) {
         ${s.note ? `<p>${esc(s.note)}</p>` : ""}
       </div>
 
-      ${moneyBlock(d, u.symbol, d.spot)}
+      ${moneyBlock(d, u.symbol, d.spot, u.size || 1)}
 
       ${d.plain ? `<div class="plain">
         <p>${d.plain.position}</p>
@@ -1605,7 +1693,7 @@ function renderAnalysis(tab) {
         <div class="pleg plhead"><span>leg</span><span>expiry</span><span>sessions</span>
           <span>entry</span><span>mark</span><span>delta</span><span>profit</span></div>
         ${d.legs.map((l) => `<div class="pleg">
-          <span><b>${l.side} ${nf(l.qty, 0)}</b> ${l.kind === "stock" ? "stock" : `${money(l.strike, 0)} ${l.kind}`}</span>
+          <span><b>${l.side} ${nf(l.qty, 0)}</b> ${l.kind === "stock" ? "stock" : `${strikeOf(l.strike)} ${l.kind}`}</span>
           <span>${esc(l.expiry || "--")}</span>
           <span>${l.days == null ? "--" : l.days}</span>
           <span>${money(l.entry)}</span>
@@ -1622,8 +1710,16 @@ function renderAnalysis(tab) {
             <span class="sn">${i + 1}</span>
             <div class="sbody">
               <h5>${esc(g.head)}</h5>
-              ${g.figure ? `<div class="sfig">${esc(g.figure)}</div>` : ""}
+              ${g.figure ? `<div class="sfig">${
+                // Only hover-attach a sum that comes to the figure it is
+                // attached to. A labelled sum explains something next to
+                // the figure rather than the figure itself, and hanging
+                // it off the number would claim a derivation it is not.
+                calc(esc(g.figure), g.working_label ? null : g.working)}</div>` : ""}
               <p>${g.body}</p>
+              ${g.working ? `<details class="sworking">
+                <summary>${esc(g.working_label || "where that number comes from")}</summary>
+                ${wcalc(g.working)}</details>` : ""}
             </div>
           </div>`).join("")}
       </div>
@@ -1700,6 +1796,10 @@ function wirePosition(tab) {
       u.editing = t.id;
       u.symbol = t.symbol;
       u.legs = t.legs.map((l) => ({ ...l }));
+      // These quantities are already the real ones. Leaving a multiplier
+      // of 3 in place from the last thing built would silently reopen
+      // the trade at three times the size it was logged at.
+      u.size = 1;
       u.view = "work";
       u.route = "custom";
       u.chain = null;
@@ -1802,6 +1902,34 @@ function wirePosition(tab) {
     };
   });
 
+  /* Size.
+   *
+   * Re-prices rather than scaling the numbers in the browser: max loss
+   * is not always linear in size once a position has a stock leg in it,
+   * and a figure multiplied client-side would quietly disagree with the
+   * one the server would give. One source for every number on the page.
+   */
+  const setSize = (next) => {
+    const n = Math.max(1, Math.min(9999, Math.round(Number(next) || 1)));
+    if (n === (u.size || 1)) return;
+    u.size = n;
+    render(true);
+    analysePosition(tab);
+  };
+
+  const szin = document.getElementById("pos-size");
+  if (szin) {
+    szin.onchange = () => setSize(szin.value);
+    szin.onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); setSize(szin.value); }
+      if (e.key === "ArrowUp") { e.preventDefault(); setSize((u.size || 1) + 1); }
+      if (e.key === "ArrowDown") { e.preventDefault(); setSize((u.size || 1) - 1); }
+    };
+  }
+  document.querySelectorAll("[data-size]").forEach((b) => {
+    b.onclick = () => setSize((u.size || 1) + (b.dataset.size === "up" ? 1 : -1));
+  });
+
   const pt = document.getElementById("pre-toggle");
   if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(true); };
 
@@ -1823,7 +1951,9 @@ function wirePosition(tab) {
     };
   });
   const pb = document.getElementById("pre-back");
-  if (pb) pb.onclick = () => { u.preset = null; u.legs = []; tab.data = null; render(true); };
+  if (pb) pb.onclick = () => {
+    u.preset = null; u.legs = []; u.size = 1; tab.data = null; render(true);
+  };
 
   document.querySelectorAll("[data-use]").forEach((b) => {
     b.onclick = () => {
@@ -2107,6 +2237,9 @@ function tile(id, cls, span, title, body, badge = "") {
  * off a quote has no derivation, and marking it would promise one. */
 const calc = (formatted, working) =>
   (working ? window.QUIPU_WORKING.calc(formatted, working) : formatted);
+/* The same sum, laid out on the page instead of inside a hover. */
+const wcalc = (working) =>
+  (working ? window.QUIPU_WORKING.renderWorking(working) : "");
 const WK = () => window.QUIPU_WORKING.WK;
 
 const kv = (label, value, cls = "") =>
