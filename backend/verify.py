@@ -1288,6 +1288,87 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "moneyness", f"could not run: {exc}"))
 
+section("Every ready-made setup is what it claims to be")
+
+# Two independent statements about each setup: the name it is filed
+# under, and the shape the payoff actually turns out to have. A "bull"
+# call spread built upside-down off a thin chain is not bullish, and the
+# label would go on saying it was -- so the lean shown on the card is
+# read off the payoff, and the catalogue's own claim is checked against
+# it rather than trusted.
+try:
+    import presets as PRE
+    import position as POS
+
+    board = O.fetch_options("AAPL", max_expiries=1, div_yield=0.0)
+    if not board.get("available"):
+        RESULTS.append((None, "  [SKIP] setups -- " + str(board.get("reason"))[:40], ""))
+    else:
+        exp = board["expiries"][0]
+        spot = board.get("spot") or 0.0
+        vol = ((exp.get("stats") or {}).get("atm_iv") or 23.0) / 100.0
+        built = PRE.build(exp["calls"], exp["puts"], exp["expiry"], spot, vol, 0.04)
+
+        ids = {b["id"] for b in built}
+        missing = [c["id"] for c in PRE.CATALOGUE if c["id"] not in ids]
+        RESULTS.append((not missing, "every catalogued setup builds off a live board",
+                        f"{len(built)} of {len(PRE.CATALOGUE)}"
+                        if not missing else "missing " + ", ".join(missing[:4])))
+
+        # The detector has to recognise what the builder assembled. If it
+        # cannot, the card names one structure and the page below it
+        # names another.
+        unknown = [b["id"] for b in built
+                   if not b.get("detected") or "leg position" in str(b["detected"])]
+        RESULTS.append((not unknown, "and the detector names what was built",
+                        "all recognised" if not unknown else ", ".join(unknown[:4])))
+
+        wrong = [f'{b["id"]}: built {b["bias"]}, filed {PRE.DECLARED_BIAS.get(b["id"])}'
+                 for b in built
+                 if PRE.DECLARED_BIAS.get(b["id"]) != b.get("bias")]
+        RESULTS.append((not wrong, "the lean it shows matches the lean it claims",
+                        f"{len(built)} agree" if not wrong else "; ".join(wrong[:3])))
+
+        # "Bullish" is not the whole answer. A long call needs a rise; a
+        # cash-secured put needs the price not to fall through a level it
+        # is already above. Both are bullish and they are not the same
+        # hope, so the shade has to distinguish them.
+        shades = {b["id"]: b.get("shade") for b in built}
+        RESULTS.append((shades.get("buy_call") == "needs"
+                        and shades.get("csp") == "holds",
+                        "a rise and a hold are told apart",
+                        f'long call {shades.get("buy_call")}, '
+                        f'cash-secured put {shades.get("csp")}'))
+
+        # Where it stops improving has to be a real level, or absent --
+        # never a number on a position that has no cap.
+        bad = []
+        for b in built:
+            a = POS.analyse(b["legs"], spot, vol, 0.04)
+            h = a.get("hope") or {}
+            best = [st for st in h.get("steps") or []
+                    if st["label"].startswith("makes the most")]
+            if a.get("max_profit_unbounded") and best:
+                bad.append(f'{b["id"]}: capped level on an uncapped payoff')
+            if not a.get("max_profit_unbounded") and not best:
+                bad.append(f'{b["id"]}: no best level on a capped payoff')
+        RESULTS.append((not bad, "and says where it stops improving only when it does",
+                        "all consistent" if not bad else "; ".join(bad[:3])))
+
+        # An iron condor's two break-evens sit the same distance from the
+        # share price by construction. Choosing the nearest and the
+        # furthest separately returned the same one twice.
+        ic = next((b for b in built if b["id"] == "iron_condor"), None)
+        if ic:
+            a = POS.analyse(ic["legs"], spot, vol, 0.04)
+            lv = [st["level"] for st in (a["hope"]["steps"] or [])
+                  if "even" in st["label"] or st["label"] == "and at"]
+            RESULTS.append((len(lv) == len(set(lv)),
+                            "a two-sided break-even is not printed twice",
+                            ", ".join(str(x) for x in lv)))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "setups", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

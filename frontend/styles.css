@@ -87,6 +87,11 @@
   --pos:    #6E9E78;
   --neg:    #B5706B;
 
+  /* A deadline, which is neither good news nor bad. Desaturated to
+     sit with the pair above -- an expiry two sessions out is a fact
+     that wants noticing, not an alarm. */
+  --warn:   #B59A54;
+
   /* The four evidence classes. Barely there on purpose -- the class is
    * already named in words on every panel and drawn in the weight of
    * its top rule, so this is a third quiet echo of a fact you can
@@ -2281,3 +2286,95 @@ a { color: inherit; text-decoration: none; }
 .sworking > summary::before { content: "+ "; font-family: var(--mono); }
 .sworking[open] > summary::before { content: "− "; }
 .sworking > summary:hover { color: var(--text2); }
+
+
+/* ---- which way a position leans ----
+   Read off the payoff by the engine rather than off the name of the
+   structure. The word alone is not enough: "bullish" covers a long call
+   that needs a six percent rise and a cash-secured put that needs the
+   price not to fall four, so the chip says whether it NEEDS the move or
+   merely HOLDS a level. Colour is never the only carrier -- there is an
+   arrow and a word in every one of these. */
+
+.bias {
+  display: inline-flex; align-items: baseline; gap: 5px; margin-left: 8px;
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--rule); color: var(--faint);
+  white-space: nowrap; vertical-align: middle;
+}
+.bias i { font-style: normal; font-family: var(--mono); font-size: 11px; }
+.bias em { font-style: normal; opacity: .6; letter-spacing: .08em; }
+.bias.b-bullish { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 35%, transparent); }
+.bias.b-bearish { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
+.bias.b-neutral { color: var(--text2); border-color: var(--rule2); }
+.bias.b-either  { color: var(--text2); border-color: var(--rule2); }
+.bias.big { font-size: 9.5px; padding: 3px 9px; }
+
+/* The card edge repeats it, so the grid sorts itself by eye. */
+.pcard.lean-bullish { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--pos) 55%, transparent); }
+.pcard.lean-bearish { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--neg) 55%, transparent); }
+.pcard.lean-neutral,
+.pcard.lean-either  { box-shadow: inset 2px 0 0 var(--rule2); }
+
+/* ---- what you want to happen, and how far ---- */
+.mnyhope { padding: 0 0 16px; }
+.mnyhead { display: flex; align-items: center; gap: 10px; }
+.mnywant { font-size: 17px; line-height: 1.35; color: var(--text2); }
+.mnywant b { color: var(--text); font-weight: 600; }
+.mnyhope .mnyarrow { font-size: 20px; line-height: 1; }
+.mnyhope.lean-bullish .mnyarrow { color: var(--pos); }
+.mnyhope.lean-bearish .mnyarrow { color: var(--neg); }
+.mnyhope.lean-neutral .mnyarrow,
+.mnyhope.lean-either  .mnyarrow { color: var(--text2); }
+.mnyfrom { margin-top: 3px; font-size: 11.5px; color: var(--faint); }
+.mnyfrom b { color: var(--text2); font-family: var(--mono); }
+
+.mnysteps { list-style: none; margin: 11px 0 0; padding: 0; }
+.mnysteps li {
+  display: grid; grid-template-columns: 132px 92px 62px 1fr;
+  align-items: baseline; gap: 8px;
+  padding: 5px 0; border-top: 1px solid var(--hline);
+}
+.mslab {
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--faint);
+}
+.msval { font-family: var(--mono); font-size: 14px; color: var(--text); }
+.mspct { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+.mspct.up { color: var(--pos); }
+.mspct.down { color: var(--neg); }
+.msnote { font-size: 11px; color: var(--faint); }
+
+@media (max-width: 760px) {
+  .mnysteps li { grid-template-columns: 1fr auto; }
+  .mnysteps .msnote { grid-column: 1 / -1; }
+}
+
+/* ---- a deadline in the trade log ----
+   An option that expires this week is the one thing in a log that has a
+   clock on it: miss it and the position settles itself at whatever the
+   price happens to be. It used to print "2 sessions" in the same grey as
+   everything else on the row. */
+.bookitem { position: relative; }
+.bookitem.exp-soon  { box-shadow: inset 3px 0 0 var(--warn); }
+.bookitem.exp-today { box-shadow: inset 3px 0 0 var(--neg); }
+.bookitem.exp-gone  { box-shadow: inset 3px 0 0 var(--neg); }
+.bookitem.exp-gone .bookrow { opacity: .75; }
+
+.bdays { font-family: var(--ui); font-size: 10px; color: var(--faint); }
+.bookitem.exp-soon  .bdays { color: var(--warn); }
+.bookitem.exp-today .bdays,
+.bookitem.exp-gone  .bdays { color: var(--neg); font-weight: 700; }
+
+/* A dot, so urgency survives a colourblind reader and a grey printout. */
+.expdot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; margin-right: 6px; vertical-align: middle;
+}
+.bookitem.urgent .expdot { animation: expPulse 2.4s ease-in-out infinite; }
+@keyframes expPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .bookitem.urgent .expdot { animation: none; }
+}

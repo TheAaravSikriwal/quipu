@@ -74,6 +74,28 @@ def _leg(row: Dict, kind: str, side: str, expiry: str, qty: int = 1) -> Optional
             "delta": row.get("delta"), "iv": row.get("iv")}
 
 
+def _at(rows: List[Dict], strike: Optional[float]) -> Optional[Dict]:
+    """The row on one exact strike.
+
+    An iron butterfly sells the call and the put on the SAME strike, and
+    a synthetic long buys and sells one. Picking each side by nearest
+    delta independently lands them a strike or two apart, which is a
+    different structure wearing the name -- an iron condor, in the
+    butterfly's case.
+    """
+    if strike is None:
+        return None
+    for r in rows:
+        if r.get("strike") == strike and (r.get("bid") or r.get("ask")):
+            return r
+    return None
+
+
+def _stock(spot: float) -> Dict[str, Any]:
+    return {"kind": "stock", "side": "long", "strike": None, "qty": 100,
+            "entry": round(spot, 4), "expiry": None}
+
+
 def _all(*legs) -> Optional[List[Dict]]:
     """Every leg or none -- a half-built spread is a different trade."""
     return None if any(l is None for l in legs) else list(legs)
@@ -178,6 +200,75 @@ CATALOGUE = [
         "build": lambda c, p, e, s: _all(
             _leg(_pick(c, 0.25, above=s), "call", "long", e),
             _leg(_pick(p, 0.25, below=s), "put", "long", e)),
+    },
+    {
+        "id": "married_put", "name": "Married put",
+        "view": "You want to own it, and you want a floor under it.",
+        "note": "The shares plus a put is stock you cannot lose more than a "
+                "known amount on. The put costs money every time you buy one, "
+                "which is the premium for sleeping at night.",
+        "build": lambda c, p, e, s: _all(
+            _stock(s), _leg(_pick(p, 0.35), "put", "long", e)),
+    },
+    {
+        "id": "collar", "name": "Collar",
+        "view": "You own it, want a floor, and will give up the top to pay for it.",
+        "note": "A married put with a call sold above to fund the put. Often "
+                "costs almost nothing to put on -- the trade is that the "
+                "upside stops at the call strike.",
+        "build": lambda c, p, e, s: _all(
+            _stock(s),
+            _leg(_pick(p, 0.25), "put", "long", e),
+            _leg(_pick(c, 0.25), "call", "short", e)),
+    },
+    {
+        "id": "call_fly", "name": "Long call butterfly",
+        "view": "You think it lands close to one particular price.",
+        "note": "Cheap, and it pays only if the stock finishes near the middle "
+                "strike. Wrong by a few dollars either way and it expires at "
+                "nothing, so it is a narrow bet bought at a narrow price.",
+        "build": lambda c, p, e, s: (lambda mid: _all(
+            _leg(_pick(c, 0.70, below=mid["strike"]) if mid else None,
+                 "call", "long", e),
+            _leg(mid, "call", "short", e, 2),
+            _leg(_pick(c, 0.30, above=mid["strike"]) if mid else None,
+                 "call", "long", e),
+        ))(_pick(c, 0.50)),
+    },
+    {
+        "id": "iron_fly", "name": "Iron butterfly",
+        "view": "You think it finishes very close to where it is now.",
+        "note": "Pays more than an iron condor and gives you a much smaller "
+                "target. Sold at the money on both sides, with wings bought "
+                "to cap what being wrong can cost.",
+        "build": lambda c, p, e, s: (lambda atm: _all(
+            _leg(_pick(p, 0.15, below=atm), "put", "long", e),
+            _leg(_at(p, atm), "put", "short", e),
+            _leg(_at(c, atm), "call", "short", e),
+            _leg(_pick(c, 0.15, above=atm), "call", "long", e),
+        ))((_pick(c, 0.50) or {}).get("strike")),
+    },
+    {
+        "id": "short_strangle", "name": "Short strangle",
+        "view": "You think it stays inside a range, and want paying for it.",
+        "note": "Sells both sides and keeps the premium if neither is reached. "
+                "Nothing is bought back, so a large move in either direction "
+                "costs more than the whole credit -- on the call side there is "
+                "no ceiling on it at all.",
+        "build": lambda c, p, e, s: _all(
+            _leg(_pick(c, 0.20, above=s), "call", "short", e),
+            _leg(_pick(p, 0.20, below=s), "put", "short", e)),
+    },
+    {
+        "id": "synthetic_long", "name": "Synthetic long stock",
+        "view": "You want the shares' payoff without buying the shares.",
+        "note": "A call bought and a put sold on the same strike behave almost "
+                "exactly like a hundred shares, for a fraction of the cash. "
+                "The loss below the strike is the same as owning it.",
+        "build": lambda c, p, e, s: (lambda atm: _all(
+            _leg(_at(c, atm), "call", "long", e),
+            _leg(_at(p, atm), "put", "short", e),
+        ))((_pick(c, 0.50) or {}).get("strike")),
     },
 ]
 
@@ -286,6 +377,28 @@ def _sentence(a: Dict[str, Any], spot: float) -> str:
     return out[:1].upper() + out[1:]
 
 
+#: What the SHAPE has to be for each setup, asserted here and checked
+#: against what the payoff actually turns out to want. A "bull" call
+#: spread built upside-down off a thin chain is not bullish, and the
+#: label would go on saying it was.
+DECLARED_BIAS = {
+    "buy_call": "bullish",      "buy_put": "bearish",
+    "bull_call": "bullish",     "bear_put": "bearish",
+    "csp": "bullish",           "covered_call": "bullish",
+    "bull_put": "bullish",      "bear_call": "bearish",
+    "iron_condor": "neutral",   "straddle": "either",
+    "strangle": "either",       "married_put": "bullish",
+    "collar": "bullish",        "call_fly": "neutral",
+    "iron_fly": "neutral",      "short_strangle": "neutral",
+    "synthetic_long": "bullish",
+}
+
+# The derivation lives with the payoff it is read from -- the position
+# workspace shows the same thing for a hand-built spread, and two copies
+# of this would be two chances to disagree about which way a trade leans.
+bias_of = P.bias_of
+
+
 def build(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
           vol: float, rate: float, div_yield: float = 0.0) -> List[Dict[str, Any]]:
     """Every setup that can be built from this board, priced and scored."""
@@ -318,6 +431,7 @@ def build(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
             "max_loss_unbounded": a.get("max_loss_unbounded"),
             "breakevens": a.get("breakevens"),
             "needs": a.get("needs"),
+            **bias_of(a.get("needs")),
             "best_at": a.get("best_at"),
             "worst_at": a.get("worst_at"),
             "summary": _sentence(a, spot),

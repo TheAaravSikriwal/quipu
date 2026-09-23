@@ -494,6 +494,7 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "greek_working": _greek_working(legs, spot, vol, rate, div_yield),
         "chance": pop,
         "needs": _needs(pay, spot, bes, curve),
+        "hope": _hope(_needs(pay, spot, bes, curve), where, bes, spot, ext),
         "valued_at": at_expiry,
         **where,
         "days_left": days_left,
@@ -926,6 +927,105 @@ def _where_extreme(pay, strikes: List[float], spot: float) -> Dict[str, Any]:
         "best_at": span(max(pl for _, pl in pts)),
         "worst_at": span(min(pl for _, pl in pts)),
     }
+
+
+_BIAS_OF_DIR = {"up": "bullish", "down": "bearish",
+                "still": "neutral", "move": "either"}
+
+
+def bias_of(needs: Dict[str, Any]) -> Dict[str, Any]:
+    """Which way you are hoping it goes, and whether it has to move at all.
+
+    Read off the payoff rather than the name. The direction alone is not
+    the whole answer: a cash-secured put and a long call are both
+    "bullish" and they are not the same hope. One needs a rise; the
+    other only needs the price NOT to fall through a level it is already
+    above. Saying "bullish" for both and stopping there is the thing
+    that makes an options page unreadable.
+    """
+    d = (needs or {}).get("dir")
+    bias = _BIAS_OF_DIR.get(d, "unclear")
+    winning = bool((needs or {}).get("winning_now"))
+    pct = (needs or {}).get("move_pct")
+
+    if bias in ("bullish", "bearish"):
+        word = "up" if bias == "bullish" else "down"
+        if winning:
+            shade, plain = "holds", f"it only has to stay {word}"
+        else:
+            shade, plain = "needs", f"it has to go {word}"
+    elif bias == "neutral":
+        shade, plain = "holds", "it has to stay in a range"
+    elif bias == "either":
+        shade, plain = "needs", "it has to move, either way"
+    else:
+        shade, plain = "", ""
+
+    return {"bias": bias, "shade": shade, "plain": plain,
+            "already": winning, "move_pct": pct}
+
+
+def _hope(needs: Dict[str, Any], where: Dict[str, Any], bes: List[float],
+          spot: float, ext: Dict[str, Any]) -> Dict[str, Any]:
+    """Which way you want it to go, and how far.
+
+    The direction on its own does not tell you what you have signed up
+    for. "Bullish" covers a long call that needs a six percent rise and
+    a cash-secured put that needs the price not to fall four percent --
+    opposite amounts of hoping, under one word.
+
+    So this states three levels in the order they are reached: where the
+    position stops losing, where it stops improving, and how far each is
+    from today's price as a percentage. Everything here is read off the
+    payoff, not off the name of the structure.
+    """
+    b = bias_of(needs)
+    pct = lambda lvl: (round((lvl / spot - 1) * 100, 1) if spot else None)
+
+    steps = []
+    if bes:
+        # Sorted by distance, then walked. Taking the min and the max
+        # separately returned the SAME break-even twice on an iron
+        # condor, whose two sides are equidistant from the share price
+        # by construction -- and Python hands back the first element on
+        # a tie for both.
+        ordered = sorted(bes, key=lambda x: (abs(x - spot), x))
+        steps.append({
+            "label": "breaks even at",
+            "level": round(ordered[0], 2),
+            "pct": pct(ordered[0]),
+            "note": ("already past it" if needs.get("winning_now")
+                     else "below this it is a loss at expiry"),
+        })
+        for extra in ordered[1:]:
+            steps.append({"label": "and at", "level": round(extra, 2),
+                          "pct": pct(extra),
+                          "note": "the other side of it"})
+
+    # Where it stops getting better. For anything uncapped there is no
+    # such price, and saying one would be the opposite of the truth.
+    if ext.get("max_profit_unbounded"):
+        steps.append({"label": "best case", "level": None, "pct": None,
+                      "note": "no cap -- the further it runs, the more it makes"})
+    else:
+        best = (where.get("best_at") or [None])[0]
+        if best:
+            if best.get("to_inf"):
+                lvl, tail = best["lo"], "or anywhere above"
+            elif best.get("to_zero"):
+                lvl, tail = best["hi"], "or anywhere below"
+            elif abs(best["hi"] - best["lo"]) < 0.005:
+                lvl, tail = best["lo"], "exactly"
+            else:
+                lvl, tail = best["lo"], f"up to ${best['hi']:,.2f}"
+            steps.append({
+                "label": "makes the most at", "level": round(lvl, 2),
+                "pct": pct(lvl),
+                "note": f"{tail} -- past there it makes no more"
+                        if "above" in tail or "below" in tail else tail,
+            })
+
+    return {**b, "spot": round(spot, 2), "steps": steps}
 
 
 def _needs(pay, spot: float, bes: List[float],

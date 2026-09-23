@@ -737,6 +737,30 @@ function paintPosSuggest(tab) {
  * The pattern the numbers always show is the one worth seeing: the
  * setups that work seven times in ten make small money, and the ones
  * with no cap on the upside work three times in ten. */
+/* Which way a position leans, drawn the same way everywhere.
+ *
+ * Read off the payoff by the engine, not off the name of the structure:
+ * a bull call spread entered upside-down is not bullish, and the label
+ * would go on saying it was.
+ *
+ * The word alone is not enough. "Bullish" covers a long call that needs
+ * a six percent rise and a cash-secured put that needs the price not to
+ * fall four percent -- opposite amounts of hoping under one word -- so
+ * the chip says whether it NEEDS the move or merely HOLDS a level.
+ */
+const BIAS_ARROW = { bullish: "&uarr;", bearish: "&darr;",
+                     neutral: "&harr;", either: "&#8597;" };
+const BIAS_WORD = { bullish: "bullish", bearish: "bearish",
+                    neutral: "wants it still", either: "wants a move" };
+
+function biasChip(p, cls = "") {
+  if (!p || !p.bias || p.bias === "unclear") return "";
+  return `<span class="bias b-${esc(p.bias)} ${cls}" title="${esc(p.plain || "")}">
+    <i>${BIAS_ARROW[p.bias] || ""}</i>${BIAS_WORD[p.bias] || esc(p.bias)}${
+      p.shade === "holds" ? `<em>holds</em>` : p.shade === "needs" ? `<em>needs it</em>` : ""}
+  </span>`;
+}
+
 function renderPresets(tab, c) {
   const list = c.presets || [];
   if (!list.length) return "";
@@ -756,10 +780,10 @@ function renderPresets(tab, c) {
     </div>
     ${open ? `<div class="pregrid">
       ${list.map((p) => `
-        <button class="pcard" data-preset="${esc(p.id)}">
+        <button class="pcard lean-${esc(p.bias || "unclear")}" data-preset="${esc(p.id)}">
           <span class="odds"><b>${p.chance == null ? "--" : nf(p.chance, 0) + "%"}</b>
             <i>chance of making money</i></span>
-          <span class="pname">${esc(p.name)}</span>
+          <span class="pname">${esc(p.name)}${biasChip(p)}</span>
           <span class="pview">${esc(p.view)}</span>
           <span class="psum">${p.summary}</span>
           <span class="plegs">${p.legs.map((l) =>
@@ -879,13 +903,7 @@ function moneyBlock(a, symbol, spot, size = 1) {
 
   return `
   <div class="mny">
-    <div class="mnyneed ${esc(n.dir || "")}">
-      <span class="mnyarrow">${arrow}</span>
-      <span class="mnytext">${esc(symbol || "It")} has to <b>${esc(n.text || "finish in profit")}</b>
-        ${n.winning_now ? `<i>&mdash; it is there now</i>`
-          : n.move_pct != null ? `<i>&mdash; ${n.move_pct > 0 ? "up" : "down"}
-              ${nf(Math.abs(n.move_pct), 1)}% from ${money(spot)}</i>` : ""}</span>
-    </div>
+    ${hopeBlock(a, symbol, spot, n, arrow)}
 
     <div class="mnysize">
       <span class="mszlab">size</span>
@@ -954,6 +972,53 @@ function mnyMath(a) {
         <h6>${label}</h6>${wcalc(x)}</div>`).join("")}
     </div>
   </details>`;
+}
+
+/* Which way you want it to go, and how far.
+ *
+ * The direction on its own does not tell you what you have signed up
+ * for. "Bullish" covers a long call that needs a six percent rise and a
+ * cash-secured put that needs the price not to fall four percent --
+ * opposite amounts of hoping, under one word. So the levels are printed
+ * in the order the share price would reach them, each with the move it
+ * represents from where the stock actually is.
+ */
+function hopeBlock(a, symbol, spot, n, arrow) {
+  const h = a.hope;
+  const sym = esc(symbol || "It");
+
+  // No payoff to read a direction off: say the sentence that is still
+  // true rather than inventing a lean.
+  if (!h || !h.bias || h.bias === "unclear") {
+    return `<div class="mnyneed ${esc(n.dir || "")}">
+      <span class="mnyarrow">${arrow}</span>
+      <span class="mnytext">${sym} has to
+        <b>${esc(n.text || "finish in profit")}</b></span></div>`;
+  }
+
+  const want = { bullish: "go up", bearish: "go down",
+                 neutral: "stay where it is", either: "move, either way" }[h.bias];
+  const hold = { bullish: "stay up", bearish: "stay down",
+                 neutral: "stay in its range", either: "move" }[h.bias];
+
+  return `<div class="mnyhope lean-${esc(h.bias)}">
+    <div class="mnyhead">
+      <span class="mnyarrow">${BIAS_ARROW[h.bias] || arrow}</span>
+      <span class="mnywant">you want ${sym} to
+        <b>${h.shade === "holds" ? hold : want}</b></span>
+      ${biasChip(h, "big")}
+    </div>
+    <div class="mnyfrom">from <b>${money(spot)}</b>, where it is now</div>
+    ${h.steps?.length ? `<ol class="mnysteps">
+      ${h.steps.map((st) => `<li>
+        <span class="mslab">${esc(st.label)}</span>
+        <span class="msval">${st.level == null ? "&mdash;" : money(st.level)}</span>
+        <span class="mspct ${st.pct == null ? "" : st.pct >= 0 ? "up" : "down"}">${
+          st.pct == null ? "" : signed(st.pct, 1)}</span>
+        <span class="msnote">${esc(st.note || "")}</span>
+      </li>`).join("")}
+    </ol>` : ""}
+  </div>`;
 }
 
 /* One setup, opened up.
@@ -1297,6 +1362,61 @@ function renderReady(tab) {
  * here, because they are two routes to the same destination: a trade
  * you now hold and will want to look at again next week.
  */
+/* How close a trade is to expiring, and how loudly to say so.
+ *
+ * The log already printed "2 sessions" in the same grey as everything
+ * else on the row, which is a fact rather than a warning. An option
+ * that expires this week is the one thing in a log that has a deadline
+ * attached to it -- miss it and the position settles itself, at
+ * whatever the price happens to be.
+ *
+ * Counted from the legs rather than from the analysis, so the mark
+ * does not have to have loaded for the warning to be there: the dates
+ * are already in the log and a trade expiring today should not be
+ * waiting on a network call to say so.
+ *
+ * Sessions are used where the analysis has them, because a Friday
+ * expiry three calendar days out is one trading day away and those are
+ * different amounts of time to react in.
+ */
+function expiryState(t, a) {
+  if (t.closed) return null;
+  const dates = t.legs.map((l) => l.expiry).filter(Boolean).sort();
+  if (!dates.length) return null;             // stock only: nothing expires
+
+  const today = new Date().toISOString().slice(0, 10);
+  const next = dates[0];
+  const days = Math.round(
+    (Date.parse(next + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86400000);
+  const sessions = a?.days_left;
+
+  // Already past. The position has settled whether or not the log says
+  // so, and leaving it in the open list quietly overstates what is at
+  // risk -- so this is the loudest state, not the quietest.
+  if (days < 0) {
+    return { level: "gone", label: "expired " + next, urgent: true,
+             why: "This expired on " + next + ". It has already settled; "
+                + "close it in the log so the totals stop counting it as open." };
+  }
+  if (days === 0) {
+    return { level: "today", label: "expires today", urgent: true,
+             why: "Today is the last day to trade it." };
+  }
+  if (sessions === 0) {
+    return { level: "today", label: "last session", urgent: true,
+             why: "No trading sessions left before it expires on " + next + "." };
+  }
+  const n = sessions == null ? days : sessions;
+  const unit = sessions == null ? "day" : "session";
+  const word = `${n} ${unit}${n === 1 ? "" : "s"}`;
+  if (n <= 1) return { level: "soon", label: word + " left", urgent: true,
+                       why: "Expires " + next + "." };
+  if (n <= 5) return { level: "soon", label: word + " left", urgent: false,
+                       why: "Expires " + next + "." };
+  if (n <= 15) return { level: "near", label: word, urgent: false, why: "" };
+  return { level: "far", label: word, urgent: false, why: "" };
+}
+
 function renderBook(tab) {
   const u = tab.ui;
   const live = bookOpen(u.book);
@@ -1327,7 +1447,10 @@ function renderBook(tab) {
     const cls = pl == null ? "" : pl >= 0 ? "up" : "down";
     const closing = u.closing === t.id;
 
-    return `<div class="bookitem${closing ? " closing" : ""}">
+    const x = expiryState(t, a);
+
+    return `<div class="bookitem${closing ? " closing" : ""}${
+      x ? " exp-" + x.level : ""}${x?.urgent ? " urgent" : ""}">
       <button class="bookrow ${t.closed ? "shut" : ""}" data-open="${esc(t.id)}">
         <span class="bsym">${esc(t.symbol)}</span>
         <span class="bname">${esc(t.name || a?.strategy?.name || legSummary(t.legs))}
@@ -1337,8 +1460,9 @@ function renderBook(tab) {
         <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
           : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
         <span class="bpct ${cls}">${pctOfRisk(pct)}</span>
-        <span class="bdays">${t.closed ? "settled"
-          : a?.days_left == null ? "" : `${a.days_left} session${a.days_left === 1 ? "" : "s"}`}</span>
+        <span class="bdays" title="${esc(x?.why || "")}">${t.closed ? "settled"
+          : x ? `${x.urgent ? `<i class="expdot"></i>` : ""}${esc(x.label)}`
+          : a?.days_left == null ? "" : `${a.days_left} sessions`}</span>
       </button>
       ${t.closed
         ? `<button class="brow-act" data-reopen="${esc(t.id)}"
