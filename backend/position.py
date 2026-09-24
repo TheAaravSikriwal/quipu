@@ -461,7 +461,7 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         x = lo + (hi - lo) * i / 60
         curve.append({"s": round(x, 2), "pl": round(pay(x), 2)})
 
-    pop = _chance_of_profit(pay, legs, spot, vol, rate, div_yield, bes)
+    pop, pop_parts = _chance_of_profit(pay, legs, spot, vol, rate, div_yield, bes)
 
     nearest = min((l for l in legs if l["expiry"]), key=lambda l: l["expiry"], default=None)
     days_left = None
@@ -493,6 +493,7 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
         "working": _position_working(legs, cost, value_now, pl, risk, ext, where),
         "greek_working": _greek_working(legs, spot, vol, rate, div_yield),
         "chance": pop,
+        "chance_working": _chance_working(pop_parts, days_left),
         "needs": _needs(pay, spot, bes, curve),
         "hope": _hope(_needs(pay, spot, bes, curve), where, bes, spot, ext),
         "valued_at": at_expiry,
@@ -990,17 +991,33 @@ def _hope(needs: Dict[str, Any], where: Dict[str, Any], bes: List[float],
         # by construction -- and Python hands back the first element on
         # a tie for both.
         ordered = sorted(bes, key=lambda x: (abs(x - spot), x))
-        steps.append({
-            "label": "breaks even at",
-            "level": round(ordered[0], 2),
-            "pct": pct(ordered[0]),
-            "note": ("already past it" if needs.get("winning_now")
-                     else "below this it is a loss at expiry"),
-        })
-        for extra in ordered[1:]:
-            steps.append({"label": "and at", "level": round(extra, 2),
-                          "pct": pct(extra),
-                          "note": "the other side of it"})
+        inside = bool(needs.get("winning_now"))
+
+        # Where the stock stands relative to EACH level, rather than one
+        # verdict pinned to the first of them. On a two-sided position
+        # "already past it" was printed against a break-even above the
+        # share price that it had not come near: an iron condor sits
+        # BETWEEN its break-evens, and passing either one is the thing
+        # that ends it.
+        def _note(level, first):
+            if len(ordered) > 1:
+                side = "above" if level > spot else "below"
+                if first:
+                    return (f"it trades {'below' if level > spot else 'above'} this now"
+                            + (" and profits inside the pair" if inside else ""))
+                return f"the other end, {side} where it trades now"
+            if inside:
+                return "it is already past this"
+            return ("it has to get above this" if level > spot
+                    else "it has to get below this")
+
+        for i, level in enumerate(ordered):
+            steps.append({
+                "label": "breaks even at" if i == 0 else "and at",
+                "level": round(level, 2),
+                "pct": pct(level),
+                "note": _note(level, i == 0),
+            })
 
     # Where it stops getting better. For anything uncapped there is no
     # such price, and saying one would be the opposite of the truth.
@@ -1096,6 +1113,17 @@ def _needs(pay, spot: float, bes: List[float],
 
 def _dollars(v: Optional[float]) -> str:
     return "--" if v is None else f"${v:,.2f}"
+
+
+def _chance_working(parts: Optional[Dict[str, Any]],
+                    sessions: Optional[int]) -> Optional[Dict[str, Any]]:
+    """The sum behind the odds, if there were any odds to work out."""
+    if not parts or not parts.get("regions"):
+        return None
+    import working as W                                   # noqa: PLC0415
+    return W.chance(parts["regions"], parts["total"], parts["spot"],
+                    parts["vol"], parts["years"], parts["rate"],
+                    parts["q"], sessions)
 
 
 def _extreme_price(regions: Optional[List[Dict[str, Any]]]) -> Optional[float]:
@@ -1227,7 +1255,7 @@ def _breakeven_working(bes: List[float], legs: List[Dict[str, Any]],
 
 def _chance_of_profit(pay, legs: List[Dict[str, Any]], spot: float, vol: float,
                       rate: float, div_yield: float,
-                      bes: List[float]) -> Optional[float]:
+                      bes: List[float]) -> Tuple[Optional[float], Optional[Dict]]:
     """The odds this finishes profitable, under the same lognormal the
     prices already assume.
 
@@ -1242,19 +1270,19 @@ def _chance_of_profit(pay, legs: List[Dict[str, Any]], spot: float, vol: float,
     page, and it is not a forecast.
     """
     if not bes or not vol or not spot:
-        return None
+        return None, None
     expiries = [l["expiry"] for l in legs if l["expiry"]]
     if not expiries:
-        return None
+        return None, None
     years = _years(min(expiries))
     if not years or years <= 0:
-        return None
+        return None, None
 
     q = div_yield or 0.0
     drift = (rate - q - 0.5 * vol * vol) * years
     sd = vol * math.sqrt(years)
     if sd <= 0:
-        return None
+        return None, None
 
     def above(k: float) -> float:
         if k <= 0:
@@ -1263,9 +1291,26 @@ def _chance_of_profit(pay, legs: List[Dict[str, Any]], spot: float, vol: float,
 
     edges = [0.0] + sorted(bes) + [float("inf")]
     total = 0.0
+    # Kept as we go, because the single percentage hides that anything
+    # two-sided has two separate ways of winning -- a straddle's 41% is
+    # an 18% fall and a 23% rise, and those are not the same bet.
+    regions: List[Dict[str, Any]] = []
     for lo, hi in zip(edges, edges[1:]):
         mid = (lo + hi) / 2 if hi != float("inf") else lo * 1.5 + 1.0
         if pay(mid) <= 0:
             continue
-        total += (1.0 if lo <= 0 else above(lo)) - (0.0 if hi == float("inf") else above(hi))
-    return round(max(0.0, min(1.0, total)) * 100, 1)
+        p = (1.0 if lo <= 0 else above(lo)) - (0.0 if hi == float("inf") else above(hi))
+        total += p
+        if hi == float("inf"):
+            label = f"chance it finishes above ${lo:,.2f}"
+        elif lo <= 0:
+            label = f"chance it finishes below ${hi:,.2f}"
+        else:
+            label = f"chance it finishes between ${lo:,.2f} and ${hi:,.2f}"
+        regions.append({"lo": None if lo <= 0 else round(lo, 2),
+                        "hi": None if hi == float("inf") else round(hi, 2),
+                        "p": round(p, 6), "label": label})
+
+    pct = round(max(0.0, min(1.0, total)) * 100, 1)
+    return pct, {"regions": regions, "vol": vol, "years": years,
+                 "rate": rate, "q": q, "spot": spot, "total": pct}

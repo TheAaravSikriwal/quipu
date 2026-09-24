@@ -37,8 +37,17 @@ const money = (v, d = 2) => (v === null || v === undefined ? "--" : "$" + nf(v, 
  *
  * Whole strikes still print whole: "$340 call", not "$340.00 call".
  */
-const strikeOf = (v) => (v === null || v === undefined || v === "" ? "--"
-  : "$" + nf(Number(v), Number(v) % 1 === 0 ? 0 : 2).replace(/0$/, ""));
+const strikeOf = (v) => {
+  if (v === null || v === undefined || v === "") return "--";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "--";
+  // The trailing zero to drop is the CENTS one -- 337.50 reads as
+  // 337.5. Applied to a whole strike it ate a real digit instead:
+  // $220 printed as "$22", $100 as "$10", $1,200 as "$1,20". Every
+  // round strike on the board was wrong by a factor of ten, on the
+  // chips that say which contract you are about to buy.
+  return "$" + (n % 1 === 0 ? nf(n, 0) : nf(n, 2).replace(/0$/, ""));
+};
 /* A fraction shown as a percentage.
  *
  * Exists because `pct100(xNone)` is a trap: in JavaScript `null * 100`
@@ -865,7 +874,8 @@ function renderPresets(tab, c) {
     ${open ? `<div class="pregrid">
       ${list.map((p) => `
         <button class="pcard lean-${esc(p.bias || "unclear")}" data-preset="${esc(p.id)}">
-          <span class="odds"><b>${p.chance == null ? "--" : nf(p.chance, 0) + "%"}</b>
+          <span class="odds"><b>${p.chance == null ? "--"
+            : calc(nf(p.chance, 0) + "%", p.chance_working)}</b>
             <i>chance of making money</i></span>
           <span class="pname">${esc(p.name)}${biasChip(p)}</span>
           <span class="pview">${esc(p.view)}</span>
@@ -957,8 +967,12 @@ function moneyBlock(a, symbol, spot, size = 1) {
   const bestWhy = a.max_profit_unbounded
     ? "Nothing caps this. The further it runs, the more it makes."
     : credit
-      ? `${at(a.best_at)}the whole amount you were paid, and no more &mdash; `
-        + `yours if ${esc(symbol || "it")} ${esc(third(n.text) || "expires out of the money")}.`
+      // Two ranges in one sentence, and they were different ranges:
+      // where the maximum is reached, and where the position stops
+      // making anything. "yours if it finishes between 219.49 and
+      // 228.01" contradicted the "between 220.00 and 227.50" directly
+      // in front of it. The break-evens have their own rows above.
+      ? `${at(a.best_at)}you keep the whole ${money(paid)} you were paid, and no more.`
       : mp != null
         ? `${at(a.best_at)}you sell it back for ${money(mp + paid)}, having paid ${money(paid)}.`
         : "";
@@ -1135,10 +1149,13 @@ function presetDetail(tab, p, c) {
       <div class="pdview">${esc(p.view)} ${esc(p.note || "")}</div>
     </div>
     <div class="pdodds">
-      <b>${p.chance == null ? "--" : nf(p.chance, 0) + "%"}</b>
+      <b>${p.chance == null ? "--" : calc(nf(p.chance, 0) + "%", p.chance_working)}</b>
       <span>chance of making money</span>
       <em>The odds this is worth more than it cost by ${esc(p.expiry || "expiry")},
         worked out from today&rsquo;s option prices. Not a forecast.</em>
+      ${p.chance_working ? `<details class="oddswork">
+        <summary>where this number comes from</summary>
+        ${wcalc(p.chance_working)}</details>` : ""}
     </div>
   </div>
 
@@ -2005,7 +2022,8 @@ function renderAnalysis(tab) {
           ? d.breakevens.map((b, i) =>
               calc(money(b), d.breakeven_working?.[i])).join("  /  ")
           : "--")}
-        ${chip("chance of making money", d.chance == null ? "--" : nf(d.chance, 0) + "%")}
+        ${chip("chance of making money", d.chance == null ? "--"
+          : calc(nf(d.chance, 0) + "%", d.chance_working))}
         ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
       </div>
 

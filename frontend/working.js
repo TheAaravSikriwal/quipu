@@ -72,7 +72,11 @@ function renderWorking(w) {
       <span class="wterms">${terms}</span>${gives}</div>`;
   }).join("");
 
-  const total = Number(w.result).toLocaleString("en-US",
+  // "$-51.00" puts the sign in the wrong place. A negative amount of
+  // money is written with the minus in front of the whole thing, and
+  // with a real minus sign rather than a hyphen.
+  const neg = Number(w.result) < 0;
+  const total = Math.abs(Number(w.result)).toLocaleString("en-US",
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // A per-share figure is not the price of anything you can buy; the
@@ -90,7 +94,7 @@ function renderWorking(w) {
   return `<div class="wcalc">
     ${rows}
     <div class="wrow wtotal"><span class="wsign">=</span>
-      <span class="wterms">${money ? "$" : ""}${total}${unit}${
+      <span class="wterms">${neg ? "\u2212" : ""}${money ? "$" : ""}${total}${unit}${
         w.per_share ? " a share" : ""}</span></div>
     ${hundred}
     ${notes}

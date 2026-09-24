@@ -278,7 +278,10 @@ def settlement(legs: List[Dict[str, Any]], price: float, cost: float,
             ("" if side > 0 else "-") if not lines
             else ("+" if side > 0 else "-"),
             term(f"{held} {_what(leg)}, worth", value,
-                 note=("Worth nothing at this price -- it expires unexercised."
+                 # Printed after the term's label, which already ends in
+                 # "worth" -- so a note starting "Worth nothing" read as a
+                 # stutter: "put, worth Worth nothing at this price".
+                 note=("Out of the money at this price, so it expires unexercised."
                        if value == 0 and kind != "stock" else "")),
             term("shares", shares, 0),
             gives=abs(cash)))
@@ -342,6 +345,52 @@ def greek_total(name: str, legs: List[Dict[str, Any]],
         f"Each leg's {name} is per share. Multiplied by the shares it "
         f"controls and added up with its sign, that is {_GREEK_UNIT.get(name, '')}."
     ).strip())
+
+
+def chance(regions: List[Dict[str, Any]], total: float, spot: float,
+           vol: float, years: float, rate: float, q: float,
+           sessions: Optional[int] = None) -> Dict[str, Any]:
+    """Where a "chance of making money" came from, and what it is not.
+
+    A bare percentage next to a trade reads like a forecast, and this
+    one is not one. It is the market's own number: the odds under the
+    same lognormal the option prices on this page are already quoted
+    from, with a drift of the risk-free rate less the dividend yield --
+    NOT a view about where the stock is going. Feed it a different
+    volatility and it gives a different answer, which is the honest
+    tell that it is a restatement of today's prices rather than a
+    prediction about tomorrow's.
+
+    The break-evens cut the price line into stretches, and a payoff
+    that is straight between them cannot change sign inside one. So the
+    sum is simply the stretches that pay, added up -- which is worth
+    showing, because for anything two-sided the single percentage hides
+    that it is two separate ways of winning.
+    """
+    lines = []
+    for i, r in enumerate(regions):
+        lines.append(line(
+            "" if i == 0 else "+",
+            term(r["label"], r["p"], 4,
+                 note=r.get("note", "")),
+            gives=r["p"]))
+    if not lines:
+        return None
+
+    lines.append(line("x", term("to make it a percentage", 100, 0), gives=100))
+
+    return sum_of(round(total, 2), lines, unit="%", note=(
+        f"Worked out from a volatility of {vol * 100:.1f}%"
+        + (f" over {sessions} trading session{'' if sessions == 1 else 's'}"
+           if sessions else "")
+        + f", a rate of {rate * 100:.2f}%"
+        + (f" and a dividend yield of {q * 100:.2f}%" if q else "")
+        + f", against a share price of ${spot:,.2f}. "
+        "This is the market's own probability, not a forecast: the drift "
+        "in it is the risk-free rate less the dividend, not a view on the "
+        "stock. It assumes the position is held to expiry, and it says "
+        "nothing about HOW MUCH -- the setups with the best odds are "
+        "generally the ones that make the least."))
 
 
 # --------------------------------------------------------------------------
