@@ -1480,6 +1480,151 @@ function renderReady(tab) {
  * expiry three calendar days out is one trading day away and those are
  * different amounts of time to react in.
  */
+/* When the thing actually expires, and what happens if you are still
+ * holding it.
+ *
+ * A session count says how LONG you have. It does not say when, and
+ * "1 session left" is not a deadline anybody can act on -- a deadline
+ * is a day and a clock time.
+ *
+ * And for a long option the moment that matters is not really expiry,
+ * it is the last moment you can sell. Hold one that finishes in the
+ * money and the clearing house exercises it for you: the OCC exercises
+ * by exception anything a cent or more in the money unless told
+ * otherwise. For a long call that means buying a hundred shares per
+ * contract -- a five-figure bill on a share like MSTR, and exactly
+ * what somebody trading the option rather than the stock does not
+ * want.
+ *
+ * US equity options stop trading at 4:00pm New York time on the expiry
+ * date. That is the deadline, and it is quoted in New York alongside
+ * the reader's own clock, because a market deadline in the wrong
+ * timezone is worse than no deadline at all.
+ */
+const NY = "America/New_York";
+
+function sellBy(t, a) {
+  const opts = t.legs.filter((l) => l.kind !== "stock" && l.expiry);
+  if (!opts.length) return null;                 // stock only: nothing expires
+
+  const next = opts.map((l) => l.expiry).sort()[0];
+  const close = nyClose(next);
+  if (!close) return null;
+
+  // en-US, because the zone abbreviation is the point of the line and
+  // this is a US market deadline: "EDT" is what a trader reads, where
+  // en-GB renders the same instant as "GMT-4" and makes them do the
+  // arithmetic themselves.
+  const fmt = (tz, withZone) => new Intl.DateTimeFormat("en-US", {
+    weekday: "short", day: "numeric", month: "short",
+    hour: "numeric", minute: "2-digit", hour12: true, timeZone: tz,
+    ...(withZone ? { timeZoneName: "short" } : {}),
+  }).format(close);
+
+  const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const sameClock = fmt(here) === fmt(NY);
+
+  // Only the legs that finish in the money get exercised or assigned,
+  // so only those are worth warning about.
+  // Only the legs expiring AT this deadline, and only the ones that
+  // would be in the money. A calendar spread holds a December leg
+  // behind a September one, and warning that December's call will be
+  // exercised at September's close names a deadline it does not have.
+  const spot = a?.spot;
+  const exposed = spot == null ? [] : opts.filter((l) =>
+    l.expiry === next
+    && (l.kind === "call" ? spot > l.strike : spot < l.strike));
+
+  return {
+    at: close,
+    ny: fmt(NY, true),
+    local: sameClock ? null : fmt(here, true),
+    expiry: next,
+    exposed,
+    consequence: consequenceOf(exposed, next, spot != null),
+  };
+}
+
+/* 4pm on the expiry date, in New York, as a real instant.
+ *
+ * Built by asking the runtime where 4pm UTC lands in New York on that
+ * date and correcting by the difference, rather than hard-coding an
+ * offset: it is four hours in summer and five in winter, and a
+ * position opened in October and expiring in November straddles the
+ * changeover.
+ */
+function nyClose(isoDate) {
+  const [y, m, d] = String(isoDate).split("-").map(Number);
+  if (!y || !m || !d) return null;
+
+  /* Solved rather than offset-corrected.
+   *
+   * The obvious trick -- render an instant in New York, re-parse it,
+   * and take the difference -- is an identity on a machine that is
+   * ALREADY in New York, so it shifted nothing and every expiry
+   * printed as noon. It only appeared to work from another timezone,
+   * which is the worst kind of wrong: right on the developer's laptop
+   * and wrong for the person the deadline belongs to.
+   *
+   * So: guess an instant, ask what New York wall clock it lands on,
+   * and correct by how far that is from 4pm. Twice, because the
+   * correction can itself cross the daylight-saving boundary.
+   */
+  const want = Date.UTC(y, m - 1, d, 16, 0, 0);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NY, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+
+  let t = want;
+  for (let i = 0; i < 2; i++) {
+    const p = {};
+    parts.formatToParts(new Date(t)).forEach((x) => { p[x.type] = x.value; });
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day,
+                           +p.hour % 24, +p.minute, +p.second);
+    if (asUTC === want) break;
+    t += want - asUTC;
+  }
+  return new Date(t);
+}
+
+function consequenceOf(exposed, expiry, known) {
+  // Not knowing where the stock is, and saying nothing is in the money,
+  // are different statements. The mark had not loaded -- or had failed
+  // -- and this printed the reassuring one, which is the reassurance
+  // there is least reason to give.
+  if (!known) {
+    return `Trading in these stops at the close on ${expiry}. Anything `
+         + `in the money at that point is exercised or assigned `
+         + `automatically; selling before the close avoids it. What is `
+         + `in the money cannot be said here because the live price has `
+         + `not come back.`;
+  }
+  if (!exposed.length) {
+    return `Trading in these stops at the close on ${expiry}. Nothing here `
+         + `is in the money at today's price, so it would expire `
+         + `rather than be exercised — still worth closing if it has `
+         + `value left.`;
+  }
+  const parts = exposed.map((l) => {
+    const shares = (Number(l.qty) || 0) * 100;
+    const cash = shares * Number(l.strike);
+    const long = String(l.side).toLowerCase().startsWith("l");
+    if (l.kind === "call") {
+      return long
+        ? `you would buy ${nf(shares, 0)} shares at ${strikeOf(l.strike)}, about ${money(cash, 0)}`
+        : `you would have to deliver ${nf(shares, 0)} shares at ${strikeOf(l.strike)}`;
+    }
+    return long
+      ? `you would sell ${nf(shares, 0)} shares at ${strikeOf(l.strike)}, about ${money(cash, 0)}`
+      : `you would be put ${nf(shares, 0)} shares at ${strikeOf(l.strike)}, about ${money(cash, 0)}`;
+  });
+  return `Trading stops at the close on ${expiry}. If it is still in the money `
+       + `then: ${parts.join("; ")}. Selling before the close avoids it. Your `
+       + `broker's own cut-off is earlier than the market's.`;
+}
+
 function expiryState(t, a) {
   if (t.closed) return null;
   const dates = t.legs.map((l) => l.expiry).filter(Boolean).sort();
@@ -1549,6 +1694,7 @@ function renderBook(tab) {
     const closing = u.closing === t.id;
 
     const x = expiryState(t, a);
+    const sb = t.closed ? null : sellBy(t, a);
 
     return `<div class="bookitem${closing ? " closing" : ""}${
       x ? " exp-" + x.level : ""}${x?.urgent ? " urgent" : ""}">
@@ -1562,9 +1708,11 @@ function renderBook(tab) {
         <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
           : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
         <span class="bpct ${cls}">${pctOfRisk(pct)}</span>
-        <span class="bdays" title="${esc(x?.why || "")}">${t.closed ? "settled"
-          : x ? `${x.urgent ? `<i class="expdot"></i>` : ""}${esc(x.label)}`
-          : a?.days_left == null ? "" : `${a.days_left} sessions`}</span>
+        <span class="bdays" title="${esc(sb?.consequence || x?.why || "")}">${
+          t.closed ? "settled"
+          : sb ? `${x?.urgent ? `<i class="expdot"></i>` : ""}<b>${esc(sb.ny)}</b>${
+              sb.local ? `<i class="blocal">${esc(sb.local)} your time</i>` : ""}`
+          : "&ndash;"}</span>
       </button>
       <button class="brow-act" data-stock="${esc(t.symbol)}"
         title="Everything on ${esc(t.symbol)} -- price, options, filings, news">stock</button>
@@ -1606,7 +1754,7 @@ function renderBook(tab) {
   return head
     + (live.length ? `<div class="booklist">
         <div class="bookrow bhead"><span>ticker</span><span>position</span>
-          <span>profit</span><span>of risk</span><span>left</span></div>
+          <span>profit</span><span>of risk</span><span>expires</span></div>
         ${live.map(row).join("")}
       </div>` : "")
     + totals
