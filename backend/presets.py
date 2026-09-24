@@ -91,6 +91,60 @@ def _at(rows: List[Dict], strike: Optional[float]) -> Optional[Dict]:
     return None
 
 
+def _wings(rows, centre, rungs: int = 2):
+    """The two listed strikes the SAME DISTANCE either side of `centre`.
+
+    A butterfly is symmetric by definition -- equal distance out on both
+    sides, so the two halves cancel and the thing has a peak rather than
+    a slope. Picking each wing by delta instead gave 332.5 and 340
+    around a 337.5 body: five dollars down against two and a half up,
+    which is a broken-wing butterfly, a different structure with a
+    different payoff, wearing this one's name.
+
+    Delta also stops discriminating near expiry. On a board with a day
+    left the calls either side of the money run 0.88 and 0.08, so
+    "the 0.70 call" is whichever strike happens to be least wrong, and
+    on a thin ladder there may be none that can be quoted at all.
+
+    Distance out is measured in dollars rather than rungs because the
+    ladder does not keep one spacing across the board -- 2.50 near the
+    money and 5.00 further out is normal, and counting rungs would pick
+    an asymmetric pair and call it symmetric.
+    """
+    ladder = sorted({r["strike"] for r in rows
+                     if r.get("strike") is not None and (r.get("bid") or r.get("ask"))})
+    if centre not in ladder:
+        return None, None
+
+    # A sensible width to aim for: a couple of rungs of whatever this
+    # ladder's spacing is NEAR THE CENTRE. Measured locally because a
+    # board is not evenly spaced -- 2.50 around the money and 10 out in
+    # the tails is ordinary, and the median across the whole ladder
+    # said 5 and built a butterfly twice as wide as the strikes
+    # actually available around the body.
+    near = [k for k in ladder if abs(k - centre) <= max(centre * 0.06, 2 * 2.5)]
+    gaps = [round(b - a, 4) for a, b in zip(near, near[1:]) if b > a]         or [round(b - a, 4) for a, b in zip(ladder, ladder[1:]) if b > a]
+    if not gaps:
+        return None, None
+    step = sorted(gaps)[len(gaps) // 2]
+    want = step * rungs
+
+    # Every width that has a listed strike on BOTH sides, nearest to
+    # what we wanted first.
+    usable = []
+    for k in ladder:
+        w = round(abs(k - centre), 4)
+        if w <= 0:
+            continue
+        lo, hi = _at(rows, round(centre - w, 4)), _at(rows, round(centre + w, 4))
+        if lo and hi:
+            usable.append((abs(w - want), lo, hi))
+    if not usable:
+        return None, None
+    usable.sort(key=lambda t: t[0])
+    return usable[0][1], usable[0][2]
+
+
 def _stock(spot: float) -> Dict[str, Any]:
     return {"kind": "stock", "side": "long", "strike": None, "qty": 100,
             "entry": round(spot, 4), "expiry": None}
@@ -227,13 +281,11 @@ CATALOGUE = [
         "note": "Cheap, and it pays only if the stock finishes near the middle "
                 "strike. Wrong by a few dollars either way and it expires at "
                 "nothing, so it is a narrow bet bought at a narrow price.",
-        "build": lambda c, p, e, s: (lambda mid: _all(
-            _leg(_pick(c, 0.70, below=mid["strike"]) if mid else None,
-                 "call", "long", e),
+        "build": lambda c, p, e, s: (lambda mid: (lambda w: _all(
+            _leg(w[0], "call", "long", e),
             _leg(mid, "call", "short", e, 2),
-            _leg(_pick(c, 0.30, above=mid["strike"]) if mid else None,
-                 "call", "long", e),
-        ))(_pick(c, 0.50)),
+            _leg(w[1], "call", "long", e),
+        ))(_wings(c, mid["strike"]) if mid else (None, None)))(_pick(c, 0.50)),
     },
     {
         "id": "iron_fly", "name": "Iron butterfly",

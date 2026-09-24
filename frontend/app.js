@@ -201,6 +201,88 @@ const bookOpen = (book) => book.filter((t) => !t.closed);
 
 const blankLeg = () => ({ kind: "call", side: "long", strike: "", qty: 1, entry: "", expiry: "" });
 
+/* The four rooms this app has, and what each tab strip entry means.
+ *
+ * Colour here is the same argument the moving averages make: it says
+ * WHICH ROOM THIS IS and nothing else. The hue on a tab is repeated on
+ * the button that opens that room, so the mapping is shown rather than
+ * memorised -- and the room is named in words on both, so the colour is
+ * never carrying the fact alone.
+ */
+const ROOMS = {
+  search:   { label: "Search",    what: "one company, everything on it" },
+  finder:   { label: "Finder",    what: "rank the whole market and find one" },
+  position: { label: "Workshop",  what: "build a position and price it" },
+  log:      { label: "Trade log", what: "what you are holding now" },
+};
+
+/* Going somewhere else, from anywhere.
+ *
+ * Every room used to be reachable only from the front page, so getting
+ * from a company to the finder meant opening a blank tab first and
+ * going back out to the launcher. That is what made the app feel like
+ * it branched: each tab was a dead end you reversed out of.
+ *
+ * The same four buttons now sit in every room, so the shape is a ring
+ * rather than a tree -- from any one of them you are one click from the
+ * other three, and you never lose where you were, because going to a
+ * different KIND of room opens a tab instead of replacing this one.
+ *
+ * Switching to the room you are already in is not navigation, so that
+ * button is marked as where you are and does nothing.
+ */
+function roomNav(here) {
+  return `<nav class="rooms">${Object.entries(ROOMS).map(([id, r]) =>
+    `<button class="room r-${id}${id === here ? " here" : ""}"
+       data-room="${id}" title="${esc(r.what)}"
+       ${id === here ? 'aria-current="page"' : ""}>${esc(r.label)}</button>`
+  ).join("")}</nav>`;
+}
+
+/* One way in to each room, so "open a new tab" is decided once. */
+function openRoom(which) {
+  if (which === "finder") {
+    (FINDER_RANKINGS.length ? Promise.resolve() : loadRankings())
+      .then(() => newFinderTab());
+    return;
+  }
+  if (which === "log") return newLogTab();
+  if (which === "position") return newPositionTab();
+  return newTab();                       // search: a fresh blank tab
+}
+
+function wireRooms() {
+  document.querySelectorAll("[data-room]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (b.classList.contains("here")) return;
+      openRoom(b.dataset.room);
+    };
+  });
+}
+
+/* The log, as a place rather than a view.
+ *
+ * It used to be a mode of the workshop tab -- open the log and the
+ * workshop was gone, open a trade and the log was gone. Two things you
+ * move between constantly, taking turns in one window. Splitting them
+ * means a trade can be open in front of you WHILE the log is still
+ * there to go back to, which is the whole reason a tab strip exists.
+ */
+function newLogTab() {
+  const book = loadBook();
+  const tab = {
+    id: ++state.seq, symbol: null, kind: "log", status: "log",
+    data: null, error: null, live: true, loading: false,
+    ui: { book, closing: null, marks: {}, zoom: null },
+  };
+  state.tabs.push(tab);
+  state.active = tab.id;
+  render();
+  markBook(tab);
+  return tab;
+}
+
 function newPositionTab() {
   const book = loadBook();
   const tab = {
@@ -211,11 +293,10 @@ function newPositionTab() {
       // Legs start empty: they are picked off the board, not typed in.
       legs: [],
       book,
-      // Where you are. The logbook is the home of this tab -- the two
-      // route cards are a way IN to building something, not the front
-      // door, and once a trade exists the record of it is what you came
-      // back for.
-      view: bookOpen(book).length ? "book" : "new",
+      // The workshop is only ever the workshop now. The log is its own
+      // room, so this tab does not have to decide which of the two you
+      // meant by opening it.
+      view: "new",
       editing: null,
       chain: null, expiry: null, chainLoading: false, chainError: null,
       basis: "atm", unit: "cash",
@@ -232,9 +313,6 @@ function newPositionTab() {
   state.tabs.push(tab);
   state.active = tab.id;
   render();
-  // Price what is already held, so the log shows where each trade
-  // stands rather than being a list of names.
-  if (tab.ui.view === "book") markBook(tab);
   return tab;
 }
 
@@ -330,6 +408,9 @@ const PLACE = {
                       preset: u.preset, symbol: u.symbol,
                       legs: JSON.stringify(u.legs || []) }),
   finder: (u) => ({ ranking: u.ranking, study: u.study }),
+  // The log has one piece of state worth stepping back through: which
+  // trade, if any, has its closing form open.
+  log: (u) => ({ closing: u.closing }),
   ticker: (u) => ({ zoom: u.zoom }),
 };
 
@@ -363,10 +444,8 @@ function step(tab, delta) {
   // analysis of them did not, and showing the old one would be showing
   // numbers for a different trade.
   render(true);
-  if (tab.kind === "position") {
-    if (tab.ui.view === "book") markBook(tab);
-    else if (tab.ui.legs?.length) analysePosition(tab);
-  }
+  if (tab.kind === "log") markBook(tab);
+  else if (tab.kind === "position" && tab.ui.legs?.length) analysePosition(tab);
 }
 
 const canStep = (tab, d) => {
@@ -583,17 +662,21 @@ function renderTabs() {
 
   state.tabs.forEach((tab) => {
     const el = document.createElement("div");
-    el.className = "tab" + (tab.id === state.active ? " active" : "")
-      + (tab.kind === "finder" ? " tab-finder" : "")
-      + (tab.kind === "position" ? " tab-position" : "");
+    // One class per room, so a glance at the strip says what kind of
+    // thing each tab is before you read the name on it.
+    const room = tab.kind || "search";
+    el.className = `tab t-${room}` + (tab.id === state.active ? " active" : "");
     const q = tab.data?.quote;
     const chg = q?.change_pct;
     el.innerHTML =
       (tab.status === "ready" ? `<span class="livedot ${tab.live ? "" : "off"}"></span>` : "") +
       `<span class="sym">${esc(tab.symbol
-        || (tab.kind === "finder" ? "Finder"
-          : tab.kind === "position" ? (tab.ui.symbol ? tab.ui.symbol + " position" : "Position")
+        || (room === "finder" ? "Finder"
+          : room === "log" ? "Trade log"
+          : room === "position" ? (tab.ui.symbol ? tab.ui.symbol + " workshop" : "Workshop")
           : "New search"))}</span>` +
+      (room === "log" && bookOpen(tab.ui.book || []).length
+        ? `<span class="chg dim">${bookOpen(tab.ui.book).length} open</span>` : "") +
       (tab.status === "loading" ? `<span class="chg dim">...</span>` : "") +
       (q?.price ? `<span class="px">${money(q.price)}</span>` : "") +
       (chg !== undefined && chg !== null ? `<span class="chg ${sign(chg)}">${signed(chg, 2)}</span>` : "") +
@@ -621,15 +704,16 @@ function renderTabs() {
  * information a door can usefully show before you walk through it. */
 function renderDoors() {
   const open = bookOpen(loadBook()).length;
-  const door = (id, name, what, badge = "") => `<button class="door" data-door="${id}">
-      <span class="dn">${name}${badge}</span>
-      <span class="dw">${what}</span>
-    </button>`;
+  // The same three rooms, the same names and the same hues as the nav
+  // that sits in every other tab -- the front page is one more place
+  // on the ring, not a different menu with its own vocabulary.
   return `<div class="doors">
-    ${door("finder", "Finder", "rank the whole market and find one")}
-    ${door("workshop", "Workshop", "build a position and price it")}
-    ${door("logbook", "Trade log", "what you are holding now",
-           open ? `<i class="dcount">${open}</i>` : "")}
+    ${["finder", "position", "log"].map((id) => `
+      <button class="door d-${id}" data-room="${id}">
+        <span class="dn">${esc(ROOMS[id].label)}${
+          id === "log" && open ? `<i class="dcount">${open}</i>` : ""}</span>
+        <span class="dw">${esc(ROOMS[id].what)}</span>
+      </button>`).join("")}
   </div>`;
 }
 
@@ -1452,7 +1536,8 @@ function renderBook(tab) {
     return `<div class="bookitem${closing ? " closing" : ""}${
       x ? " exp-" + x.level : ""}${x?.urgent ? " urgent" : ""}">
       <button class="bookrow ${t.closed ? "shut" : ""}" data-open="${esc(t.id)}">
-        <span class="bsym">${esc(t.symbol)}</span>
+        <span class="bsym" data-stock="${esc(t.symbol)}" role="button" tabindex="0"
+              title="Open everything on ${esc(t.symbol)}">${esc(t.symbol)}</span>
         <span class="bname">${esc(t.name || a?.strategy?.name || legSummary(t.legs))}
           <i>${t.legs.length} leg${t.legs.length > 1 ? "s" : ""}
             &middot; opened ${esc(t.opened)}${t.closed
@@ -1464,6 +1549,8 @@ function renderBook(tab) {
           : x ? `${x.urgent ? `<i class="expdot"></i>` : ""}${esc(x.label)}`
           : a?.days_left == null ? "" : `${a.days_left} sessions`}</span>
       </button>
+      <button class="brow-act" data-stock="${esc(t.symbol)}"
+        title="Everything on ${esc(t.symbol)} -- price, options, filings, news">stock</button>
       ${t.closed
         ? `<button class="brow-act" data-reopen="${esc(t.id)}"
              title="Put it back in the open list">reopen</button>`
@@ -1603,7 +1690,7 @@ async function markBook(tab) {
       tab.ui.marks[t.id] = undefined;
     }
   }));
-  if (state.active === tab.id && tab.ui.view === "book") render(true);
+  if (state.active === tab.id && tab.kind === "log") render(true);
 }
 
 /* Settle a trade: record what it was closed for, and stop marking it.
@@ -1663,6 +1750,117 @@ function commitTrade(tab, id = null) {
   return trade.id;
 }
 
+/* The log as its own room, and the two places every row can go.
+ *
+ * A trade in the log is a fact about two different things -- a
+ * structure you built, and a company. Both are worth opening and they
+ * are not the same destination, so the row offers both rather than
+ * picking one and making the other a detour through search.
+ */
+function renderLogTab(tab) {
+  return `<div class="livebar">
+      <span class="lbsym">Trade log</span>
+      <span class="grow"></span>
+      ${roomNav("log")}
+    </div>` + renderBook(tab);
+}
+
+function wireLog(tab) {
+  const u = tab.ui;
+  wireRooms();
+
+  const nu = document.getElementById("book-new");
+  if (nu) nu.onclick = () => openRoom("position");
+
+  // Open the structure. A new tab, because the log is a place you come
+  // back to -- replacing it with the trade you just opened is what made
+  // moving between the two feel like going somewhere and losing it.
+  document.querySelectorAll("[data-open]").forEach((b) => {
+    b.onclick = () => openTrade(u.book.find((x) => x.id === b.dataset.open));
+  });
+
+  // Open the company.
+  document.querySelectorAll("[data-stock]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); newTab(b.dataset.stock); };
+  });
+
+  wireBookRows(tab);
+}
+
+/* A held trade, opened into a workshop tab of its own. */
+function openTrade(t) {
+  if (!t) return null;
+  const tab = newPositionTab();
+  const u = tab.ui;
+  u.editing = t.id;
+  u.symbol = t.symbol;
+  u.legs = t.legs.map((l) => ({ ...l }));
+  // These quantities are already the real ones. A multiplier left over
+  // from the last thing built would reopen the trade at that size.
+  u.size = 1;
+  u.view = "work";
+  u.route = "custom";
+  u.chain = null;
+  u.preset = null;
+  render();
+  loadChain(tab);
+  analysePosition(tab);
+  return tab;
+}
+
+/* Closing, reopening and settling, which the log and the workshop both
+ * do and which used to be written out once inside the workshop's wiring
+ * where only the workshop could reach it. */
+function wireBookRows(tab) {
+  const u = tab.ui;
+
+  document.querySelectorAll("[data-closing]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      u.closing = b.dataset.closing;
+      render(true);
+      document.getElementById("close-val")?.focus();
+    };
+  });
+
+  const cancelClose = document.querySelector("[data-cancelclose]");
+  if (cancelClose) {
+    cancelClose.onclick = (e) => { e.stopPropagation(); u.closing = null; render(true); };
+  }
+
+  document.querySelectorAll("[data-confirm]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const raw = document.getElementById("close-val")?.value;
+      const paying = document.querySelector(".closeform")?.dataset.paying === "1";
+      let got = raw == null || String(raw).trim() === "" ? null
+        : Number(String(raw).replace(/[^0-9.-]/g, ""));
+      // Asked as a positive cost, stored as a negative value: money out
+      // is a negative amount received.
+      if (got != null && Number.isFinite(got) && paying) got = -Math.abs(got);
+      settleTrade(tab, b.dataset.confirm, Number.isFinite(got) ? got : null);
+      u.closing = null;
+      render(true);
+    };
+  });
+
+  document.querySelectorAll("[data-reopen]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const t = u.book.find((x) => x.id === b.dataset.reopen);
+      if (!t) return;
+      // Closing one by mistake should not be a dead end.
+      t.closed = null;
+      t.exit_value = null;
+      t.realised = null;
+      t.realised_pct = null;
+      saveBook(u.book);
+      render(true);
+      markBook(tab);
+    };
+  });
+}
+
 function renderPosition(tab) {
   const u = tab.ui, d = tab.data, c = u.chain;
 
@@ -1675,6 +1873,7 @@ function renderPosition(tab) {
     ${d ? `<span>${d.marks_live}/${d.legs.filter((l) => l.kind !== "stock").length} legs priced live</span>
            <span>IV <b>${pct(d.vol_used, 1)}</b></span>` : ""}
     ${d ? `<button id="pos-price">Reprice</button>` : ""}
+    ${roomNav("position")}
   </div>`;
 
   const picker = `<div class="pospick">
@@ -1702,13 +1901,6 @@ function renderPosition(tab) {
     </div>`).join("")}
   </div>` : `<div class="chips empty-chips">Nothing yet &mdash; click a price on the board below</div>`;
 
-  // ---- where this tab is ----------------------------------------
-  //
-  // The logbook is home. The two route cards are a way in to building
-  // something, not the front door: once a trade exists, the record of
-  // it is what you came back for.
-  if (u.view === "book") return bar + renderBook(tab);
-
   // ---- the fork -------------------------------------------------
   //
   // Two entirely different jobs were sharing one screen. Building a
@@ -1717,11 +1909,7 @@ function renderPosition(tab) {
   // chips, the second wants to be left alone with eleven cards. Shown
   // together, the board pushed the setups below the fold and the
   // setups made the board look like something you had to read first.
-  if (!u.route) {
-    return bar + `<div class="bookbar">
-        <button class="plink" id="book-back">&larr; trade log</button>
-      </div>` + renderRoutes(tab);
-  }
+  if (!u.route) return bar + renderRoutes(tab);
 
   let out = bar + renderRouteBar(tab) + picker;
   if (u.route === "ready") {
@@ -1894,6 +2082,7 @@ function renderAnalysis(tab) {
 
 function wirePosition(tab) {
   const u = tab.ui;
+  wireRooms();
 
   const sym = document.getElementById("pos-sym");
   if (sym) {
@@ -1924,46 +2113,22 @@ function wirePosition(tab) {
     render();
   };
 
-  const bback = document.getElementById("book-back");
-  if (bback) bback.onclick = () => { u.view = "book"; render(); markBook(tab); };
-
+  // Adding to the log used to throw the workshop away and show the
+  // log instead, which is a strange reward for saving something: the
+  // thing you just built disappears. It stays, now marked as logged,
+  // and the log is a click away in the nav like everything else.
   const bsave = document.getElementById("book-save");
   if (bsave) bsave.onclick = () => {
     const id = commitTrade(tab);
     if (!id) return;
-    u.editing = null;
-    u.view = "book";
+    u.editing = id;
     u.marks = { ...(u.marks || {}), [id]: tab.data };
-    render();
-    markBook(tab);
+    u.justSaved = true;
+    render(true);
   };
 
   const bdone = document.getElementById("book-done");
-  if (bdone) bdone.onclick = () => { u.view = "book"; render(); markBook(tab); };
-
-  document.querySelectorAll("[data-open]").forEach((b) => {
-    b.onclick = () => {
-      const t = u.book.find((x) => x.id === b.dataset.open);
-      if (!t) return;
-      // Opening one from the log drops you into the workspace with its
-      // legs loaded, which is the same place the custom route ends --
-      // so editing a held trade and building a new one are one screen.
-      u.editing = t.id;
-      u.symbol = t.symbol;
-      u.legs = t.legs.map((l) => ({ ...l }));
-      // These quantities are already the real ones. Leaving a multiplier
-      // of 3 in place from the last thing built would silently reopen
-      // the trade at three times the size it was logged at.
-      u.size = 1;
-      u.view = "work";
-      u.route = "custom";
-      u.chain = null;
-      u.preset = null;
-      render();
-      loadChain(tab);
-      analysePosition(tab);
-    };
-  });
+  if (bdone) bdone.onclick = () => openRoom("log");
 
   // Closing from inside an open trade. The live analysis is right
   // there, so what it is worth now is the sensible default and there is
@@ -1974,59 +2139,7 @@ function wirePosition(tab) {
       u.marks ||= {};
       u.marks[b.dataset.close] = tab.data || u.marks[b.dataset.close];
       settleTrade(tab, b.dataset.close, tab.data?.value_now ?? null);
-      u.editing = null;
-      u.view = "book";
-      render();
-      markBook(tab);
-    };
-  });
-
-  // ---- closing from the log itself
-  document.querySelectorAll("[data-closing]").forEach((b) => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      u.closing = b.dataset.closing;
       render(true);
-      document.getElementById("close-val")?.focus();
-    };
-  });
-
-  const cancelClose = document.querySelector("[data-cancelclose]");
-  if (cancelClose) {
-    cancelClose.onclick = (e) => { e.stopPropagation(); u.closing = null; render(true); };
-  }
-
-  document.querySelectorAll("[data-confirm]").forEach((b) => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const raw = document.getElementById("close-val")?.value;
-      const paying = document.querySelector(".closeform")?.dataset.paying === "1";
-      let got = raw == null || String(raw).trim() === "" ? null
-        : Number(String(raw).replace(/[^0-9.-]/g, ""));
-      // Asked as a positive cost, stored as a negative value: money out
-      // is a negative amount received, which is what the arithmetic
-      // downstream expects.
-      if (got != null && Number.isFinite(got) && paying) got = -Math.abs(got);
-      settleTrade(tab, b.dataset.confirm, Number.isFinite(got) ? got : null);
-      u.closing = null;
-      render(true);
-    };
-  });
-
-  document.querySelectorAll("[data-reopen]").forEach((b) => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const t = u.book.find((x) => x.id === b.dataset.reopen);
-      if (!t) return;
-      // Closing one by mistake should not be a dead end. The settlement
-      // figures go with it: it is live again, so it is marked again.
-      t.closed = null;
-      t.exit_value = null;
-      t.realised = null;
-      t.realised_pct = null;
-      saveBook(u.book);
-      render(true);
-      markBook(tab);
     };
   });
 
@@ -2237,6 +2350,7 @@ function renderFinder(tab) {
     <span>${meta.age_s != null ? `scanned <b>${meta.age_s < 90
       ? meta.age_s + "s" : Math.round(meta.age_s / 60) + " min"}</b> ago` : ""}</span>
     <button id="fn-refresh">Rescan</button>
+    ${roomNav("finder")}
   </div>`;
 
   /* Each card carries what the ranking DID, not only what it is for. A
@@ -2314,6 +2428,7 @@ async function loadRankings() {
 }
 
 function wireFinder(tab) {
+  wireRooms();
   document.querySelectorAll("[data-frank]").forEach((b) => {
     b.onclick = () => {
       if (b.dataset.frank === tab.ui.rank) return;
@@ -4643,6 +4758,7 @@ function liveBar(tab) {
     <button id="lb-toggle">${tab.live ? "Pause" : "Resume"}</button>
     <button id="lb-now">Refresh now</button>
     <button id="lb-full">Reload everything</button>
+    ${roomNav("search")}
   </div>`;
 }
 
@@ -5007,6 +5123,14 @@ function render(keepScroll = false) {
 
   if (!tab || tab.status === "blank") { view.innerHTML = renderLauncher(); wireLauncher(); return; }
 
+  if (tab.kind === "log") {
+    view.innerHTML = renderLogTab(tab);
+    gloss(view);
+    wireLog(tab);
+    view.scrollTop = scroll;
+    return;
+  }
+
   if (tab.kind === "position") {
     view.innerHTML = renderPosition(tab);
     gloss(view);
@@ -5076,24 +5200,7 @@ function wireLauncher() {
     else if (e.key === "Escape") { suggestions = []; paintSuggestions(); }
   };
   document.querySelectorAll(".quick span").forEach((el) => { el.onclick = () => pick(el.dataset.s); });
-  document.querySelectorAll("[data-door]").forEach((b) => {
-    b.onclick = async () => {
-      const where = b.dataset.door;
-      if (where === "finder") {
-        if (!FINDER_RANKINGS.length) await loadRankings();
-        newFinderTab();
-        return;
-      }
-      // The workshop and the log are two views of one tab, so the door
-      // opens the tab and then says which room to arrive in.
-      const tab = newPositionTab();
-      if (where === "workshop") {
-        tab.ui.view = "new";
-        tab.ui.route = null;
-        render();
-      }
-    };
-  });
+  wireRooms();
 }
 
 /* ---- charts ---------------------------------------------------------- */
@@ -5781,6 +5888,7 @@ function wireZoom(tab) {
 }
 
 function wireLiveBar(tab) {
+  wireRooms();
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on("lb-story", () => {
     tab.ui.story = !tab.ui.story;

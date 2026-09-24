@@ -108,6 +108,48 @@
      honest about something whose direction is unknown. */
   --attn:   #C79A52;
 
+
+  /* THE FOUR ROOMS
+
+   *
+
+   * The same argument the moving averages make: this hue says WHICH
+
+   * ROOM a tab is, and nothing else. It is not a mood and not a
+
+   * judgement -- a workshop tab is not warmer or better than a search
+
+   * tab, it is a different kind of place.
+
+   *
+
+   * Kept away from the hues that already mean something. Green and red
+
+   * are money, amber is attention, and the sand/teal/mauve trio belongs
+
+   * to the moving averages. These four are quieter than all of them,
+
+   * because a tab strip is furniture and should not be the brightest
+
+   * thing on screen.
+
+   *
+
+   * Every room is also named in words, on the tab and on the button
+
+   * that opens it, so the colour is a second way of reading something
+
+   * already legible rather than the only way. */
+
+  --room-search:   #8FA3B8;   /* slate  -- one company            */
+
+  --room-finder:   #7FA88C;   /* sage   -- the whole market       */
+
+  --room-position: #C0946B;   /* tan    -- building something     */
+
+  --room-log:      #A98BB5;   /* lilac  -- what you already hold  */
+
+
   --mast:   "Bodoni Moda", Georgia, serif;
   /* GFS Didot, from the Greek Font Society -- a Greek Didone that also cuts
      Latin. Used for the name alone, nowhere else. */
@@ -2378,3 +2420,72 @@ a { color: inherit; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .bookitem.urgent .expdot { animation: none; }
 }
+
+
+/* ---- the four rooms, in the strip and in the nav ----
+   A tab carries its room as a top edge; the button that opens that room
+   carries the same hue as a dot. Shown twice so the mapping is read
+   rather than remembered, and named in words in both places so the
+   colour is never doing the work alone. */
+
+.tab { position: relative; }
+.tab::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: var(--room); opacity: .34;
+}
+.tab.active::before { opacity: 1; }
+.t-search   { --room: var(--room-search); }
+.t-finder   { --room: var(--room-finder); }
+.t-position { --room: var(--room-position); }
+.t-log      { --room: var(--room-log); }
+
+/* ---- going somewhere else, from anywhere ----
+   The ring. Four buttons in every room, so no room is a dead end you
+   have to reverse out of. */
+.rooms { display: inline-flex; align-items: center; gap: 2px; margin-left: 10px; }
+.room {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer;
+  padding: 4px 9px; border-radius: 3px;
+  font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--faint);
+}
+.room::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--room); opacity: .55;
+}
+.room.r-search   { --room: var(--room-search); }
+.room.r-finder   { --room: var(--room-finder); }
+.room.r-position { --room: var(--room-position); }
+.room.r-log      { --room: var(--room-log); }
+.room:hover { color: var(--text); background: var(--raised); }
+.room:hover::before { opacity: 1; }
+
+/* Where you already are is not a destination. */
+.room.here {
+  color: var(--text); cursor: default;
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.room.here::before { opacity: 1; }
+.room.here:hover { background: none; }
+
+@media (max-width: 900px) {
+  .room { padding: 4px 6px; font-size: 0; gap: 0; }   /* dots only */
+  .room::before { width: 8px; height: 8px; }
+}
+
+/* The ticker in a log row is a way into the company. */
+.bsym[data-stock] { cursor: pointer; }
+.bsym[data-stock]:hover { color: var(--text); text-decoration: underline dotted; }
+
+/* The doors on the front page are the same three rooms as the nav. */
+.door { position: relative; }
+.door::before {
+  content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+  top: -7px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--room); opacity: .6;
+}
+.door:hover::before { opacity: 1; }
+.door.d-finder   { --room: var(--room-finder); }
+.door.d-position { --room: var(--room-position); }
+.door.d-log      { --room: var(--room-log); }
