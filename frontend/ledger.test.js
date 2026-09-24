@@ -78,5 +78,88 @@ const empty = bookTotals([], []);
 yes("an empty log totals zero, not NaN",
     empty.all === 0 && empty.priced === 0, JSON.stringify(empty));
 
+
+section("Closing is shown as the subtraction it is");
+
+/* The form asked for a number and printed a result, with the step
+ * between them left to the reader. That step is not obvious for
+ * anything SOLD: "what you paid to open" is stored as a negative, and
+ * on screen both figures look like income, so 26 and 20 could
+ * plausibly come to 46 as easily as to 6.
+ *
+ * WK is lifted from working.js rather than stubbed, so the rows here
+ * are built by the same code that builds every other sum on the page.
+ */
+const { lift } = require("./lift.js");
+
+// app.js reaches the sum-building helpers through window.QUIPU_WORKING,
+// the same as it does in the browser. Wired up here with the real
+// object out of working.js rather than a stub, so these rows are built
+// by the code that builds every other sum on the page.
+const { WK: realWK } = lift("working.js:WK");
+global.window = { QUIPU_WORKING: { WK: realWK } };
+
+const { closingWorking, round2 } = lift("WK", "round2", "closingWorking");
+
+/** Follow the rows the way a reader would, and see where they land. */
+function walk(w) {
+  let total = null;
+  for (const ln of w.lines) {
+    const v = ln.gives !== null && ln.gives !== undefined
+      ? ln.gives
+      : ln.terms.reduce((a, t) => a * t.value, 1);
+    if (total === null) total = ln.op === "-" ? -v : v;
+    else if (ln.op === "+") total += v;
+    else if (ln.op === "-") total -= v;
+    else if (ln.op === "x") total *= v;
+  }
+  return total;
+}
+
+// Bought for 99, sold back for 250.
+const closeDebit = closingWorking(250, 99, false);
+near("a debit trade comes to the difference", closeDebit.result, 151);
+near("and the rows say so too", walk(closeDebit), 151);
+yes("the first row is what you get back",
+    /get back/.test(closeDebit.lines[0].terms[0].label), closeDebit.lines[0].terms[0].label);
+yes("the second is subtracted",
+    closeDebit.lines[1].op === "-", `op "${closeDebit.lines[1].op}"`);
+
+// Paid 26 to open, cost 20 to buy back. Both look like income on
+// screen; only one of them is.
+const closeCredit = closingWorking(-20, -26, true);
+near("a credit trade keeps the difference", closeCredit.result, 6);
+near("and its rows say so too", walk(closeCredit), 6);
+yes("it leads with what you were paid",
+    /were paid to open/.test(closeCredit.lines[0].terms[0].label),
+    closeCredit.lines[0].terms[0].label);
+yes("and subtracts the cost of buying it back",
+    closeCredit.lines[1].op === "-" && /costs you to close/.test(closeCredit.lines[1].terms[0].label),
+    closeCredit.lines[1].terms[0].label);
+yes("every printed value is a magnitude, never a bare negative",
+    closeCredit.lines.every((l) => l.gives >= 0),
+    closeCredit.lines.map((l) => l.gives).join(", "));
+
+// The same credit trade going wrong: bought back for more than it paid.
+const blown = closingWorking(-199, -26, true);
+near("a credit closed for more than it paid is a loss", blown.result, -173);
+near("and the rows land there", walk(blown), -173);
+
+// Selling a long position for nothing is still a real answer.
+const worthless = closingWorking(0, 99, false);
+near("expiring worthless loses the whole debit", worthless.result, -99);
+near("and the rows agree", walk(worthless), -99);
+
+// It agrees with the number the log actually stores.
+for (const [recv, cost] of [[250, 99], [-20, -26], [-199, -26], [0, 99], [45, -51]]) {
+  const w = closingWorking(recv, cost, cost < 0);
+  near(`working matches realised() for ${recv} against ${cost}`,
+       w.result, realised(recv, cost, null).pl);
+}
+
+yes("it declines to invent a sum with nothing to work from",
+    closingWorking(null, 99, false) === null
+    && closingWorking(250, null, false) === null);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

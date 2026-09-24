@@ -2513,3 +2513,19 @@ a { color: inherit; text-decoration: none; }
 }
 .bookitem.exp-today .blocal,
 .bookitem.exp-gone  .blocal { color: var(--neg); }
+
+/* ---- what closing comes to ----
+   The form asked for a number and printed a result, with the step
+   between them left to the reader -- and that step is not obvious for
+   anything sold, where "what you paid to open" is a negative number
+   and both figures look like income. */
+.cfrow.cfwork { align-items: start; }
+.cfsum { flex: 1; min-width: 0; }
+.cfsum .wcalc { font-size: 12px; }
+.cfnone { font-size: 11.5px; color: var(--faint); }
+.cfres {
+  margin-top: 7px; font-family: var(--mono); font-size: 13px; color: var(--text2);
+}
+.cfres b { font-size: 16px; font-weight: 500; }
+.cfres.up b { color: var(--pos); }
+.cfres.down b { color: var(--neg); }

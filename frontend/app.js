@@ -1703,8 +1703,8 @@ function renderBook(tab) {
               title="Open everything on ${esc(t.symbol)}">${esc(t.symbol)}</span>
         <span class="bname">${esc(t.name || a?.strategy?.name || legSummary(t.legs))}
           <i>${t.legs.length} leg${t.legs.length > 1 ? "s" : ""}
-            &middot; opened ${esc(t.opened)}${t.closed
-              ? ` &middot; closed ${esc(t.closed)}` : ""}</i></span>
+            &middot; opened ${whenText(t.opened_at, t.opened)}${t.closed
+              ? ` &middot; closed ${whenText(t.closed_at, t.closed)}` : ""}</i></span>
         <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
           : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
         <span class="bpct ${cls}">${pctOfRisk(pct)}</span>
@@ -1773,6 +1773,67 @@ function renderBook(tab) {
  * that is close enough -- but a trade closed in a hurry rarely fills
  * at the midpoint, and a log that quietly assumes it did will flatter
  * every result in it. */
+/* When a trade was opened and when it was closed, to the minute.
+ *
+ * The log recorded dates. Two trades opened four hours apart on either
+ * side of an earnings print read as the same day, and a closing price
+ * with no time on it cannot be checked against anything -- a tape, a
+ * statement, or your own memory of what you were looking at.
+ *
+ * Stored as a full instant and shown in local time. The date-only
+ * fields stay, because trades already in the log have only those and a
+ * log that loses its own history to a format change is worse than one
+ * that never had the time.
+ */
+const stamp = () => new Date().toISOString();
+
+function whenText(iso, dateOnly) {
+  if (!iso) return dateOnly ? esc(dateOnly) : "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return esc(dateOnly || "");
+  return esc(new Intl.DateTimeFormat("en-GB", {
+    day: "numeric", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  }).format(d));
+}
+
+/* What closing actually comes to, written as the subtraction it is.
+ *
+ * The form asked for a number and then printed a result, with the step
+ * between them left to the reader -- and that step is not obvious for
+ * anything sold, where "what you paid to open" is a negative number
+ * and the result is a sum of two things that both look like income.
+ */
+function closingWorking(received, cost, paying) {
+  if (received == null || cost == null) return null;
+  const W = WK();
+  const credit = cost < 0;
+
+  // Written in the order the money moved, so the signs match what
+  // actually happened rather than what the stored fields look like.
+  const lines = credit
+    ? [
+        W.line("", [W.term("what you were paid to open it", Math.abs(cost))],
+               Math.abs(cost)),
+        W.line("-", [W.term("what it costs you to close it", Math.abs(received))],
+               Math.abs(received)),
+      ]
+    : [
+        W.line("", [W.term("what you get back for closing it", received)], received),
+        W.line("-", [W.term("what you paid to open it", cost)], cost),
+      ];
+
+  return W.sum(round2(received - cost), lines, "$",
+    credit
+      ? "You keep the difference. Closing a sold position means buying it "
+      + "back, so the whole of what you were paid is only yours if it "
+      + "costs nothing to close."
+      : "What you get back, less what it cost you. Commissions are not in "
+      + "this, and neither is the spread you crossed to get out.");
+}
+
+const round2 = (v) => Math.round(v * 100) / 100;
+
 function closeForm(t, a) {
   const value = a?.value_now;
   const cost = a?.net_cost;
@@ -1806,12 +1867,40 @@ function closeForm(t, a) {
       <span class="cfv">${money(Math.abs(cost))}</span>
       <span class="cfhint">the result is the difference between the two</span>
     </div>` : ""}
+    <div class="cfrow cfwork">
+      <span class="cfl">what that comes to</span>
+      <div class="cfsum" id="close-sum">${closingSum(t, a, shown, paying)}</div>
+    </div>
     <div class="cfrow cfact">
       <span class="cfl"></span>
       <button class="bookadd" data-confirm="${esc(t.id)}">close the trade</button>
       <button class="bookclose" data-cancelclose="1">cancel</button>
     </div>
   </div>`;
+}
+
+/* The sum under the closing field, for whatever is typed in it. */
+function closingSum(t, a, typed, paying) {
+  const cost = a?.net_cost ?? t.net_cost ?? null;
+  if (cost == null) {
+    return `<span class="cfnone">What it cost to open is not recorded for
+      this trade, so the result cannot be worked out &mdash; the amount you
+      enter is stored as it is.</span>`;
+  }
+  const n = typed == null || typed === "" ? null
+    : Number(String(typed).replace(/[^0-9.-]/g, ""));
+  if (n == null || !Number.isFinite(n)) {
+    return `<span class="cfnone">Enter what it
+      ${paying ? "cost to close" : "came back for"} and the result appears here.</span>`;
+  }
+  // Asked as a positive amount, stored signed: money out is a negative
+  // amount received, which is what the arithmetic downstream expects.
+  const received = paying ? -Math.abs(n) : n;
+  const w = closingWorking(received, cost, paying);
+  const pl = received - cost;
+  return (w ? wcalc(w) : "")
+    + `<div class="cfres ${pl >= 0 ? "up" : "down"}">${
+        pl >= 0 ? "a gain of " : "a loss of "}<b>${money(Math.abs(pl))}</b></div>`;
 }
 
 /* A return against what was at risk, which for a cash-secured put is
@@ -1872,6 +1961,7 @@ function settleTrade(tab, id, received) {
   const cost = a?.net_cost;
 
   t.closed = new Date().toISOString().slice(0, 10);
+  t.closed_at = stamp();
   t.exit_value = received;
   // Keep the name and the cost with the trade. Both came from an
   // analysis that will not be run again once it is closed, and a log
@@ -1908,7 +1998,9 @@ function commitTrade(tab, id = null) {
     id: "t" + Date.now() + Math.random().toString(36).slice(2, 6),
     symbol: u.symbol, legs,
     opened: new Date().toISOString().slice(0, 10),
+    opened_at: stamp(),
     closed: null,
+    closed_at: null,
   };
   u.book.unshift(trade);
   saveBook(u.book);
@@ -1987,6 +2079,18 @@ function wireBookRows(tab) {
       document.getElementById("close-val")?.focus();
     };
   });
+
+  // Repainted in place rather than through render(), which would
+  // rebuild the input and take the cursor out of it mid-number.
+  const val = document.getElementById("close-val");
+  const sumHost = document.getElementById("close-sum");
+  if (val && sumHost) {
+    const t = u.book.find((x) => x.id === u.closing);
+    const paying = document.querySelector(".closeform")?.dataset.paying === "1";
+    val.oninput = () => {
+      sumHost.innerHTML = closingSum(t, u.marks?.[u.closing], val.value, paying);
+    };
+  }
 
   const cancelClose = document.querySelector("[data-cancelclose]");
   if (cancelClose) {
