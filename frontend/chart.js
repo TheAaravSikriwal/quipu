@@ -199,6 +199,24 @@ function macd(points, fast = 12, slow = 26, signal = 9) {
   return { line, signal: sig, hist };
 }
 
+/** Bars since the histogram last changed sign -- that is, since the
+ *  MACD line last crossed its signal line.
+ *
+ *  Null when it has not crossed inside the data we hold, which is a
+ *  different statement from "it crossed a long time ago" and is worth
+ *  keeping distinct: one is a measurement, the other is the absence of
+ *  one.
+ */
+function macdCrossBars(hist, i) {
+  if (!hist || hist[i] == null) return null;
+  const side = hist[i] >= 0;
+  for (let j = i - 1; j >= 0; j--) {
+    if (hist[j] == null) return null;
+    if ((hist[j] >= 0) !== side) return i - j;
+  }
+  return null;
+}
+
 /** Bollinger bands: a 20-day average with two standard deviations either
  *  side, measured on the same window as the average. */
 function bollinger(points, period = 20, mult = 2) {
@@ -776,6 +794,18 @@ function makeChart(host, opts) {
         macd: m.line[i] == null ? null : m.line[i],
         macd_signal: m.signal[i] == null ? null : m.signal[i],
         macd_hist: m.hist[i] == null ? null : m.hist[i],
+        // The price the MACD is measured in. It is a DIFFERENCE OF TWO
+        // AVERAGES, so it carries the units of the share and nothing
+        // normalises it: +5 is a fifth of a $25 stock and one percent
+        // of a $500 one. Without the price beside it the number cannot
+        // be compared to the same stock last year, let alone to
+        // another stock.
+        close: all[i] ? all[i].c : null,
+        // How long the current side of the signal line has held. A
+        // crossing that happened this morning and one that happened in
+        // March are the same fact stated with very different
+        // confidence, and the readout said neither.
+        macd_cross_bars: macdCrossBars(m.hist, i),
         cross: last && { ...last, bars_ago: all.length - 1 - last.i },
         cross_count: xs.length,
         ma50: f[i], ma200: sl[i],
@@ -797,4 +827,5 @@ function makeChart(host, opts) {
   return api;
 }
 
-window.QUIPU_CHART = { makeChart, rsi, ema, macd, bollinger, sma, crossovers };
+window.QUIPU_CHART = { makeChart, rsi, ema, macd, macdCrossBars,
+                       bollinger, sma, crossovers };

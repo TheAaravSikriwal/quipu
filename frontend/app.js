@@ -5737,13 +5737,25 @@ function paintIndicatorNote(tab, chart, root = document) {
   if (ui.osc === "macd") {
     if (r.macd == null || r.macd_hist == null) { host.innerHTML = ""; return; }
     const above = r.macd_hist >= 0;
+    // MACD is a difference of two averages, so it is denominated in
+    // the share. The raw figure says nothing on its own: +5 is a fifth
+    // of a $25 stock and one percent of a $500 one, and the number was
+    // printed bare.
+    const share = r.close ? (r.macd / r.close) * 100 : null;
+    const ago = r.macd_cross_bars;
     host.innerHTML = `<span class="indname">MACD 12/26/9</span>
-      <b>${nf(r.macd, 2)}</b>, ${above ? "above" : "below"} its signal line by
+      <b>${nf(r.macd, 2)}</b>${share == null ? ""
+        : ` &mdash; <b>${signed(share, 2)}</b> of the share price`},
+      ${above ? "above" : "below"} its signal line by
       ${nf(Math.abs(r.macd_hist), 2)}. The bars are that gap.
+      ${ago == null ? "" : `It last crossed <b>${plural(ago, "session")}</b> ago.`}
       <span class="inddef">The distance between a 12-day and a 26-day
-      exponential average. Above zero the shorter average is higher, which
-      means the recent trend is upward; the crossing is what people watch,
-      and it lags by construction.</span>`
+      exponential average, in dollars &mdash; which is why the percentage
+      matters: the same reading means a violent move on a cheap share and
+      almost nothing on an expensive one. Above zero the shorter average is
+      higher, so the recent trend is upward. The crossing is what people
+      watch, and it lags by construction: it is two averages of the past,
+      and it turns after the price does.</span>`
       + tail;
   }
 }

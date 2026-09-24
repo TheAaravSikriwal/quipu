@@ -22,7 +22,8 @@ const src = fs.readFileSync(path.join(__dirname, "chart.js"), "utf8");
 // Run it in its own scope. Evaluated inline, chart.js's top-level
 // declarations collide with this file's imports of the same names.
 new Function(src).call(global);
-const { rsi, ema, macd, bollinger, sma, crossovers } = global.window.QUIPU_CHART;
+const { rsi, ema, macd, macdCrossBars, bollinger, sma, crossovers } =
+  global.window.QUIPU_CHART;
 
 let pass = 0, fail = 0;
 const bars = (closes) => closes.map((c) => ({ t: "", o: c, h: c, l: c, c, v: 0 }));
@@ -179,6 +180,73 @@ const cw = crossovers(bars(wobble), 50, 200);
 yes("crossings alternate direction",
     cw.length > 1 && cw.every((c, idx) => idx === 0 || c.kind !== cw[idx - 1].kind),
     `${cw.length}: ` + cw.map((c) => c.kind[0]).join(""));
+
+
+/* Exact equality, including null -- near() cannot express "no crossing",
+ * and a null that quietly compared equal to 0 would hide the one case
+ * this function most needs to get right. */
+function same(name, got, want) {
+  const ok = got === want;
+  console.log(`  [${ok ? "PASS" : "FAIL"}] ${name.padEnd(52)} got ${got}  want ${want}`);
+  ok ? pass++ : fail++;
+}
+
+section("How long the MACD has been on this side of its signal");
+
+/* A crossing that happened this morning and one that happened in March
+ * are the same fact stated with very different confidence, and the
+ * readout used to say neither. Counted from the histogram, which is
+ * the MACD line less its signal -- so a change of sign in the
+ * histogram IS the crossing.
+ */
+
+// Hand-built histograms, so the expected answer is countable by eye.
+same("crossed on the last bar", macdCrossBars([-1, -1, -1, 2], 3), 1);
+same("crossed three bars back", macdCrossBars([-1, 2, 2, 2], 3), 3);
+same("crossed the other way", macdCrossBars([1, 1, -2], 2), 1);
+
+// Zero counts as the positive side, the same way the readout's
+// "above or below" does -- the two must agree or the sentence and the
+// number contradict each other.
+same("exactly zero is treated as above", macdCrossBars([-1, -1, 0], 2), 1);
+
+// No crossing inside the data is NOT "a long time ago". It is the
+// absence of a measurement, and saying "200 sessions" would be
+// inventing one.
+same("no crossing in the data at all", macdCrossBars([1, 2, 3, 4], 3), null);
+same("nothing to measure from", macdCrossBars([null, null], 1), null);
+same("an empty histogram", macdCrossBars([], 0), null);
+
+// Against the real generator rather than a hand-built array: whatever
+// it returns must point at an actual change of sign.
+const hist = macd(bars(noise)).hist;
+const last = hist.length - 1;
+const back = macdCrossBars(hist, last);
+if (back == null) {
+  yes("the sample never crosses, and it says so", true, "null");
+} else {
+  const here = hist[last] >= 0;
+  const there = hist[last - back] >= 0;
+  const between = hist.slice(last - back + 1, last + 1).every((v) => (v >= 0) === here);
+  yes("it points at a real change of sign",
+      there !== here, `${hist[last - back].toFixed(3)} then ${hist[last].toFixed(3)}`);
+  yes("and nothing in between crossed back", between, `${back} bars held`);
+}
+
+section("MACD carries the units of the share");
+
+/* This is the whole reason the readout now prints a percentage. The
+ * indicator is a difference of two averages of PRICE, so doubling the
+ * price doubles the reading without anything about the trend changing.
+ */
+const cheap = bars(noise);
+const dear = bars(noise.map((v) => v * 10));
+const mc = macd(cheap), md = macd(dear);
+const j = mc.line.length - 1;
+near("ten times the price is ten times the MACD",
+     md.line[j], mc.line[j] * 10, 1e-6);
+near("but the same fraction of the share price",
+     md.line[j] / dear[j].c, mc.line[j] / cheap[j].c, 1e-9);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
