@@ -2736,3 +2736,34 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .wcal { grid-template-columns: 1fr; gap: 3px; }
 }
+
+/* The handful most likely to have moved the price.
+   Sixty articles is a good haul and a bad list: chronological order
+   puts a syndicated opinion piece above an earnings miss, and leaves
+   the reader doing the ranking the app should have done. */
+.movers {
+  background: var(--sunk); border-left: 2px solid var(--attn);
+  padding: 11px 14px 12px; margin: 0 0 14px;
+}
+.mvhead {
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--attn);
+  margin-bottom: 8px;
+}
+.mvrow {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
+  padding: 5px 0; border-top: 1px solid var(--hline);
+}
+.mvrow:first-of-type { border-top: none; }
+.mvhl { font-size: 12.5px; line-height: 1.4; color: var(--text); text-decoration: none; }
+.mvhl:hover { text-decoration: underline; }
+.mvage { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.mvwhy {
+  grid-column: 1 / -1; font-size: 10px; color: var(--faint);
+  font-family: var(--ui); letter-spacing: .04em;
+}
+.mvnote {
+  margin-top: 9px; font-size: 10px; line-height: 1.5; color: var(--faint);
+}
+/* And the same story, still in its place in the list below. */
+.article.mover { box-shadow: inset 2px 0 0 var(--attn); padding-left: 10px; }

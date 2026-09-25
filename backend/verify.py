@@ -1663,6 +1663,59 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "spot agreement", f"could not run: {exc}"))
 
+section("The news that is likely to have moved the price ranks above the news that is not")
+
+# Sixty articles is a good haul and a bad list: in date order a
+# syndicated opinion piece from this morning sits above an earnings
+# miss from last night. The ranking has to put those the right way
+# round without reading either of them.
+try:
+    from datetime import timedelta as _td
+    import sources.news_rss as NR
+
+    _now = _dt.now(_tz.utc)
+
+    def _art(title, feeds=1, hours=2):
+        return {"title": title, "excerpt": "", "feed_count": feeds,
+                "published": (_now - _td(hours=hours)).isoformat()}
+
+    miss = NR.price_moving(_art("Acme misses earnings, guidance cut", 3, 1))
+    deal = NR.price_moving(_art("Acme to be acquired in $4bn takeover", 1, 2))
+    cut = NR.price_moving(_art("Analyst downgrades Acme, cuts price target", 2, 5))
+    view = NR.price_moving(_art("Acme: why I am still holding", 1, 1))
+    old = NR.price_moving(_art("Acme: a long term view", 1, 24 * 10))
+
+    RESULTS.append((miss["score"] > view["score"],
+                    "an earnings miss outranks an opinion piece",
+                    f'{miss["score"]} against {view["score"]}'))
+    RESULTS.append((deal["score"] > view["score"],
+                    "and so does a takeover",
+                    f'{deal["score"]} against {view["score"]}'))
+    RESULTS.append((cut["score"] > view["score"],
+                    "and a downgrade with a price target",
+                    f'{cut["score"]} against {view["score"]}'))
+
+    # Age discounts rather than disqualifies: somebody back after a
+    # week still wants to know what happened while they were away.
+    RESULTS.append((old["score"] < view["score"],
+                    "the same piece scores lower once it is old",
+                    f'{old["score"]} against {view["score"]}'))
+
+    # More outlets is more signal, all else equal.
+    one = NR.price_moving(_art("Acme misses earnings", 1, 1))
+    five = NR.price_moving(_art("Acme misses earnings", 5, 1))
+    RESULTS.append((five["score"] > one["score"],
+                    "five outlets outrank one on the same headline",
+                    f'{five["score"]} against {one["score"]}'))
+
+    # And it says why, every time it says anything.
+    silent = [n for n, m in (("miss", miss), ("deal", deal), ("cut", cut))
+              if not m["why"]]
+    RESULTS.append((not silent, "every ranked story carries its reason",
+                    "all say why" if not silent else ", ".join(silent)))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "price-moving ranking", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

@@ -4292,13 +4292,51 @@ function calMarket(d, tab, expiry, ev) {
     </div>`;
 }
 
+/* The handful most likely to have moved the price.
+ *
+ * Sixty-odd articles is a good haul and a bad list. Chronological
+ * order puts a syndicated opinion piece from this morning above an
+ * earnings miss from last night, and the reader is left doing the
+ * ranking the app should have done.
+ *
+ * So the top few are lifted out. Scored on the server from three
+ * things that need no reading -- how many outlets ran it, what kind
+ * of words are in the headline, how old it is -- and every one shows
+ * the reason it was picked, because a ranking that cannot say why is
+ * just a different order.
+ */
+function moversStrip(items) {
+  const scored = items
+    .filter((a) => (a.moving?.score || 0) >= 3)
+    .sort((a, b) => (b.moving.score - a.moving.score))
+    .slice(0, 4);
+  if (!scored.length) return "";
+
+  return `<div class="movers">
+    <div class="mvhead">most likely to have moved the price</div>
+    ${scored.map((a) => `<div class="mvrow">
+      <a class="mvhl" href="${esc(a.url)}" target="_blank" rel="noopener">${
+        esc(a.title || "untitled")}</a>
+      <span class="mvwhy">${(a.moving.why || []).map(esc).join(" &middot; ")
+        || "recent"}</span>
+      <span class="mvage">${esc(ago(a.published) || "undated")}</span>
+    </div>`).join("")}
+    <div class="mvnote">Ranked by how many outlets carried it, the kind of
+      words in the headline, and how recent it is &mdash; none of which
+      requires reading the article, and none of which is a claim that the
+      price actually moved. Everything found is still listed below.</div>
+  </div>`;
+}
+
 function newsTile(news) {
   const items = news?.articles || [];
   if (!items.length) return tile(
     "news", "elastic e-claimed", "w3 h2", "The Wire", `<div class="dim">nothing found</div>`);
   return tile(
     "news", "elastic e-claimed cols2", "w3 h3", "The Wire",
-    items.map((a) => `<div class="article${a.is_new ? " fresh" : ""}">
+    moversStrip(items) +
+    items.map((a) => `<div class="article${a.is_new ? " fresh" : ""}${
+        (a.moving?.score || 0) >= 3 ? " mover" : ""}">
         <a class="hl" href="${esc(a.url)}" target="_blank" rel="noopener">${
           a.is_new ? `<i class="newflag">new</i>` : ""}${esc(a.title || "untitled")}</a>
         <div class="meta">${esc(a.publisher || "unknown")}<span class="dot">&bull;</span>${esc(ago(a.published) || "undated")}${

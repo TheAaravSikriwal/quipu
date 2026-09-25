@@ -825,6 +825,15 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                 # where the response is a third projection listing only
                 # the fields somebody remembered to name.
                 "feed_count": item.get("feed_count") or 1,
+                # How likely this headline is to have moved the price,
+                # and the reasons behind the number -- a score on its
+                # own is one more thing to take on trust.
+                "moving": news_rss.price_moving({
+                    "title": (got or {}).get("title") or item.get("title"),
+                    "excerpt": item.get("summary"),
+                    "feed_count": item.get("feed_count"),
+                    "published": (got or {}).get("published") or item.get("published"),
+                }),
                 "full_text": bool(got),
             }
         )

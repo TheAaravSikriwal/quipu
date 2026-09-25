@@ -228,6 +228,91 @@ def _about(items: List[Dict[str, Any]], symbol: str,
     return out
 
 
+#: Words that appear in a headline that moves ONE company's price,
+#: as opposed to one that merely mentions it. Deliberately narrow: an
+#: analyst's opinion piece and an earnings miss both mention a
+#: company, and only one of them reprices it.
+#:
+#: Grouped by how hard each tends to hit, which is not a forecast --
+#: it is what these words have historically been attached to.
+MOVERS = {
+    3: re.compile(
+        r"\b(earnings|results|guidance|profit warning|beats|misses|"
+        r"acquisition|acquire|merger|takeover|buyout|bankrupt|chapter 11|"
+        r"fda|approval|recall|halted|halt|investigation|fraud|"
+        r"restate|delist|short.?seller)\b", re.I),
+    2: re.compile(
+        r"\b(upgrade|downgrade|price target|initiated|dividend|buyback|"
+        r"split|offering|dilut|lawsuit|settle|subpoena|ceo|cfo|resign|"
+        r"steps down|layoff|contract|deal|partnership|patent)\b", re.I),
+    1: re.compile(
+        r"\b(outlook|forecast|analyst|rating|stake|insider|filing|"
+        r"conference|launch|expansion)\b", re.I),
+}
+
+
+def price_moving(article: Dict[str, Any]) -> Dict[str, Any]:
+    """How likely a headline is to have moved the price, and why.
+
+    Three things, none of which requires reading the article:
+
+    How many outlets ran it. The cheapest signal there is, and a
+    surprisingly good one -- everybody carries an earnings surprise
+    and nobody carries a sponsored post.
+
+    What kind of words are in the headline. An acquisition and an
+    analyst note are both news about a company; only one of them
+    reprices it.
+
+    How old it is. A repricing event stops being news once the price
+    has already moved, so age is a discount and not a disqualifier --
+    a reader who has been away for a week still wants to know.
+
+    Returned as a score AND the reasons behind it, because a number
+    on its own is another thing to take on trust.
+    """
+    title = f'{article.get("title") or ""} {article.get("excerpt") or ""}'
+    why: List[str] = []
+    score = 0
+
+    hits = 0
+    for weight, pattern in MOVERS.items():
+        found = pattern.search(title)
+        if found:
+            score += weight
+            hits += 1
+            if len(why) < 2:
+                why.append(found.group(0).lower())
+
+    feeds = article.get("feed_count") or 1
+    if feeds > 1:
+        score += min(feeds, 4)
+        why.append(f"{feeds} outlets ran it")
+
+    age_h = _hours_since(article.get("published"))
+    if age_h is not None:
+        if age_h <= 6:
+            score += 2
+        elif age_h <= 24:
+            score += 1
+        elif age_h > 24 * 7:
+            score -= 1
+
+    return {"score": score, "why": why, "hits": hits}
+
+
+def _hours_since(iso: Optional[str]) -> Optional[float]:
+    if not iso:
+        return None
+    try:
+        when = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - when).total_seconds() / 3600.0
+
+
 def discover_all(symbol: str, company: str = "") -> List[Dict[str, Any]]:
     """Pool every discovery feed, deduplicated by URL, newest first.
 
