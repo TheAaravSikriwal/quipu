@@ -390,6 +390,179 @@ CATALOGUE = [
 ]
 
 
+# --------------------------------------------------------------------------
+# built around a price you have in mind
+# --------------------------------------------------------------------------
+
+def _near(rows: List[Dict], price: Optional[float]) -> Optional[Dict]:
+    """The listed strike closest to a price."""
+    if price is None:
+        return None
+    usable = [r for r in rows if r.get("strike") is not None and _quotable(r)]
+    if not usable:
+        return None
+    return min(usable, key=lambda r: abs(r["strike"] - price))
+
+
+def _rung(rows: List[Dict], centre: Optional[float], steps: int) -> Optional[Dict]:
+    """`steps` strikes along the ladder from `centre`, in either direction."""
+    if centre is None:
+        return None
+    ladder = sorted({r["strike"] for r in rows
+                     if r.get("strike") is not None and _quotable(r)})
+    if not ladder:
+        return None
+    here = min(range(len(ladder)), key=lambda i: abs(ladder[i] - centre))
+    want = here + steps
+    if not (0 <= want < len(ladder)):
+        return None
+    return _at(rows, ladder[want])
+
+
+def by_target(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
+              target: float, vol: float, rate: float,
+              div_yield: float = 0.0) -> Dict[str, Any]:
+    """Every structure worth considering if the share lands on `target`.
+
+    A different question from the catalogue, and it deserves different
+    strikes. The ready-made setups choose theirs by delta, which is
+    the right way to build a position when you have a view about
+    DIRECTION. When you have a view about a PRICE, the strikes should
+    come from that price.
+
+    That is also what makes the comparison interesting rather than
+    obvious. A capped structure usually beats an uncapped one at a
+    specific target, because the cap you are selling sits exactly
+    where you have said the stock will stop -- you are refusing to pay
+    for upside you do not believe in. A butterfly centred on your
+    number is the extreme version of the same trade.
+
+    Everything is ranked by what it pays IF THE TARGET IS HIT, which
+    is a conditional and is labelled as one. Nothing here says the
+    target is likely; the chance of reaching it comes back alongside
+    so the two can be read together.
+    """
+    up = target > spot
+    atm = _near(calls if up else puts, spot)
+    atm_k = atm["strike"] if atm else None
+    tgt_c, tgt_p = _near(calls, target), _near(puts, target)
+    tgt_k = (tgt_c or tgt_p or {}).get("strike")
+
+    ideas: List[Dict[str, Any]] = []
+
+    def add(name, why, legs, capped):
+        if legs:
+            ideas.append({"name": name, "why": why, "legs": legs, "capped": capped})
+
+    if up:
+        add("Buy a call at the money",
+            "The simplest way to own the move. Nothing is capped, so if it "
+            "runs past your price you keep going -- and you pay for that.",
+            _all(_leg(atm, "call", "long", expiry)), False)
+
+        add("Buy a call just below your price",
+            "Cheaper than the one at the money because it starts further "
+            "out. Still uncapped.",
+            _all(_leg(_rung(calls, target, -1), "call", "long", expiry)), False)
+
+        add("Call spread, sold at your price",
+            "The one your view actually describes: you buy the move up to "
+            "your number and sell everything above it, because you have "
+            "said it stops there. Much cheaper than the call alone.",
+            _all(_leg(atm, "call", "long", expiry),
+                 _leg(tgt_c if (tgt_k or 0) > (atm_k or 0) else _rung(calls, atm_k, 1),
+                      "call", "short", expiry)), True)
+
+        add("Call spread, sold one strike beyond",
+            "The same trade with a little room past your number, for when "
+            "the price is a guess rather than a level.",
+            _all(_leg(atm, "call", "long", expiry),
+                 _leg(_rung(calls, target, 1), "call", "short", expiry)), True)
+
+        add("Put spread, sold below today",
+            "Paid up front, and it does not need your price at all -- only "
+            "that the stock does not fall. Wrong in a different way from "
+            "the others.",
+            (lambda sh: _all(_leg(sh, "put", "short", expiry),
+                             _leg(_rung(puts, (sh or {}).get("strike"), -2),
+                                  "put", "long", expiry)))(_pick(puts, 0.30)), True)
+    else:
+        add("Buy a put at the money",
+            "The simplest way to own the fall. Uncapped until zero.",
+            _all(_leg(_near(puts, spot), "put", "long", expiry)), False)
+
+        add("Buy a put just above your price",
+            "Cheaper, because it starts further out. Still uncapped.",
+            _all(_leg(_rung(puts, target, 1), "put", "long", expiry)), False)
+
+        add("Put spread, sold at your price",
+            "What your view describes: you buy the fall down to your number "
+            "and sell everything below it, because you have said it stops "
+            "there.",
+            _all(_leg(_near(puts, spot), "put", "long", expiry),
+                 _leg(tgt_p, "put", "short", expiry)), True)
+
+        add("Put spread, sold one strike beyond",
+            "The same with room underneath, for when the price is a guess "
+            "rather than a level.",
+            _all(_leg(_near(puts, spot), "put", "long", expiry),
+                 _leg(_rung(puts, target, -1), "put", "short", expiry)), True)
+
+        add("Call spread, sold above today",
+            "Paid up front, and it needs only that the stock does not rise.",
+            (lambda sh: _all(_leg(sh, "call", "short", expiry),
+                             _leg(_rung(calls, (sh or {}).get("strike"), 2),
+                                  "call", "long", expiry)))(_pick(calls, 0.30)), True)
+
+    # Lands ON the number, whichever way that is. The most exact
+    # expression of a price view there is, and the least forgiving.
+    w = _wings(calls, tgt_k) if tgt_k is not None else (None, None)
+    add("Butterfly centred on your price",
+        "Pays most if it finishes exactly on your number and almost nothing "
+        "if it misses either way. The cheapest of these and the hardest to "
+        "be right with.",
+        _all(_leg(w[0], "call", "long", expiry),
+             _leg(_at(calls, tgt_k), "call", "short", expiry, 2),
+             _leg(w[1], "call", "long", expiry)), True)
+
+    # Priced, then ranked by what each pays if the target is reached.
+    out: List[Dict[str, Any]] = []
+    for idea in ideas:
+        a = P.analyse(idea["legs"], spot, vol, rate, div_yield)
+        if not a.get("ok"):
+            continue
+        at_target = P.payoff_at([P._norm(l) for l in idea["legs"]], target)
+        risk = a.get("risk")
+        out.append({
+            **idea,
+            "legs_explained": [_leg_words(l) for l in idea["legs"]],
+            "detected": (a.get("strategy") or {}).get("name"),
+            "net_cost": a.get("net_cost"),
+            "at_target": round(at_target, 2),
+            "on_risk": round(at_target / risk * 100, 1) if risk else None,
+            "max_profit": a.get("max_profit"),
+            "max_loss": a.get("max_loss"),
+            "max_profit_unbounded": a.get("max_profit_unbounded"),
+            "max_loss_unbounded": a.get("max_loss_unbounded"),
+            "breakevens": a.get("breakevens"),
+            "best_at": a.get("best_at"),
+            "chance": a.get("chance"),
+            "chance_working": a.get("chance_working"),
+            "spot_used": a.get("spot"),
+            **P.bias_of(a.get("needs")),
+        })
+
+    out.sort(key=lambda x: (x["at_target"], -(x["net_cost"] or 0)), reverse=True)
+    return {
+        "target": round(target, 2),
+        "spot": round(spot, 4),
+        "move_pct": round((target / spot - 1) * 100, 2) if spot else None,
+        "direction": "up" if up else "down",
+        "expiry": expiry,
+        "ideas": out,
+    }
+
+
 def _usd(v: float) -> str:
     return P._usd(v)
 

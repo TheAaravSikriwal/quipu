@@ -2767,3 +2767,58 @@ a { color: inherit; text-decoration: none; }
 }
 /* And the same story, still in its place in the list below. */
 .article.mover { box-shadow: inset 2px 0 0 var(--attn); padding-left: 10px; }
+
+/* ---- structures built around a price you name ----
+   The catalogue picks strikes by delta, which is right when the view
+   is about direction. When it is about a number, the strikes come
+   from the number -- and then the comparison is interesting rather
+   than obvious, because a capped structure usually wins at a
+   specific target. Refusing to buy the part above your own number is
+   what makes it cheaper. */
+.tgbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 2px; border-bottom: 1px solid var(--rule);
+}
+.tginput { display: flex; align-items: center; gap: 2px; }
+.tgcur { font-family: var(--mono); font-size: 15px; color: var(--faint); }
+.tginput input {
+  width: 120px; background: var(--panel); border: 1px solid var(--rule2);
+  border-radius: 3px; color: var(--text); font-family: var(--mono);
+  font-size: 15px; padding: 7px 10px; outline: none;
+}
+.tginput input:focus { border-color: var(--c-priced); }
+
+.tghead {
+  padding: 16px 2px 12px; font-size: 15px; color: var(--text2); line-height: 1.5;
+}
+.tghead b { color: var(--text); font-family: var(--mono); }
+
+.tgrows { border-top: 1px solid var(--rule); }
+.tgrow { padding: 14px 2px 15px; border-bottom: 1px solid var(--hline); }
+.tgrow.best { box-shadow: inset 3px 0 0 var(--c-priced); padding-left: 12px; }
+.tgname { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.tgname b { font-size: 14px; color: var(--text); font-weight: 600; }
+.tgcap {
+  font-family: var(--ui); font-size: 8px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; padding: 2px 6px; border-radius: 2px;
+  border: 1px solid var(--rule2); color: var(--faint);
+}
+.tgcap.uncapped { color: var(--attn); border-color: color-mix(in srgb, var(--attn) 40%, transparent); }
+
+.tgnums {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px 14px; margin-top: 10px;
+}
+.tgn { display: flex; flex-direction: column; gap: 2px; }
+.tgn i {
+  font-style: normal; font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+}
+.tgn b { font-family: var(--mono); font-size: 14px; font-weight: 400; color: var(--text); }
+.tgn.big b { font-size: 19px; }
+
+.tgwhy {
+  margin-top: 9px; font-size: 11.5px; line-height: 1.55; color: var(--faint);
+  max-width: 88ch;
+}
+.tglegs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 9px; }

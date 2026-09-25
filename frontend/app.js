@@ -420,6 +420,29 @@ function sizedLegs(u) {
     .map((l) => ({ ...l, qty: Number(l.qty) * n }));
 }
 
+/* Build the structures around a price, and price them all. */
+async function loadTarget(tab) {
+  const u = tab.ui;
+  if (!u.symbol || !u.target) return;
+  u.targetLoading = true;
+  u.targetError = null;
+  render(true);
+  try {
+    const res = await fetch(
+      `${API}/api/target/${encodeURIComponent(u.symbol)}`
+      + `?price=${encodeURIComponent(u.target)}`
+      + (u.expiry ? `&expiry=${encodeURIComponent(u.expiry)}` : ""));
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    u.targetData = body;
+  } catch (err) {
+    u.targetData = null;
+    u.targetError = String(err.message || err);
+  }
+  u.targetLoading = false;
+  render(true);
+}
+
 async function analysePosition(tab) {
   const legs = sizedLegs(tab.ui);
   if (!tab.ui.symbol || !legs.length) { tab.data = null; render(); return; }
@@ -1720,12 +1743,119 @@ function renderRoutes(tab) {
       </button>
       <button class="route" data-route="ready">
         <span class="rk">Use a ready-made setup</span>
-        <span class="rd">Eleven standard structures, already built from
+        <span class="rd">Seventeen standard structures, already built from
           today&rsquo;s prices with the strikes chosen for you, each with the
           odds on it and what you would have to believe.</span>
         <span class="rg">pick from a menu &middot; nothing to assemble</span>
       </button>
+      <button class="route" data-route="target">
+        <span class="rk">I have a price in mind</span>
+        <span class="rd">Name the price you think it reaches and Quipu builds
+          the structures around that number rather than around a delta,
+          then ranks them by what each one pays if you turn out to be
+          right.</span>
+        <span class="rg">strikes from your number &middot; capped against uncapped</span>
+      </button>
     </div>
+  </div>`;
+}
+
+/* Structures built around a price you name.
+ *
+ * The catalogue picks strikes by delta, which is right when the view
+ * is about direction. When the view is about a NUMBER, the strikes
+ * should come from the number -- and then the comparison becomes
+ * interesting rather than obvious, because a capped structure
+ * usually beats an uncapped one at a specific target. You are
+ * refusing to pay for upside past the point you have said it stops.
+ */
+function renderTarget(tab) {
+  const u = tab.ui;
+  const c = u.chain;
+  const spot = c?.spot;
+
+  const field = `<div class="tgbar">
+    <span class="explab">price you think it reaches</span>
+    <div class="tginput">
+      <span class="tgcur">$</span>
+      <input id="tg-price" type="text" inputmode="decimal" autocomplete="off"
+        value="${u.target == null ? "" : esc(String(u.target))}"
+        placeholder="${spot ? nf(spot, 2) : "0.00"}">
+    </div>
+    <button class="bookadd" id="tg-go">build them</button>
+    ${spot ? `<span class="exphint">it trades at <b>${money(spot)}</b>${
+      u.target ? ` &middot; your number is
+        <b>${signed((u.target / spot - 1) * 100, 1)}</b> from there` : ""}</span>` : ""}
+  </div>`;
+
+  if (!u.symbol) {
+    return field + `<div class="loading" style="height:30%">
+      <div>Which company?</div></div>`;
+  }
+  if (u.targetLoading) {
+    return field + `<div class="loading" style="height:30%">
+      <div class="spinner"></div><div>Building them around ${
+        money(u.target)}</div></div>`;
+  }
+  if (u.targetError) {
+    return field + `<div class="empty" style="height:130px">
+      <div class="down">Could not build those</div>
+      <div class="stage">${esc(u.targetError)}</div></div>`;
+  }
+  const r = u.targetData;
+  if (!r) {
+    return field + `<div class="empty" style="height:140px">
+      <div>Name a price above</div>
+      <div class="stage">every structure here will be built around it,
+        and ranked by what it pays if the stock gets there</div></div>`;
+  }
+
+  const money0 = (v) => (v == null ? "&ndash;" : money(v, 0));
+  const rows = (r.ideas || []).map((i, n) => `
+    <div class="tgrow${n === 0 ? " best" : ""}">
+      <div class="tgname">
+        <b>${esc(i.name)}</b>
+        <span class="tgcap ${i.max_profit_unbounded ? "uncapped" : "capped"}">${
+          i.max_profit_unbounded ? "no cap on the upside" : "capped"}</span>
+        ${biasChip(i)}
+      </div>
+      <div class="tgnums">
+        <span class="tgn"><i>costs today</i><b>${i.net_cost >= 0
+          ? "&minus;" + money0(Math.abs(i.net_cost))
+          : "+" + money0(Math.abs(i.net_cost))}</b></span>
+        <span class="tgn big"><i>pays at ${money(r.target)}</i><b class="${
+          i.at_target >= 0 ? "up" : "down"}">${i.at_target >= 0 ? "+" : "&minus;"}${
+          money0(Math.abs(i.at_target))}</b></span>
+        <span class="tgn"><i>on what is at risk</i><b>${
+          i.on_risk == null ? "&ndash;" : nf(i.on_risk, 0) + "%"}</b></span>
+        <span class="tgn"><i>most it could make</i><b>${
+          i.max_profit_unbounded ? "no cap" : money0(i.max_profit)}</b></span>
+        <span class="tgn"><i>most it could lose</i><b>${
+          i.max_loss_unbounded ? "no limit" : money0(Math.abs(i.max_loss || 0))}</b></span>
+        <span class="tgn"><i>chance of any profit</i><b>${
+          i.chance == null ? "&ndash;"
+            : calc(nf(i.chance, 0) + "%", i.chance_working)}</b></span>
+      </div>
+      <div class="tgwhy">${esc(i.why)}</div>
+      <div class="tglegs">${(i.legs || []).map((l) =>
+        `<span class="mnyleg ${l.side}"><b>${l.side === "long" ? "buy" : "sell"}
+          ${nf(l.qty, 0)}</b> ${strikeOf(l.strike)} ${esc(l.kind)}</span>`).join("")}
+        <button class="plink" data-tguse="${n}">open this one &rarr;</button>
+      </div>
+    </div>`).join("");
+
+  return field + `<div class="tgwrap">
+    <div class="tghead">If ${esc(u.symbol)} finishes at
+      <b>${money(r.target)}</b> on ${esc(r.expiry)} &mdash;
+      ${signed(r.move_pct, 1)} from ${money(r.spot)}</div>
+    <div class="tgrows">${rows}</div>
+    <div class="fnote">Ranked by what each pays IF THE PRICE IS REACHED, which
+      is a conditional and not a prediction: nothing here says your number is
+      likely, and the chance of any profit at all sits in every row so the two
+      can be read together. The capped structures usually win this ranking
+      precisely because they are capped &mdash; selling the part above your
+      number is what makes them cheaper, and you have already said you do not
+      expect it.</div>
   </div>`;
 }
 
@@ -1733,12 +1863,16 @@ function renderRoutes(tab) {
  * rather than a permanent half of the screen. */
 function renderRouteBar(tab) {
   const u = tab.ui;
-  const other = u.route === "custom" ? "ready" : "custom";
-  const label = other === "ready" ? "use a ready-made setup" : "build it myself";
+  // Three routes, so "the other one" is no longer a single thing.
+  const NAMES = { custom: "build it myself", ready: "use a ready-made setup",
+                  target: "name a price" };
+  const others = Object.keys(NAMES).filter((k) => k !== u.route);
+  const HERE = { custom: "Building it yourself", ready: "Ready-made setups",
+                 target: "Built around your price" };
   return `<div class="routebar">
-    <span class="rbnow">${u.route === "custom" ? "Building it yourself"
-      : "Ready-made setups"}</span>
-    <button class="plink" data-switch="${other}">${label}</button>
+    <span class="rbnow">${HERE[u.route] || "Workshop"}</span>
+    ${others.map((k) =>
+      `<button class="plink" data-switch="${k}">${NAMES[k]}</button>`).join("")}
   </div>`;
 }
 
@@ -2653,6 +2787,15 @@ function renderPosition(tab) {
   // setups made the board look like something you had to read first.
   if (!u.route) return bar + renderRoutes(tab);
 
+  if (u.route === "target") {
+    // renderTarget handles "no company yet" itself, and the price
+    // field belongs on screen before the ticker is chosen -- the
+    // number is the whole point of this route and hiding it until
+    // something else is filled in reads as a broken page.
+    return bar + renderRouteBar(tab) + picker + renderTarget(tab)
+      + (u.legs.length ? chips + renderAnalysis(tab) : "");
+  }
+
   let out = bar + renderRouteBar(tab) + picker;
   if (u.route === "ready") {
     if (!u.symbol) {
@@ -2939,6 +3082,37 @@ function wirePosition(tab) {
   }
   document.querySelectorAll("[data-size]").forEach((b) => {
     b.onclick = () => setSize((u.size || 1) + (b.dataset.size === "up" ? 1 : -1));
+  });
+
+  const tgGo = document.getElementById("tg-go");
+  const tgPrice = document.getElementById("tg-price");
+  const takeTarget = () => {
+    const v = Number(String(tgPrice?.value || "").replace(/[^0-9.]/g, ""));
+    if (!Number.isFinite(v) || v <= 0) return;
+    u.target = v;
+    loadTarget(tab);
+  };
+  if (tgGo) tgGo.onclick = takeTarget;
+  if (tgPrice) tgPrice.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); takeTarget(); }
+  };
+
+  // Opening one hands it to the workshop, which is where every route
+  // ends: the same legs, the same analysis, the same page.
+  document.querySelectorAll("[data-tguse]").forEach((b) => {
+    b.onclick = () => {
+      const idea = (u.targetData?.ideas || [])[Number(b.dataset.tguse)];
+      if (!idea) return;
+      u.legs = idea.legs.map((l) => ({
+        kind: l.kind, side: l.side, qty: l.qty, entry: l.entry,
+        strike: l.strike ?? "", expiry: l.expiry ?? "",
+      }));
+      u.size = 1;
+      render(true);
+      analysePosition(tab);
+      document.querySelector(".chips")?.scrollIntoView(
+        { behavior: "smooth", block: "center" });
+    };
   });
 
   const pt = document.getElementById("pre-toggle");

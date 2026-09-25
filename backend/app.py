@@ -634,6 +634,46 @@ def market_events(horizon: int = 180) -> Dict[str, Any]:
     return events.upcoming(None, horizon=horizon)
 
 
+@app.get("/api/target/{symbol}")
+def by_target(symbol: str, price: float, expiry: str = "") -> Dict[str, Any]:
+    """What to trade if you think the share lands on a particular price.
+
+    A different question from "what setups exist", and it deserves
+    different strikes. The catalogue picks its by delta, which is the
+    right way to build a position when the view is about DIRECTION.
+    When the view is about a PRICE, the strikes should come from it.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 12:
+        raise HTTPException(status_code=400, detail="bad symbol")
+    if not price or price <= 0:
+        raise HTTPException(status_code=400, detail="a target price is required")
+
+    div = _div_yield(symbol)
+    rate = options.risk_free_rate()
+    board = options.fetch_options(symbol, max_expiries=8, div_yield=div,
+                                  dividends=_div_schedule(symbol),
+                                  only=expiry or None)
+    if not board.get("available") or not board.get("expiries"):
+        raise HTTPException(status_code=404,
+                            detail=board.get("reason", "no chain"))
+
+    want = expiry or ""
+    exp = next((e for e in board["expiries"] if e["expiry"] == want),
+               board["expiries"][0])
+    spot = board.get("spot") or 0.0
+    if not spot:
+        raise HTTPException(status_code=400, detail=f"no price for {symbol}")
+
+    vol = ((exp.get("stats") or {}).get("atm_iv") or 30.0) / 100.0
+    out = preset_engine.by_target(exp["calls"], exp["puts"], exp["expiry"],
+                                  spot, float(price), vol, rate, div)
+    out["all_expiries"] = board.get("all_expiries") or []
+    out["trading_days"] = exp.get("trading_days")
+    out["vol_used"] = round(vol * 100, 2)
+    return out
+
+
 @app.get("/api/world")
 def world(horizon: int = 30) -> Dict[str, Any]:
     """What is happening, rather than what is happening to one company.
