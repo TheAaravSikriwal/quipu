@@ -177,6 +177,33 @@ async function loadScreen(tab) {
  * the one piece of state that is genuinely yours rather than fetched.
  */
 const POS_KEY = "quipu.positions";
+/* Where the banked total starts counting.
+ *
+ * Reset draws a LINE rather than deleting anything. A trade log whose
+ * history can be wiped by a button next to a total is not a log, and
+ * the closed trades are the part you cannot reconstruct -- the marks
+ * come back from the market every time, the record of what you
+ * actually did does not.
+ *
+ * So the trades stay, the tile says what it is counting from, and the
+ * line can be lifted again.
+ */
+const BANKED_FROM_KEY = "quipu.bankedFrom";
+const loadBankedFrom = () => {
+  try { return localStorage.getItem(BANKED_FROM_KEY) || null; } catch { return null; }
+};
+const saveBankedFrom = (iso) => {
+  try {
+    if (iso) localStorage.setItem(BANKED_FROM_KEY, iso);
+    else localStorage.removeItem(BANKED_FROM_KEY);
+  } catch { /* private mode: the line is a convenience, not a record */ }
+};
+
+/** Was this trade closed after the line? */
+function countsAsBanked(t, from) {
+  if (!from) return true;
+  return (t.closed_at || t.closed || "") >= from;
+}
 
 /* ---- the logbook ----------------------------------------------------
  *
@@ -283,7 +310,8 @@ function newLogTab() {
   const tab = {
     id: ++state.seq, symbol: null, kind: "log", status: "log",
     data: null, error: null, live: true, loading: false,
-    ui: { book, closing: null, marks: {}, zoom: null },
+    ui: { book, closing: null, marks: {}, zoom: null,
+          bankedFrom: loadBankedFrom() },
   };
   state.tabs.push(tab);
   state.active = tab.id;
@@ -1916,10 +1944,16 @@ function renderBook(tab) {
    * risk moves every time the market does; what is banked does not. A
    * single combined number hides which is which, so they are added
    * together only underneath the pair. */
+  // Closed trades from before the line are still listed; they are
+  // simply not counted. Two different statements, and the tile says
+  // which it is making.
+  const from = u.bankedFrom ?? null;
+  const counted = done.filter((t) => countsAsBanked(t, from));
   const T = window.QUIPU_LEDGER.bookTotals(
     live.map((t) => u.marks?.[t.id]?.pl ?? null),
-    done.map((t) => t.realised ?? null));
+    counted.map((t) => t.realised ?? null));
   const openPl = T.open, banked = T.banked, priced = T.priced, wins = T.wins;
+  const skipped = done.length - counted.length;
 
   const tot = (label, value, note, cls) => `<div class="btot ${cls}">
     <span class="btl">${label}</span>
@@ -1932,9 +1966,18 @@ function renderBook(tab) {
         `${priced} trade${priced === 1 ? "" : "s"}, marked to the market`,
         openPl >= 0 ? "up" : "down") : ""}
     ${done.length ? tot("banked", banked,
-        `${done.length} closed &middot; ${wins} of ${done.length} made money`,
+        (counted.length
+          ? `${counted.length} closed &middot; ${wins} of ${counted.length} made money`
+          : "nothing closed since the reset")
+        + (skipped ? ` &middot; <button class="btreset" data-unreset="1"
+             title="Count them again">${skipped} earlier one${
+               skipped === 1 ? "" : "s"} not counted</button>`
+           : ` &middot; <button class="btreset" data-reset="1"
+             title="Keep the trades, start the total again from now"
+             >reset to zero</button>`),
         banked >= 0 ? "up" : "down") : ""}
-    ${priced && done.length ? tot("all in", openPl + banked, "open and closed together",
+    ${priced && done.length ? tot("all in", openPl + banked,
+        skipped ? "open and counted, together" : "open and closed together",
         (openPl + banked) >= 0 ? "up" : "down") : ""}
   </div>` : "";
 
@@ -2314,6 +2357,24 @@ function wireBookRows(tab) {
       render(true);
     };
   });
+
+  const reset = document.querySelector("[data-reset]");
+  if (reset) reset.onclick = (e) => {
+    e.stopPropagation();
+    // From now. Anything closed after this counts; everything before
+    // it stays in the log and stops being added up.
+    u.bankedFrom = new Date().toISOString();
+    saveBankedFrom(u.bankedFrom);
+    render(true);
+  };
+
+  const unreset = document.querySelector("[data-unreset]");
+  if (unreset) unreset.onclick = (e) => {
+    e.stopPropagation();
+    u.bankedFrom = null;
+    saveBankedFrom(null);
+    render(true);
+  };
 
   document.querySelectorAll("[data-reopen]").forEach((b) => {
     b.onclick = (e) => {

@@ -192,5 +192,36 @@ near("shares alongside options are not counted",
      commissionOf([{ kind: "stock", side: "long", qty: 100 },
                    { kind: "call", side: "short", qty: 1 }]).contracts, 1, 1e-9);
 
+
+section("Resetting the banked total draws a line, it does not delete");
+
+/* A trade log whose history can be wiped by a button next to a total
+ * is not a log. The marks come back from the market every time; the
+ * record of what you actually did does not. So reset moves a line and
+ * the closed trades stay listed, uncounted. */
+const { countsAsBanked } = lift("countsAsBanked");
+
+const LINE = "2026-09-25T16:00:00.000Z";
+const before = { closed_at: "2026-09-24T18:00:00.000Z", closed: "2026-09-24" };
+const after  = { closed_at: "2026-09-25T19:00:00.000Z", closed: "2026-09-25" };
+
+yes("with no line everything counts", countsAsBanked(before, null));
+yes("before the line it does not", !countsAsBanked(before, LINE));
+yes("after the line it does", countsAsBanked(after, LINE));
+
+// Trades logged before timestamps existed carry only a date. They
+// must still fall on a defensible side rather than throwing.
+yes("a date-only trade from before still falls before",
+    !countsAsBanked({ closed: "2026-09-01" }, LINE));
+yes("and one from after falls after",
+    countsAsBanked({ closed: "2026-09-26" }, LINE));
+yes("one with no closing record at all is not counted",
+    !countsAsBanked({}, LINE));
+
+// The exact moment of the line counts as on or after it, so a trade
+// closed in the same second as a reset is not silently lost.
+yes("closing on the line itself counts",
+    countsAsBanked({ closed_at: LINE }, LINE));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

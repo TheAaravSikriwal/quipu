@@ -2638,3 +2638,14 @@ a { color: inherit; text-decoration: none; }
   padding: 8px 1px 0; font-size: 11.5px; line-height: 1.5; color: var(--faint);
 }
 .mnyfee b { color: var(--text2); font-family: var(--mono); }
+
+/* Start the banked total again. A line, not a delete: the closed
+   trades stay listed and simply stop being added up, because the
+   record of what you actually did is the part that cannot be
+   reconstructed. */
+.btreset {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--faint);
+  text-decoration: underline dotted; text-underline-offset: 2px;
+}
+.btreset:hover { color: var(--text2); }
