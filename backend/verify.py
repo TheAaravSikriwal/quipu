@@ -1581,6 +1581,84 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "flat payoff", f"could not run: {exc}"))
 
+section("Both endpoints agree what the share is worth")
+
+# The chain solved the spot out of put-call parity; the position
+# engine took the raw quote. On a thinly quoted name those differ --
+# 16.31 against 16.02 on FRVO -- so a hundred shares recorded off the
+# board and then marked by the engine showed a $29 loss the instant
+# the trade was opened. A tenth of the risk on it, invented by two
+# halves of the app answering one question differently, and it looked
+# exactly like a real move.
+#
+# A position built from a board and priced immediately should show
+# only what it actually costs to cross the spread: nothing at all on
+# a stock leg, and half a spread per option leg.
+try:
+    import presets as PRE
+    import position as POS
+
+    board = _board(1)
+    if not board.get("available"):
+        RESULTS.append((None, "  [SKIP] spot agreement -- no board", ""))
+    else:
+        exp = board["expiries"][0]
+        spot = board.get("spot") or 0.0
+        vol = ((exp.get("stats") or {}).get("atm_iv") or 23.0) / 100.0
+        built = PRE.build(exp["calls"], exp["puts"], exp["expiry"], spot, vol, 0.04)
+
+        # Priced the way the endpoint prices it: against the very
+        # spot it was built at, and with the board's own marks.
+        #
+        # Without the marks this falls back to Black-Scholes, and then
+        # it is not measuring the spread at all -- it is measuring how
+        # far the model sits from the market, which is a different
+        # question and on a one-day option a large number.
+        marks = {}
+        for kind, rows in (("call", exp["calls"]), ("put", exp["puts"])):
+            for r in rows:
+                mk = r.get("mark") or r.get("last")
+                if mk:
+                    marks[f'{kind}:{float(r["strike"])}:{exp["expiry"]}'] = float(mk)
+
+        worst_stock, worst_total, worst_name = 0.0, 0.0, ""
+        for b in built:
+            a = POS.analyse(b["legs"], spot, vol, 0.04, 0.0, marks)
+            if not a.get("ok"):
+                continue
+            for l in a["legs"]:
+                if l["kind"] == "stock":
+                    worst_stock = max(worst_stock, abs(l["pl"]))
+            opts = sum(1 for l in b["legs"] if l["kind"] != "stock") or 1
+            per = abs(a["pl"]) / opts
+            if per > worst_total:
+                worst_total, worst_name = per, b["name"]
+
+        # A share has one price. Recorded at it and marked at it, the
+        # leg is worth exactly what it cost.
+        RESULTS.append((worst_stock < 0.01,
+                        "a stock leg opens at exactly what it cost",
+                        f"largest shift ${worst_stock:,.2f} across "
+                        f"{len(built)} setups"))
+
+        # And an option leg is down half its spread, no more. Half a
+        # spread on a hundred shares is a few dollars on anything
+        # liquid; a hundred would mean something other than the spread.
+        RESULTS.append((worst_total < 40,
+                        "and an option leg only by the spread it crossed",
+                        f"worst ${worst_total:,.2f} a leg"
+                        + (f" ({worst_name})" if worst_total else "")))
+
+        # The derived spot must stay near the quote, or it is not a
+        # better reading of the price, it is a broken quote.
+        q = board.get("spot_quoted")
+        if q:
+            RESULTS.append((abs(spot / q - 1) < 0.05,
+                            "the board's spot stays close to the quoted one",
+                            f"{spot} against {q}"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "spot agreement", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

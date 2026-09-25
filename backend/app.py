@@ -202,6 +202,54 @@ def _realised_vol(symbol: str) -> Dict[str, Any]:
     return out
 
 
+def _parity_spot(calls, puts, spot_quoted, spot_ref, rate, years,
+                 discrete: bool, div: float):
+    """What the option board says the share is worth, and how it says it.
+
+    One answer to "what is this share worth", for every endpoint that
+    needs one.
+
+    It used to be worked out inside the chain endpoint and nowhere
+    else, so the board priced a stock leg off the parity reading while
+    the position engine marked the same leg off the raw quote. On a
+    thinly quoted name those are different numbers -- 16.31 against
+    16.02 on FRVO -- and a hundred shares recorded at one and valued
+    at the other showed a $29 loss the moment it was opened, before
+    anything had happened. A tenth of the risk on the trade, invented
+    by two halves of the app disagreeing.
+
+    Returns the quoted price unchanged when the board cannot improve
+    on it, which is the common case.
+    """
+    put_at = {p["strike"]: p for p in puts}
+
+    def two_sided(r):
+        return r.get("bid") and r.get("ask") and r["ask"] > r["bid"]
+
+    pairs = [(c, put_at[c["strike"]]) for c in calls
+             if c["strike"] in put_at and two_sided(c)
+             and two_sided(put_at[c["strike"]])]
+    if not pairs or not spot_quoted or not spot_ref:
+        return spot_ref, "quote"
+
+    # The nearest-the-money pair, where the spread is tightest and the
+    # parity read is therefore cleanest.
+    c, p = min(pairs, key=lambda cp: abs(cp[0]["strike"] - spot_quoted))
+    # Parity has to be written against whichever dividend model the
+    # board was priced under, or the identity is being solved for the
+    # wrong unknown. Escrowed:  C - P = S_adj - K.e^(-rT), and S_adj
+    # already has the dividends removed. Continuous: the old form with
+    # the e^(-qT) term.
+    forward = (c["mark"] - p["mark"]) + c["strike"] * math.exp(-rate * years)
+    implied = forward if discrete else forward / math.exp(-div * years)
+
+    # Only trust it if it is close; a wild number means a broken quote,
+    # not a stale one.
+    if abs(implied / spot_ref - 1) < 0.03:
+        return implied, f"put-call parity at {c['strike']:g}"
+    return spot_ref, "quote"
+
+
 @app.get("/api/chain/{symbol}")
 def chain(symbol: str, expiry: str = None, vol: float = None,
           basis: str = "atm") -> Dict[str, Any]:
@@ -254,31 +302,10 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
 
     calls = board.get("calls") or []
     puts = board.get("puts") or []
-    put_at = {p["strike"]: p for p in puts}
 
-    def _two_sided(r):
-        return r.get("bid") and r.get("ask") and r["ask"] > r["bid"]
-
-    spot = spot_ref
-    spot_source = "quote"
-    pairs = [(c, put_at[c["strike"]]) for c in calls
-             if c["strike"] in put_at and _two_sided(c) and _two_sided(put_at[c["strike"]])]
-    if pairs and spot_quoted:
-        # The nearest-the-money pair, where the spread is tightest and the
-        # parity read is therefore cleanest.
-        c, p = min(pairs, key=lambda cp: abs(cp[0]["strike"] - spot_quoted))
-        # Parity has to be written against whichever dividend model the
-        # board was priced under, or the identity is being solved for the
-        # wrong unknown. Escrowed:  C - P = S_adj - K.e^(-rT), and S_adj
-        # already has the dividends removed. Continuous: the old form
-        # with the e^(-qT) term.
-        forward = (c["mark"] - p["mark"]) + c["strike"] * math.exp(-rate * years)
-        implied = (forward if esc["model"] == "discrete"
-                   else forward / math.exp(-div * years))
-        # Only trust it if it is close; a wild number means a broken quote,
-        # not a stale one.
-        if spot_ref and abs(implied / spot_ref - 1) < 0.03:
-            spot, spot_source = implied, f"put-call parity at {c['strike']:g}"
+    spot, spot_source = _parity_spot(
+        calls, puts, spot_quoted, spot_ref, rate, years,
+        esc["model"] == "discrete", div)
 
     # Re-solve every implied vol against that spot, because the ones on the
     # rows were solved against the stale one.
@@ -418,6 +445,7 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
     div = _div_yield(symbol)
     rate = options.risk_free_rate()
+    spot_source = "quote"
 
     # Pull only the expiries this position actually uses.
     wanted = sorted({(l.get("expiry") or "") for l in legs if l.get("expiry")})
@@ -436,6 +464,24 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
                 continue
             if atm_iv is None:
                 atm_iv = (exp.get("stats") or {}).get("atm_iv")
+                # The same share price the BOARD is priced off, not the
+                # raw quote.
+                #
+                # The two used to disagree: the chain endpoint solved
+                # the spot out of put-call parity and the position
+                # engine took the quote, so a hundred shares recorded
+                # off the board at 16.31 were marked at 16.02 and
+                # showed a $29 loss the instant the trade was opened.
+                # A tenth of the risk on it, invented by two halves of
+                # the app answering one question differently.
+                years_here = max(exp.get("trading_days") or 1, 1) / 252.0
+                sched = _div_schedule(symbol)
+                esc_here = options.escrowed_spot(spot, sched, exp["expiry"], rate)
+                implied, src = _parity_spot(
+                    exp["calls"], exp["puts"], spot, esc_here["spot"],
+                    rate, years_here, esc_here["model"] == "discrete", div)
+                if src != "quote":
+                    spot, spot_source = implied, src
             for side, rows in (("call", exp["calls"]), ("put", exp["puts"])):
                 for r in rows:
                     mk = r.get("mark") or r.get("last")
@@ -461,6 +507,7 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     analysis["symbol"] = symbol
     analysis["name"] = quote.get("name")
     analysis["change_pct"] = quote.get("change_pct")
+    analysis["spot_source"] = spot_source
     analysis["vol_used"] = round(vol * 100, 2)
     analysis["rate"] = round(rate * 100, 3)
     analysis["div_yield"] = round(div * 100, 3)

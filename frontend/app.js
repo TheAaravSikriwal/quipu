@@ -1224,7 +1224,10 @@ function moneyBlock(a, symbol, spot, size = 1) {
         (${plural(fee.contracts, "contract")} in and out at
         ${money(FEE_PER_CONTRACT)} each)${bite == null ? ""
           : ` &mdash; <b>${nf(bite, 0)}%</b> of the most this can make`}.
-        An estimate: brokers differ, and some charge nothing.</div>`;
+        An estimate: brokers differ, and some charge nothing.
+        You are also down half the spread the moment you open: you buy at
+        the ask and the position is marked at the middle, so a fresh trade
+        shows a small loss before anything has happened.</div>`;
     })()}
     ${mnyMath(a)}
   </div>`;
