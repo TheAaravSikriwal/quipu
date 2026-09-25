@@ -1061,6 +1061,31 @@ function third(text) {
   return head + (/(s|sh|ch|x|z)$/.test(head) ? "es" : "s") + tail;
 }
 
+/* What the trade costs to place, which is not nothing.
+ *
+ * The page said "commissions are not included" and stopped, which is
+ * true and useless: on a four-leg iron condor taking in $51, a round
+ * turn at the going rate is $5.20 -- ten percent of the maximum
+ * profit, on the structure the app is most likely to recommend for
+ * its odds. A disclaimer that does not carry a number cannot be
+ * weighed against anything.
+ *
+ * Per contract per leg, charged again to close. Stock legs are free
+ * at every broker worth using. The rate is an estimate and is named
+ * as one: brokers differ, some charge nothing, and a few still charge
+ * a ticket fee on top.
+ */
+const FEE_PER_CONTRACT = 0.65;
+
+function commissionOf(legs) {
+  const contracts = (legs || [])
+    .filter((l) => l.kind !== "stock")
+    .reduce((n, l) => n + Math.abs(Number(l.qty) || 0), 0);
+  if (!contracts) return null;
+  const one = contracts * FEE_PER_CONTRACT;
+  return { contracts, open: one, round: one * 2 };
+}
+
 function moneyBlock(a, symbol, spot, size = 1) {
   const cost = a.net_cost || 0;
   const credit = cost < 0;
@@ -1185,6 +1210,22 @@ function moneyBlock(a, symbol, spot, size = 1) {
       </div>
     </div>
     ${ratio ? `<div class="mnyratio">${ratio}</div>` : ""}
+    ${(() => {
+      const fee = commissionOf(a.legs);
+      if (!fee) return "";
+      const cap = a.max_profit_unbounded ? null : a.max_profit;
+      // Against the maximum rather than against the cost: the cost of
+      // trading matters in proportion to what the trade can win, and
+      // on a high-odds credit structure that proportion is the thing
+      // nobody mentions.
+      const bite = cap && cap > 0 ? (fee.round / cap) * 100 : null;
+      return `<div class="mnyfee">Commission is on top of all of this:
+        about <b>${money(fee.round)}</b> for the round turn
+        (${plural(fee.contracts, "contract")} in and out at
+        ${money(FEE_PER_CONTRACT)} each)${bite == null ? ""
+          : ` &mdash; <b>${nf(bite, 0)}%</b> of the most this can make`}.
+        An estimate: brokers differ, and some charge nothing.</div>`;
+    })()}
     ${mnyMath(a)}
   </div>`;
 }
@@ -2502,8 +2543,8 @@ function renderAnalysis(tab) {
         Marks come from the live chain where the contract is listed and from
         Black-Scholes where it is not &mdash; ${d.marks_live} of ${optLegs} option
         legs here are real quotes. Entry prices default to today's mark, which is
-        not what you paid: edit them on the chips above. Commissions are not
-        included, and neither is the spread you would pay to close. Volatility
+        not what you paid: edit them on the chips above. The spread you would
+        cross to get out is not included either. Volatility
         ${pct(d.vol_used, 1)}, rate ${pct(d.rate, 2)}, dividend yield ${pct(d.div_yield, 2)}.
       </div>
     </div>`;

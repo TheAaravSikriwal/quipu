@@ -2631,3 +2631,10 @@ a { color: inherit; text-decoration: none; }
    appears nowhere else on it, which is a code with no key. */
 .vscol.vspin b { box-shadow: inset 0 -2px 0 var(--room-position); }
 .vscol.vshov b { box-shadow: inset 0 -2px 0 var(--room-log); }
+
+/* What it costs to place, which a bare "commissions are not included"
+   never let anybody weigh against anything. */
+.mnyfee {
+  padding: 8px 1px 0; font-size: 11.5px; line-height: 1.5; color: var(--faint);
+}
+.mnyfee b { color: var(--text2); font-family: var(--mono); }

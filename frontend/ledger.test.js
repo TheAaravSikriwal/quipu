@@ -161,5 +161,36 @@ yes("it declines to invent a sum with nothing to work from",
     closingWorking(null, 99, false) === null
     && closingWorking(250, null, false) === null);
 
+
+section("What it costs to place is counted, not just disclaimed");
+
+/* "Commissions are not included" is true and useless: on a four-leg
+ * condor taking in $51 a round turn is $5.20 -- ten percent of the
+ * maximum profit, on the structure the app most often surfaces for
+ * its odds. A disclaimer with no number cannot be weighed. */
+const { commissionOf, FEE_PER_CONTRACT } = lift("FEE_PER_CONTRACT", "commissionOf");
+
+const four = [
+  { kind: "put",  side: "long",  qty: 1 }, { kind: "put",  side: "short", qty: 1 },
+  { kind: "call", side: "short", qty: 1 }, { kind: "call", side: "long",  qty: 1 },
+];
+near("a four-leg condor is four contracts", commissionOf(four).contracts, 4, 1e-9);
+near("opening it costs four times the rate",
+     commissionOf(four).open, 4 * FEE_PER_CONTRACT, 1e-9);
+near("and the round turn is twice that",
+     commissionOf(four).round, 8 * FEE_PER_CONTRACT, 1e-9);
+
+const ten = four.map((l) => ({ ...l, qty: 10 }));
+near("ten lots cost ten times as much",
+     commissionOf(ten).round, commissionOf(four).round * 10, 1e-9);
+
+yes("a stock-only position is charged nothing",
+    commissionOf([{ kind: "stock", side: "long", qty: 100 }]) === null);
+yes("and an empty position too", commissionOf([]) === null);
+
+near("shares alongside options are not counted",
+     commissionOf([{ kind: "stock", side: "long", qty: 100 },
+                   { kind: "call", side: "short", qty: 1 }]).contracts, 1, 1e-9);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
