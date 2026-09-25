@@ -13,6 +13,14 @@ const G = window.QUIPU_GREEKS;
 /* Link the jargon to its definition wherever fresh HTML lands. */
 const gloss = (el) => window.QUIPU_GLOSSARY?.annotate(el);
 const LIVE_MS = 15000;
+/* News is watched on its own, slower clock.
+ *
+ * Prices move every tick and a headline does not, so polling both at
+ * fifteen seconds would be five RSS fetches a minute per open tab for
+ * no benefit. Ninety seconds is faster than anybody reloads a page
+ * and slow enough that no publisher notices.
+ */
+const NEWS_MS = 90000;
 
 const state = { tabs: [], active: null, seq: 0, timer: null };
 
@@ -611,6 +619,56 @@ function startClock() {
     const tab = current();
     if (tab && tab.live) refreshLive(tab);
   }, LIVE_MS);
+
+  if (state.newsTimer) clearInterval(state.newsTimer);
+  state.newsTimer = setInterval(() => {
+    if (document.hidden) return;
+    const tab = current();
+    if (tab && tab.live && tab.symbol && tab.status === "ready") refreshNews(tab);
+  }, NEWS_MS);
+}
+
+/* Look for stories that were not there a minute ago.
+ *
+ * Merged rather than replaced: the list already on the page has
+ * extracted bodies attached to some of its entries, and throwing that
+ * away every ninety seconds to re-fetch it would be both slower and
+ * worse. Anything already present keeps what it has; anything new is
+ * added and marked as new until the reader has seen the page settle.
+ */
+async function refreshNews(tab) {
+  if (tab.newsBusy) return;
+  tab.newsBusy = true;
+  try {
+    const company = tab.data?.quote?.name || "";
+    const res = await fetch(
+      `${API}/api/news/${encodeURIComponent(tab.symbol)}`
+      + `?company=${encodeURIComponent(company)}`);
+    if (!res.ok) return;
+    const body = await res.json();
+
+    const have = tab.data?.news?.articles || [];
+    const seen = new Set(have.map((a) => (a.url || "").split("?")[0]));
+    const fresh = (body.articles || []).filter(
+      (a) => !seen.has((a.url || "").split("?")[0]));
+
+    if (fresh.length) {
+      fresh.forEach((a) => { a.is_new = true; });
+      tab.data.news = {
+        ...(tab.data.news || {}),
+        articles: fresh.concat(have),
+        discovered: (tab.data.news?.discovered || have.length) + fresh.length,
+      };
+      tab.newsNew = (tab.newsNew || 0) + fresh.length;
+    }
+    tab.newsAt = body.at;
+    if (state.active === tab.id) render(true);
+  } catch {
+    /* a missed poll is not an error worth showing: the next one is
+       ninety seconds away and the page is still readable */
+  } finally {
+    tab.newsBusy = false;
+  }
 }
 
 /* ---- search ---------------------------------------------------------- */
@@ -4089,8 +4147,9 @@ function newsTile(news) {
     "news", "elastic e-claimed", "w3 h2", "The Wire", `<div class="dim">nothing found</div>`);
   return tile(
     "news", "elastic e-claimed cols2", "w3 h3", "The Wire",
-    items.map((a) => `<div class="article">
-        <a class="hl" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || "untitled")}</a>
+    items.map((a) => `<div class="article${a.is_new ? " fresh" : ""}">
+        <a class="hl" href="${esc(a.url)}" target="_blank" rel="noopener">${
+          a.is_new ? `<i class="newflag">new</i>` : ""}${esc(a.title || "untitled")}</a>
         <div class="meta">${esc(a.publisher || "unknown")}<span class="dot">&bull;</span>${esc(ago(a.published) || "undated")}${
           a.also_via?.length ? `<span class="dot">&bull;</span>${a.also_via.length + 1} feeds` : ""}</div>
         <div class="stand">${esc((a.excerpt || "").slice(0, 250))}${a.full_text ? "" : ` <span class="nofull">(headline only)</span>`}</div>
@@ -5329,7 +5388,10 @@ function liveBar(tab) {
     <span class="lbprice">${priceNow(tab)}</span>
     <span><span class="livedot ${tab.live ? "" : "off"}"></span>${tab.live ? "Live" : "Paused"}</span>
     <span>Prices &amp; options <b>${age === null ? "--" : age + "s"}</b> old</span>
-    <span style="color:#a39b8b">News &amp; filings from first load</span>
+    <span style="color:#a39b8b">${tab.newsAt
+      ? `News checked <b>${esc(tab.newsAt)}</b>${tab.newsNew
+          ? ` &middot; <b>${tab.newsNew} new</b>` : ""}`
+      : "News &amp; filings from first load"}</span>
     ${tab.liveError ? `<span class="stale">refresh failed: ${esc(tab.liveError)}</span>` : ""}
     <span class="grow"></span>
     <button id="lb-story" class="${tab.ui.story ? "on" : ""}">${tab.ui.story ? "Hide" : "Show"} the story</button>

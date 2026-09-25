@@ -528,6 +528,54 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return analysis
 
 
+@app.get("/api/news/{symbol}")
+def news_only(symbol: str, company: str = "") -> Dict[str, Any]:
+    """Headlines, and nothing else -- for the loop that watches for more.
+
+    The fifteen-second refresh deliberately leaves news alone, because
+    re-scraping two dozen article bodies on a timer would get us
+    rate-limited within the hour. But DISCOVERY is not scraping: it is
+    five RSS feeds fetched in parallel, about a second and a half, and
+    a story that breaks at ten past does not need to wait for a reload
+    to appear.
+
+    So this is discovery only. No extraction, no cross-referencing, no
+    financials. The page merges what comes back into the list it
+    already has and says how many are new.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 12:
+        raise HTTPException(status_code=400, detail="bad symbol")
+
+    started = time.monotonic()
+    try:
+        found = news_rss.discover_all(symbol, company)
+    except Exception as exc:                               # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {
+        "symbol": symbol,
+        "at": time.strftime("%H:%M:%S", time.localtime()),
+        "ms": int((time.monotonic() - started) * 1000),
+        "count": len(found),
+        "articles": [
+            {
+                "url": a["url"],
+                "title": a.get("title"),
+                "excerpt": (a.get("summary") or "")[:320],
+                "publisher": a.get("publisher"),
+                "published": a.get("published"),
+                "discovered_via": a.get("discovered_via"),
+                "also_via": a.get("also_via", []),
+                "feed_count": a.get("feed_count") or 1,
+                "chars": 0,
+                "tier": None,
+            }
+            for a in found
+        ],
+    }
+
+
 @app.get("/api/live/{symbol}")
 def live(symbol: str) -> Dict[str, Any]:
     """The fast-moving numbers only, for the refresh loop.
