@@ -1860,10 +1860,25 @@ try:
                 raw = open(path, "rb").read()
             except OSError:
                 continue
-            for code in (0x07, 0x08, 0x0B, 0x0C, 0x1B):
-                if bytes([code]) in raw:
-                    found.append(f"{name}:{hex(code)}")
-    RESULTS.append((not found, "no stray control bytes in source",
+            # Every control byte, not the five a \x escape happens to
+            # make.
+            #
+            # The named list missed an OCTAL one. A patch wrote "\25B2"
+            # into a CSS rule from inside a non-raw Python string,
+            # Python read \25 as octal for byte 0x15, and the
+            # stylesheet ended up drawing a control byte followed by
+            # the letters "B2" beside every figure on the page that
+            # carries a direction. The up and down triangles the design
+            # calls load-bearing were not being drawn at all, and this
+            # check passed the entire time.
+            #
+            # Tab, newline and carriage return are the only ones that
+            # belong in a source file. Anything else under 0x20 got
+            # there by accident.
+            for b in set(raw):
+                if b < 0x20 and b not in (0x09, 0x0A, 0x0D):
+                    found.append(f"{name}:{hex(b)}")
+    RESULTS.append((not found, "no control bytes in any source file",
                     "clean" if not found else ", ".join(sorted(set(found))[:4])))
 except Exception as exc:
     RESULTS.append((False, "control byte scan", f"could not run: {exc}"))

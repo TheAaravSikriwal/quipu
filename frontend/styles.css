@@ -866,8 +866,8 @@ span.q.px { color: var(--rule2); }
    Deliberately washed out. A full green on black is a traffic light and
    a page of traffic lights stops meaning anything; more to the point, a
    stock being down is not bad news, and a warning red would say it was. */
-.up::before { content: "B2"; font-size: .72em; margin-right: .35em; }
-.down::before { content: "BD"; font-size: .72em; margin-right: .35em; }
+.up::before { content: "\25B2"; font-size: .72em; margin-right: .35em; }
+.down::before { content: "\25BD"; font-size: .72em; margin-right: .35em; }
 .up { color: var(--pos); }
 .down { color: var(--neg); }
 
@@ -2519,10 +2519,22 @@ a { color: inherit; text-decoration: none; }
    between them left to the reader -- and that step is not obvious for
    anything sold, where "what you paid to open" is a negative number
    and both figures look like income. */
+/* The row is a three-column grid and this one has two children, so
+   the sum was landing in the 150px middle column and wrapping one
+   word to a line. It spans the two value columns instead. */
 .cfrow.cfwork { align-items: start; }
-.cfsum { flex: 1; min-width: 0; }
+.cfrow.cfwork .cfsum { grid-column: 2 / -1; min-width: 0; }
 .cfsum .wcalc { font-size: 12px; }
 .cfnone { font-size: 11.5px; color: var(--faint); }
+/* What the box actually wants. "Value received" is the accounting term
+   and it does not say whose cash, in which direction, or across how
+   many legs. */
+.cfrow.cfsay { margin-top: -4px; }
+.cfrow.cfsay .cfhelp {
+  grid-column: 2 / -1;
+  font-size: 11px; line-height: 1.55; color: var(--faint); max-width: 62ch;
+}
+.cfrow.cfsay .cfhelp b { color: var(--text2); font-weight: 600; }
 .cfres {
   margin-top: 7px; font-family: var(--mono); font-size: 13px; color: var(--text2);
 }

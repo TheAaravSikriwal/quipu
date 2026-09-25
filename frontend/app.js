@@ -1862,6 +1862,21 @@ function closeForm(t, a) {
         ? "not priced &mdash; enter the amount"
         : `today it would ${paying ? "cost" : "be worth"} ${money(shown)}`}</span>
     </div>
+    <div class="cfrow cfsay">
+      <span class="cfl"></span>
+      <div class="cfhelp">${paying
+        ? `The cash that <b>left</b> your account to buy this back, in total
+           across every leg &mdash; what your broker charged you to close it.
+           Enter it as a positive number.`
+        : `The cash that <b>landed in</b> your account when you sold it, in
+           total across every leg. If you let it expire worthless, that is
+           <b>0</b>.`}
+        ${shown == null ? "" : `The box is filled with
+          ${shown === 0 ? "<b>0</b>, because the position has no value left at "
+            + "today&rsquo;s prices" : `today&rsquo;s mark, ${money(shown)}`}
+          &mdash; change it to what you actually
+          ${paying ? "paid" : "got"}.`}</div>
+    </div>
     ${cost != null ? `<div class="cfrow">
       <span class="cfl">${cost >= 0 ? "you paid to open" : "you were paid to open"}</span>
       <span class="cfv">${money(Math.abs(cost))}</span>
