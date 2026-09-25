@@ -854,6 +854,140 @@ function biasChip(p, cls = "") {
   </span>`;
 }
 
+/* Two setups side by side, the way a character select compares two
+ * fighters.
+ *
+ * Seventeen cards is a menu, and a menu that commits you the moment you
+ * touch it is a trap. Picking one now PINS it rather than opening it,
+ * and hovering any other shows the two against each other row by row,
+ * so the question "is this one cheaper, and what do I give up for it"
+ * is answered by looking rather than by opening both and remembering
+ * the first.
+ *
+ * Deliberately no winner is declared. These trade off against each
+ * other by construction -- the setups with the best odds are the ones
+ * that make the least, which is a fact about options and not a fault
+ * in any particular one -- so each ROW says which way it goes and the
+ * reader decides what they are buying. Marking an overall victor would
+ * be inventing a preference they have not stated.
+ */
+
+/** The rows, and which direction is which. `good` is per-row only. */
+const VS_ROWS = [
+  {
+    key: "cash", label: "cash today",
+    /* Positive is money out. A credit trade is negative, and
+     * "cheaper" across a debit and a credit is not a comparison
+     * anybody means -- so the row says which it is in words. */
+    of: (p) => p.net_cost ?? null,
+    show: (v) => (v == null ? "&ndash;"
+      : v >= 0 ? `you pay ${money(Math.abs(v), 0)}`
+               : `you receive ${money(Math.abs(v), 0)}`),
+    good: "low", note: "less out of your account",
+  },
+  {
+    key: "chance", label: "chance of making money",
+    of: (p) => p.chance ?? null,
+    show: (v) => (v == null ? "&ndash;" : nf(v, 0) + "%"),
+    good: "high", note: "more often right",
+  },
+  {
+    key: "best", label: "most it can make",
+    of: (p) => (p.max_profit_unbounded ? Infinity : p.max_profit ?? null),
+    show: (v) => (v == null ? "&ndash;" : v === Infinity ? "no cap" : money(v, 0)),
+    good: "high", note: "more when it works",
+  },
+  {
+    key: "worst", label: "most it can lose",
+    of: (p) => (p.max_loss_unbounded ? Infinity
+      : p.max_loss == null ? null : Math.abs(p.max_loss)),
+    show: (v) => (v == null ? "&ndash;" : v === Infinity ? "no limit" : money(v, 0)),
+    good: "low", note: "less when it does not",
+  },
+  {
+    key: "ratio", label: "made for each $1 risked",
+    of: (p) => {
+      const mp = p.max_profit_unbounded ? Infinity : p.max_profit;
+      const ml = p.max_loss_unbounded ? Infinity
+        : (p.max_loss == null ? null : Math.abs(p.max_loss));
+      if (mp == null || ml == null || ml === 0) return null;
+      if (mp === Infinity) return Infinity;
+      if (ml === Infinity) return 0;
+      return mp / ml;
+    },
+    // A cash-secured put makes $130 against $33,120 at risk. Two
+    // decimals prints that as "0.00x", which reads as zero rather than
+    // as very small -- and very small is the whole point of the row.
+    show: (v) => (v == null ? "&ndash;" : v === Infinity ? "uncapped"
+      : v === 0 ? "no cap on the risk"
+      : nf(v, v < 0.1 ? 3 : 2) + "\u00d7"),
+    good: "high", note: "more per dollar at stake",
+  },
+  {
+    key: "move", label: "move it needs",
+    /* How far the share has to travel to break even. The honest
+     * common denominator between a call and a condor: both have a
+     * level, and the distance to it is what has to happen. */
+    of: (p) => {
+      const bes = p.breakevens || [];
+      const spot = p.spot_used;
+      if (!bes.length || !spot) return null;
+      return Math.min(...bes.map((b) => Math.abs(b / spot - 1) * 100));
+    },
+    show: (v) => (v == null ? "&ndash;" : nf(v, 1) + "%"),
+    good: "low", note: "less has to happen",
+  },
+];
+
+/** One setup against another, or on its own when nothing is hovered. */
+function vsBody(pin, hov) {
+  const cell = (r, p) => (p ? r.show(r.of(p)) : "");
+
+  const verdict = (r) => {
+    if (!hov) return "";
+    const a = r.of(pin), b = r.of(hov);
+    if (a == null || b == null || a === b) return "";
+    const hovWins = r.good === "high" ? b > a : b < a;
+    // Named rather than coloured alone, and always says which SETUP --
+    // "better" with no subject is the thing that makes these panels
+    // unreadable.
+    return `<span class="vsw ${hovWins ? "vsb" : "vsa"}">${
+      esc((hovWins ? hov : pin).name)}: ${esc(r.note)}</span>`;
+  };
+
+  return `
+    <div class="vshead">
+      <div class="vscol vspin">
+        <span class="vslab">holding</span>
+        <b>${esc(pin.name)}</b>${biasChip(pin)}
+      </div>
+      ${hov ? `<div class="vscol vshov">
+        <span class="vslab">comparing</span>
+        <b>${esc(hov.name)}</b>${biasChip(hov)}
+      </div>` : `<div class="vscol vsempty">
+        <span class="vslab">comparing</span>
+        <i>hover another setup</i>
+      </div>`}
+    </div>
+    <div class="vsrows">
+      ${VS_ROWS.map((r) => `<div class="vsrow">
+        <span class="vsname">${esc(r.label)}</span>
+        <span class="vsv">${cell(r, pin)}</span>
+        <span class="vsv vsv2">${hov ? cell(r, hov) : "&middot;"}</span>
+        <span class="vsverdict">${verdict(r)}</span>
+      </div>`).join("")}
+    </div>
+    <div class="vsfoot">
+      These pull against each other: the setups with the best odds are the
+      ones that make the least, and the ones with no cap on the upside are
+      right least often. No row here outranks another.
+    </div>
+    <div class="vsact">
+      <button class="bookadd" data-openpre="${esc(pin.id)}">open ${esc(pin.name)} &rarr;</button>
+      <button class="bookclose" data-unpin="1">clear</button>
+    </div>`;
+}
+
 function renderPresets(tab, c) {
   const list = c.presets || [];
   if (!list.length) return "";
@@ -865,15 +999,21 @@ function renderPresets(tab, c) {
   // whole point of looking at a setup is to find out whether you want it.
   if (chosen) return `<div class="presets">${presetDetail(tab, chosen, c)}</div>`;
 
-  return `<div class="presets">
+  const pin = list.find((p) => p.id === tab.ui.pinned);
+
+  return `<div class="presets${pin ? " haspin" : ""}">
     <div class="expbar">
       <span class="explab">ready-made setups</span>
       <button class="plink" id="pre-toggle">${open ? "hide" : "show"}</button>
-      <span class="exphint">pick one to see how it works</span>
+      <span class="exphint">${pin
+        ? "hover any other to compare it against the one you are holding"
+        : "pick one to hold it, then hover the others to compare"}</span>
     </div>
+    ${pin ? `<aside class="vs" id="vs-panel">${vsBody(pin, null)}</aside>` : ""}
     ${open ? `<div class="pregrid">
       ${list.map((p) => `
-        <button class="pcard lean-${esc(p.bias || "unclear")}" data-preset="${esc(p.id)}">
+        <button class="pcard lean-${esc(p.bias || "unclear")}${
+          p.id === tab.ui.pinned ? " pinned" : ""}" data-preset="${esc(p.id)}">
           <span class="odds"><b>${p.chance == null ? "--"
             : calc(nf(p.chance, 0) + "%", p.chance_working)}</b>
             <i>chance of making money</i></span>
@@ -884,7 +1024,8 @@ function renderPresets(tab, c) {
             `${l.side === "long" ? "buy" : "sell"} ${l.qty}
              ${l.kind === "stock" ? "shares"
                : `${nf(l.strike, l.strike % 1 ? 1 : 0)} ${l.kind}`}`).join(" &middot; ")}</span>
-          <span class="puse">open &rarr;</span>
+          <span class="puse">${p.id === tab.ui.pinned
+            ? "holding &mdash; open it &rarr;" : "hold this one"}</span>
         </button>`).join("")}
     </div>
     <div class="prenote">The percentage is the chance the setup is worth more
@@ -2486,25 +2627,69 @@ function wirePosition(tab) {
   const pt = document.getElementById("pre-toggle");
   if (pt) pt.onclick = () => { u.presetsOpen = u.presetsOpen === false; render(true); };
 
-  document.querySelectorAll("[data-preset]").forEach((b) => {
-    b.onclick = () => {
-      const p = (u.chain?.presets || []).find((x) => x.id === b.dataset.preset);
-      u.preset = b.dataset.preset;
-      // Price it on the way in rather than on a second click. Opening a
-      // setup and being shown a summary, then having to ask for the
-      // analysis, is two steps for one question.
-      if (p) {
-        u.legs = p.legs.map((l) => ({
-          kind: l.kind, side: l.side, qty: l.qty, entry: l.entry,
-          strike: l.strike ?? "", expiry: l.expiry ?? "",
-        }));
-        analysePosition(tab);
-      }
-      render();
+  /* Picking a setup HOLDS it rather than opening it.
+   *
+   * Seventeen cards is a menu, and a menu that commits you the moment
+   * you touch it is a trap: the whole point of looking at a setup is
+   * to find out whether you want it. The first click pins it beside
+   * the grid; hovering any other compares the two; opening is its own
+   * button, so it is always a deliberate act. */
+  const presets = () => u.chain?.presets || [];
+  const vsHost = () => document.getElementById("vs-panel");
+
+  const repaintVs = (hovId) => {
+    const host = vsHost();
+    const p = presets().find((x) => x.id === u.pinned);
+    if (!host || !p) return;
+    // Patched in place rather than through render(): a full rebuild on
+    // every mouseenter across seventeen cards is a redraw of the whole
+    // board, and the pointer would be over a different element by the
+    // time it finished.
+    host.innerHTML = vsBody(p, hovId && hovId !== u.pinned
+      ? presets().find((x) => x.id === hovId) : null);
+    wireVsButtons();
+  };
+
+  const openPreset = (id) => {
+    const p = presets().find((x) => x.id === id);
+    if (!p) return;
+    u.preset = id;
+    u.legs = p.legs.map((l) => ({
+      kind: l.kind, side: l.side, qty: l.qty, entry: l.entry,
+      strike: l.strike ?? "", expiry: l.expiry ?? "",
+    }));
+    render();
+    analysePosition(tab);
+  };
+
+  function wireVsButtons() {
+    const go = document.querySelector("[data-openpre]");
+    if (go) go.onclick = (e) => { e.stopPropagation(); openPreset(go.dataset.openpre); };
+    const clear = document.querySelector("[data-unpin]");
+    if (clear) clear.onclick = (e) => {
+      e.stopPropagation(); u.pinned = null; render(true);
     };
+  }
+  wireVsButtons();
+
+  document.querySelectorAll("[data-preset]").forEach((b) => {
+    const id = b.dataset.preset;
+    b.onclick = () => {
+      // Clicking the one already held opens it -- the second click on
+      // the same card is unambiguous about what it means.
+      if (u.pinned === id) return openPreset(id);
+      u.pinned = id;
+      render(true);
+    };
+    b.onmouseenter = () => { if (u.pinned) repaintVs(id); };
+    b.onfocus = () => { if (u.pinned) repaintVs(id); };
+    b.onmouseleave = () => { if (u.pinned) repaintVs(null); };
+    b.onblur = () => { if (u.pinned) repaintVs(null); };
   });
   const pb = document.getElementById("pre-back");
   if (pb) pb.onclick = () => {
+    // The setup stays held on the way back, so returning to the grid
+    // returns you to the comparison you were in the middle of.
     u.preset = null; u.legs = []; u.size = 1; tab.data = null; render(true);
   };
 

@@ -2541,3 +2541,92 @@ a { color: inherit; text-decoration: none; }
 .cfres b { font-size: 16px; font-weight: 500; }
 .cfres.up b { color: var(--pos); }
 .cfres.down b { color: var(--neg); }
+
+
+/* ---- two setups, side by side ----
+   A character select, for option structures. The held one sits top
+   right and stays there; hovering any card in the grid fills the
+   second column and marks, row by row, which of the two wins that row.
+
+   No overall winner is drawn, on purpose. These trade off against each
+   other by construction -- the best odds belong to the setups that make
+   the least -- so declaring a victor would invent a preference the
+   reader has not stated. Each row says which way it goes and stops. */
+
+/* Two columns rather than a float beside a grid.
+   A float does not push grid items aside, so reserving the space with
+   padding as well was doing it twice: the cards were squeezed into a
+   third of the row with a gap where the panel already was. The whole
+   section is one grid, the bar and the footnote span it, and the panel
+   is simply the second column. */
+.presets.haspin {
+  display: grid; grid-template-columns: minmax(0, 1fr) 352px;
+  gap: 0 22px; align-items: start;
+}
+.presets.haspin > .expbar,
+.presets.haspin > .prenote { grid-column: 1 / -1; }
+.presets.haspin > .pregrid { grid-column: 1; grid-row: 2; }
+.presets.haspin > .vs { grid-column: 2; grid-row: 2; }
+
+.vs {
+  background: var(--panel); border: 1px solid var(--rule);
+  border-top: 2px solid var(--room-position);
+  padding: 14px 16px 12px;
+  /* Follows the grid down: the point is comparing against a card
+     further along the list than the one you are holding. */
+  position: sticky; top: 12px;
+}
+
+.vshead { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.vscol { min-width: 0; }
+.vslab {
+  display: block; font-family: var(--ui); font-size: 8px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--faint);
+  margin-bottom: 3px;
+}
+.vscol b { font-size: 13px; color: var(--text); font-weight: 600; display: block; }
+.vscol .bias { margin: 4px 0 0; }
+.vsempty i { font-style: normal; font-size: 11.5px; color: var(--rule2); }
+
+.vsrows { margin-top: 12px; border-top: 1px solid var(--rule); }
+.vsrow {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--hline);
+}
+.vsname {
+  grid-column: 1 / -1;
+  font-family: var(--ui); font-size: 8.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+}
+.vsv { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+.vsv2 { color: var(--text2); }
+.vsverdict { grid-column: 1 / -1; }
+.vsw {
+  font-size: 10px; color: var(--faint);
+  display: inline-flex; align-items: baseline; gap: 5px;
+}
+.vsw::before { content: "\25B8"; font-size: .9em; }
+.vsw.vsa { color: var(--room-position); }
+.vsw.vsb { color: var(--room-log); }
+
+.vsfoot {
+  margin-top: 10px; font-size: 10.5px; line-height: 1.5; color: var(--faint);
+}
+.vsact { display: flex; gap: 8px; margin-top: 12px; }
+.vsact .bookadd { flex: 1; }
+
+/* The card you are holding. */
+.pcard.pinned {
+  box-shadow: inset 0 0 0 1px var(--room-position),
+              inset 2px 0 0 var(--room-position);
+}
+.pcard.pinned .puse { color: var(--room-position); }
+
+@media (max-width: 1150px) {
+  /* No room beside the grid, so the panel goes above it and stops
+     following. A 352px column next to a card grid on a narrow window
+     leaves neither of them readable. */
+  .presets.haspin { grid-template-columns: minmax(0, 1fr); }
+  .presets.haspin > .vs { grid-column: 1; grid-row: 2; position: static; margin-bottom: 14px; }
+  .presets.haspin > .pregrid { grid-row: 3; }
+}

@@ -1957,7 +1957,8 @@ try:
     for name, label in (("indicators.test.js", "indicator suite passes"),
                         ("ledger.test.js", "trade-log arithmetic passes"),
                         ("format.test.js", "the formatters name things correctly"),
-                        ("expiry.test.js", "the expiry deadline is a real moment")):
+                        ("expiry.test.js", "the expiry deadline is a real moment"),
+                        ("versus.test.js", "the comparison names the right winner")):
         proc = subprocess.run(
             ["node", str(root / "frontend" / name)],
             capture_output=True, text=True, timeout=60, cwd=str(root))

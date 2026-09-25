@@ -166,6 +166,50 @@ def _wings(rows, centre, rungs: int = 2):
     return usable[0][1], usable[0][2]
 
 
+def _iron_wings(calls: List[Dict], puts: List[Dict], centre: Optional[float],
+                rungs: int = 3):
+    """A put below and a call above, the SAME distance out.
+
+    An iron butterfly is a butterfly: symmetric, or it is a different
+    structure. Choosing each wing by delta put them 5.00 below and 7.50
+    above the body on a live board -- because delta is not symmetric
+    around the money, and on a short-dated chain it barely
+    discriminates at all.
+
+    Both sides have to exist at the same width, and the two ladders are
+    not always the same: a put can be listed at a strike where the call
+    is not quoted. So the widths are walked outward from a sensible
+    one and the first that has BOTH is taken.
+    """
+    if centre is None:
+        return None, None
+
+    ladder = sorted({r["strike"] for r in list(calls) + list(puts)
+                     if r.get("strike") is not None and _quotable(r)})
+    if centre not in ladder:
+        return None, None
+
+    near = [k for k in ladder if abs(k - centre) <= max(centre * 0.06, 5.0)]
+    gaps = [round(b - a, 4) for a, b in zip(near, near[1:]) if b > a] \
+        or [round(b - a, 4) for a, b in zip(ladder, ladder[1:]) if b > a]
+    if not gaps:
+        return None, None
+    want = sorted(gaps)[len(gaps) // 2] * rungs
+
+    best = None
+    for k in ladder:
+        w = round(abs(k - centre), 4)
+        if w <= 0:
+            continue
+        lo = _at(puts, round(centre - w, 4))
+        hi = _at(calls, round(centre + w, 4))
+        if lo and hi:
+            d = abs(w - want)
+            if best is None or d < best[0]:
+                best = (d, lo, hi)
+    return (best[1], best[2]) if best else (None, None)
+
+
 def _stock(spot: float) -> Dict[str, Any]:
     return {"kind": "stock", "side": "long", "strike": None, "qty": 100,
             "entry": round(spot, 4), "expiry": None}
@@ -314,12 +358,12 @@ CATALOGUE = [
         "note": "Pays more than an iron condor and gives you a much smaller "
                 "target. Sold at the money on both sides, with wings bought "
                 "to cap what being wrong can cost.",
-        "build": lambda c, p, e, s: (lambda atm: _all(
-            _leg(_pick(p, 0.15, below=atm), "put", "long", e),
+        "build": lambda c, p, e, s: (lambda atm: (lambda w: _all(
+            _leg(w[0], "put", "long", e),
             _leg(_at(p, atm), "put", "short", e),
             _leg(_at(c, atm), "call", "short", e),
-            _leg(_pick(c, 0.15, above=atm), "call", "long", e),
-        ))((_pick(c, 0.50) or {}).get("strike")),
+            _leg(w[1], "call", "long", e),
+        ))(_iron_wings(c, p, atm)))((_pick(c, 0.50) or {}).get("strike")),
     },
     {
         "id": "short_strangle", "name": "Short strangle",
@@ -504,6 +548,10 @@ def build(calls: List[Dict], puts: List[Dict], expiry: str, spot: float,
             "max_profit_unbounded": a.get("max_profit_unbounded"),
             "max_loss_unbounded": a.get("max_loss_unbounded"),
             "breakevens": a.get("breakevens"),
+            # The share price these were measured against, so the
+            # comparison panel can turn a break-even into the move
+            # it actually needs.
+            "spot_used": a.get("spot"),
             "needs": a.get("needs"),
             **bias_of(a.get("needs")),
             "best_at": a.get("best_at"),
