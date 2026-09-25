@@ -24,6 +24,28 @@ from typing import Any, Dict, List, Optional
 import position as P
 
 
+def _price_of(row: Dict, side: str = "long") -> Optional[float]:
+    """What one contract can be priced at, in order of preference.
+
+    The side of the market you would have to cross, when there is one.
+    Outside trading hours there is not: every bid and ask on the board
+    comes back 0.00, while `mark` and `last` stay perfectly good.
+
+    That broke every ready-made setup between the close and the open.
+    _leg already fell back to the mark, but the strike PICKER insisted
+    on a live quote, so it found no usable row and the whole catalogue
+    came back empty -- on an evening or a weekend, which is when
+    somebody is most likely to be sitting and planning a trade.
+    """
+    px = row.get("ask") if side == "long" else row.get("bid")
+    return px or row.get("mark") or row.get("last") or None
+
+
+def _quotable(row: Dict) -> bool:
+    """Whether a row can be turned into a leg at all."""
+    return _price_of(row, "long") is not None or _price_of(row, "short") is not None
+
+
 def _pick(rows: List[Dict], target: float,
           below: Optional[float] = None,
           above: Optional[float] = None) -> Optional[Dict]:
@@ -46,7 +68,7 @@ def _pick(rows: List[Dict], target: float,
     cannot be built honestly is better missing than wrong.
     """
     usable = [r for r in rows
-              if r.get("delta") is not None and (r.get("bid") or r.get("ask"))]
+              if r.get("delta") is not None and _quotable(r)]
     if below is not None:
         usable = [r for r in usable if r["strike"] < below]
     if above is not None:
@@ -60,8 +82,7 @@ def _leg(row: Dict, kind: str, side: str, expiry: str, qty: int = 1) -> Optional
     """One leg, priced at the side of the market you would have to cross."""
     if not row:
         return None
-    px = row.get("ask") if side == "long" else row.get("bid")
-    px = px or row.get("mark") or row.get("last")
+    px = _price_of(row, side)
     if not px:
         return None
     return {"kind": kind, "side": side, "strike": row["strike"],
@@ -86,7 +107,7 @@ def _at(rows: List[Dict], strike: Optional[float]) -> Optional[Dict]:
     if strike is None:
         return None
     for r in rows:
-        if r.get("strike") == strike and (r.get("bid") or r.get("ask")):
+        if r.get("strike") == strike and _quotable(r):
             return r
     return None
 
@@ -112,7 +133,7 @@ def _wings(rows, centre, rungs: int = 2):
     an asymmetric pair and call it symmetric.
     """
     ladder = sorted({r["strike"] for r in rows
-                     if r.get("strike") is not None and (r.get("bid") or r.get("ask"))})
+                     if r.get("strike") is not None and _quotable(r)})
     if centre not in ladder:
         return None, None
 

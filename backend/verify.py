@@ -1393,6 +1393,27 @@ try:
                         f"{len(built)} agree" if not wrong else "; ".join(wrong[:3])))
 
 
+
+        # With the market shut, every bid and ask on the board comes
+        # back 0.00 while the mark and the last stay perfectly good.
+        # The strike picker used to insist on a live quote, so between
+        # the close and the open the entire catalogue came back empty
+        # -- on an evening or a weekend, which is exactly when somebody
+        # sits down to plan a trade.
+        shut_calls = [{**r, "bid": 0.0, "ask": 0.0} for r in exp["calls"]]
+        shut_puts = [{**r, "bid": 0.0, "ask": 0.0} for r in exp["puts"]]
+        after_hours = PRE.build(shut_calls, shut_puts, exp["expiry"],
+                                spot, vol, 0.04)
+        RESULTS.append((len(after_hours) == len(built),
+                        "and they still build with the market shut",
+                        f"{len(after_hours)} of {len(PRE.CATALOGUE)} "
+                        f"with no live bid or ask"))
+
+        # Priced off the mark rather than off nothing.
+        zero = [b["id"] for b in after_hours
+                if any(not l.get("entry") for l in b["legs"] if l["kind"] != "stock")]
+        RESULTS.append((not zero, "and none of them is priced at nothing",
+                        "all legs priced" if not zero else ", ".join(zero[:3])))
         # A butterfly is symmetric by definition: equal distance out on
         # both sides, so the halves cancel and it has a peak instead of
         # a slope. Choosing each wing by delta gave five dollars down
