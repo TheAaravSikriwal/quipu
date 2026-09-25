@@ -1146,10 +1146,12 @@ function moneyBlock(a, symbol, spot, size = 1) {
 
     <div class="mnysize">
       <span class="mszlab">size</span>
-      <button class="mszbtn" data-size="down" title="one less">&minus;</button>
+      <button class="mszbtn" data-size="down" title="one less"
+              aria-label="one less">&minus;</button>
       <input class="mszin" id="pos-size" value="${size}" inputmode="numeric"
              aria-label="how many of this structure to trade">
-      <button class="mszbtn" data-size="up" title="one more">+</button>
+      <button class="mszbtn" data-size="up" title="one more"
+              aria-label="one more">+</button>
       <span class="mszhint">&times; the structure below${
         contracts ? ` &mdash; <b>${nf(contracts, 0)}</b> contract${contracts === 1 ? "" : "s"} in total` : ""
       }. Every figure on this page moves with it.</span>
@@ -2322,7 +2324,8 @@ function renderPosition(tab) {
       ${l.kind === "stock" ? "" : `<span class="cx">${esc((l.expiry || "").slice(5))}</span>`}
       <span class="at">@</span>
       <input data-f="entry" value="${esc(l.entry)}" title="what you actually paid, per share">
-      <button data-drop="${i}" title="Remove">&times;</button>
+      <button data-drop="${i}" title="Remove"
+        aria-label="Remove this leg">&times;</button>
     </div>`).join("")}
   </div>` : `<div class="chips empty-chips">Nothing yet &mdash; click a price on the board below</div>`;
 

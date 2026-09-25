@@ -1531,6 +1531,56 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "rooms", "could not run: " + str(exc)))
 
+section("A flat payoff is one region, not a thousand break-evens")
+
+# A butterfly that happens to cost nothing to open is mathematically
+# flat at zero outside its wings -- and in floating point a flat zero
+# is not zero, it is a fraction of a cent flickering sign at random.
+# Testing `y < 0` there found a crossing at nearly every grid point:
+# this exact structure reported 3,576 break-evens, every one of which
+# the page would have printed as a level to watch.
+#
+# Zero is read as a band half a cent wide now, and the edges of a flat
+# stretch are its boundaries.
+try:
+    import position as POS
+
+    def _leg(kind, side, strike, entry, qty=1):
+        return {"kind": kind, "side": side, "strike": strike, "qty": qty,
+                "entry": entry, "expiry": "2026-12-18"}
+
+    # 22 - 2x15 + 8 = 0. Costs nothing, so it is flat at zero on both
+    # sides of the wings.
+    flat = POS.analyse([_leg("call", "long", 320, 22),
+                        _leg("call", "short", 335, 15, 2),
+                        _leg("call", "long", 350, 8)], 335.0, 0.24, 0.04)
+    bes = flat.get("breakevens") or []
+    RESULTS.append((flat["net_cost"] == 0.0, "the case costs exactly nothing to open",
+                    f'net {flat["net_cost"]}'))
+    RESULTS.append((len(bes) <= 4, "and reports a handful of levels, not thousands",
+                    f"{len(bes)}: {bes[:4]}"))
+    RESULTS.append((bool(bes) and all(319 <= b <= 351 for b in bes),
+                    "each of them at a wing, where the flat part ends",
+                    ", ".join(str(b) for b in bes[:4])))
+
+    # And the ordinary version is untouched by the change.
+    costed = POS.analyse([_leg("call", "long", 320, 24),
+                          _leg("call", "short", 335, 15, 2),
+                          _leg("call", "long", 350, 8)], 335.0, 0.24, 0.04)
+    cbes = costed.get("breakevens") or []
+    RESULTS.append((len(cbes) == 2 and abs(cbes[0] - 322) < 1 and abs(cbes[1] - 348) < 1,
+                    "a butterfly that cost something still has two",
+                    str(cbes)))
+
+    # The zero band must not swallow a real but small break-even gap.
+    tight = POS.analyse([_leg("call", "long", 335, 15.00),
+                         _leg("call", "short", 335.5, 14.90)], 335.0, 0.24, 0.04)
+    RESULTS.append((len(tight.get("breakevens") or []) >= 1,
+                    "a ten-cent-wide spread still finds its level",
+                    str(tight.get("breakevens"))))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "flat payoff", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

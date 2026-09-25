@@ -314,32 +314,63 @@ def _payoff_fn(legs: List[Dict[str, Any]], vol: float, rate: float,
 def _breakevens(pay, lo: float, hi: float, steps: int = 4000) -> List[float]:
     """Where the payoff crosses zero, found by scanning and bisecting.
 
-    Solved numerically rather than per strategy: the closed forms differ for
-    every structure in the taxonomy, and a sign change is a sign change
-    whatever the shape above it.
+    Solved numerically rather than per strategy: the closed forms
+    differ for every structure in the taxonomy, and a sign change is a
+    sign change whatever the shape above it.
+
+    Zero is treated as a BAND half a cent wide, not as a point.
+
+    A payoff can be mathematically flat at zero over a whole stretch --
+    a butterfly that happened to cost nothing to open is exactly that
+    outside its wings -- and in floating point such a stretch is not
+    zero, it is plus or minus a fraction of a cent, flickering sign at
+    random. Testing `y < 0` there found a crossing at nearly every grid
+    point: one structure reported three and a half THOUSAND
+    break-evens, every one of which would have been printed as a level
+    to watch.
+
+    So the payoff is read as one of three states -- below, at, or above
+    zero -- and a break-even is a move between below and above. Where
+    the payoff merely touches or rides along zero, the EDGES of that
+    stretch are the boundaries, because that is what is true: there is
+    a region where you neither make nor lose, and it begins and ends
+    somewhere.
     """
+    # Half a cent. Below this nothing is a real gain or loss on a
+    # position quoted in dollars, and anything smaller is arithmetic
+    # noise rather than money.
+    eps = 0.005
+
+    def state(y: float) -> int:
+        return 0 if abs(y) < eps else (1 if y > 0 else -1)
+
+    xs = [lo + (hi - lo) * i / steps for i in range(steps + 1)]
+    st = [state(pay(x)) for x in xs]
+
     out: List[float] = []
-    prev_x = lo
-    prev_y = pay(lo)
-    for i in range(1, steps + 1):
-        x = lo + (hi - lo) * i / steps
-        y = pay(x)
-        if prev_y == 0:
-            out.append(round(prev_x, 2))
-        elif (prev_y < 0) != (y < 0):
-            a, b = prev_x, x
+    for i in range(1, len(xs)):
+        a, b = st[i - 1], st[i]
+        if a == b:
+            continue
+        if a != 0 and b != 0:
+            # A clean sign change: solve for where it happens.
+            x0, x1 = xs[i - 1], xs[i]
             for _ in range(60):
-                m = 0.5 * (a + b)
-                if (pay(a) < 0) != (pay(m) < 0):
-                    b = m
+                m = 0.5 * (x0 + x1)
+                if state(pay(x0)) != state(pay(m)):
+                    x1 = m
                 else:
-                    a = m
-            out.append(round(0.5 * (a + b), 2))
-        prev_x, prev_y = x, y
-    # Collapse duplicates that the scan can produce at a kink.
+                    x0 = m
+            out.append(round(0.5 * (x0 + x1), 2))
+        else:
+            # Entering or leaving the zero band. The grid point on the
+            # zero side is the edge of the region.
+            out.append(round(xs[i] if b == 0 else xs[i - 1], 2))
+
+    # Two edges a hair apart are one edge.
     tidy: List[float] = []
     for v in out:
-        if not tidy or abs(v - tidy[-1]) > 0.01:
+        if not tidy or v - tidy[-1] > max((hi - lo) / steps * 1.5, 0.02):
             tidy.append(v)
     return tidy
 
