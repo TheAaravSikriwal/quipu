@@ -18,6 +18,8 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+import requests
+
 from urllib.parse import urlparse
 
 MIN_BODY_CHARS = 400  # below this we treat the extraction as failed
@@ -76,7 +78,19 @@ def _clean_authors(authors: Any) -> List[str]:
 def _tier_trafilatura(url: str) -> Optional[Article]:
     if not _HAS_TRAFILATURA:
         return None
-    downloaded = trafilatura.fetch_url(url)
+    # Fetched with a deadline. trafilatura.fetch_url has no timeout
+    # argument and will wait on a host far longer than a reader will:
+    # of twenty-two articles attempted on one page, thirteen failed,
+    # and it was the failures rather than the successes that took two
+    # minutes. A page that cannot be read in eight seconds is not
+    # going to be read.
+    try:
+        resp = requests.get(
+            url, timeout=8,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; quipu/0.1)"})
+        downloaded = resp.text if resp.ok else None
+    except Exception:
+        downloaded = None
     if not downloaded:
         return None
 

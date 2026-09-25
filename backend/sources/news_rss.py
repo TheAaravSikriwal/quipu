@@ -13,6 +13,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import concurrent.futures as _cf
+
 import feedparser
 import requests
 
@@ -36,7 +38,19 @@ def _strip_html(text: str) -> str:
 
 
 def _from_feed(url: str, source: str, limit: int) -> List[Dict[str, Any]]:
-    feed = feedparser.parse(url)
+    """One feed, fetched with a deadline and then parsed.
+
+    feedparser.parse(url) does its own fetch, and that fetch has NO
+    TIMEOUT. With two feeds in series that was a slow page; with seven
+    in parallel it is a hung one, because a single unresponsive host
+    holds the whole pool open and the page waits on it forever.
+    Requests does the fetching now, so every feed has a deadline, and
+    a host that will not answer costs the reader fifteen seconds
+    rather than the article list.
+    """
+    resp = requests.get(url, headers={"User-Agent": UA}, timeout=TIMEOUT)
+    resp.raise_for_status()
+    feed = feedparser.parse(resp.content)
     items: List[Dict[str, Any]] = []
     for entry in feed.entries[:limit]:
         link = entry.get("link")
@@ -74,6 +88,44 @@ def google_news_rss(symbol: str, company: str = "", limit: int = 25) -> List[Dic
         + "&hl=en-US&gl=US&ceid=US:en"
     )
     return _from_feed(url, "google_news", limit)
+
+
+def seeking_alpha(symbol: str, limit: int = 25) -> List[Dict[str, Any]]:
+    """Seeking Alpha's per-ticker feed: news and analysis together.
+
+    Carries commentary the wires do not, which is worth having and
+    worth labelling -- an opinion piece and a filing are not the same
+    kind of thing and the evidence class on the panel says so.
+    """
+    url = f"https://seekingalpha.com/api/sa/combined/{urllib.parse.quote(symbol)}.xml"
+    return _from_feed(url, "seeking_alpha", limit)
+
+
+def nasdaq_rss(symbol: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Nasdaq's own per-ticker feed."""
+    url = ("https://www.nasdaq.com/feed/rssoutbound?symbol="
+           + urllib.parse.quote(symbol))
+    return _from_feed(url, "nasdaq", limit)
+
+
+def bing_news(symbol: str, company: str = "", limit: int = 20) -> List[Dict[str, Any]]:
+    """Bing's news index, as RSS.
+
+    Indexes a different slice of the web from Google, which is the
+    entire reason it is here: two search engines miss different things,
+    and a story only one of them found is still a story.
+    """
+    query = f'"{company}" stock' if company else f"{symbol} stock"
+    url = ("https://www.bing.com/news/search?q="
+           + urllib.parse.quote(query) + "&format=RSS")
+    return _from_feed(url, "bing_news", limit)
+
+
+def investing_com(limit: int = 20) -> List[Dict[str, Any]]:
+    """Investing.com's market news. Not per-ticker, so it is filtered
+    by the caller against the symbol and the company name."""
+    return _from_feed("https://www.investing.com/rss/news_25.rss",
+                      "investing", limit)
 
 
 def stocktwits(symbol: str, limit: int = 30) -> Dict[str, Any]:
@@ -145,6 +197,37 @@ def finnhub_news(symbol: str, limit: int = 40) -> List[Dict[str, Any]]:
     return [i for i in items if i["url"]]
 
 
+def _headline_key(title: str) -> str:
+    """A headline reduced to what makes it the same story.
+
+    A wire piece runs on a dozen sites under one title, each with its
+    own URL and its own trailing publisher name, so deduplicating by
+    URL alone left the same sentence on the page a dozen times.
+    """
+    t = re.sub(r"[^a-z0-9 ]+", " ", (title or "").lower())
+    words = [w for w in t.split() if len(w) > 2]
+    return " ".join(words[:9])
+
+
+def _about(items: List[Dict[str, Any]], symbol: str,
+           company: str = "") -> List[Dict[str, Any]]:
+    """Keep only the items that mention the company at all.
+
+    Some good feeds are market-wide rather than per-ticker. Pooling one
+    of those unfiltered would bury the company under general news,
+    which is the opposite of what a ticker page is for.
+    """
+    names = [symbol.lower()]
+    if company:
+        names.append(company.lower().split()[0])
+    out = []
+    for it in items:
+        hay = f'{it.get("title", "")} {it.get("summary", "")}'.lower()
+        if any(n in hay for n in names if len(n) > 1):
+            out.append(it)
+    return out
+
+
 def discover_all(symbol: str, company: str = "") -> List[Dict[str, Any]]:
     """Pool every discovery feed, deduplicated by URL, newest first.
 
@@ -153,21 +236,43 @@ def discover_all(symbol: str, company: str = "") -> List[Dict[str, Any]]:
     because a story every feed picked up is a different signal from one only
     Google News found.
     """
+    # Fetched together rather than one after another. Two feeds in
+    # series was a second or so; seven would be most of ten, and this
+    # runs on every page load and every refresh.
+    jobs = {
+        "yahoo": lambda: yahoo_rss(symbol),
+        "google": lambda: google_news_rss(symbol, company),
+        "seeking_alpha": lambda: seeking_alpha(symbol),
+        "nasdaq": lambda: nasdaq_rss(symbol),
+        "bing": lambda: bing_news(symbol, company),
+        "investing": lambda: _about(investing_com(), symbol, company),
+        "finnhub": lambda: finnhub_news(symbol),      # optional, needs a key
+    }
+
     pooled: List[Dict[str, Any]] = []
-    for fetch in (
-        lambda: yahoo_rss(symbol),
-        lambda: google_news_rss(symbol, company),
-    ):
-        try:
-            pooled.extend(fetch())
-        except Exception:
-            continue
+    reached: List[str] = []
+    with _cf.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = {pool.submit(fn): name for name, fn in jobs.items()}
+        for fut in _cf.as_completed(futures, timeout=TIMEOUT + 10):
+            name = futures[fut]
+            try:
+                got = fut.result() or []
+            except Exception:
+                continue                       # a dead feed is not an error
+            if got:
+                reached.append(name)
+            pooled.extend(got)
 
-    try:
-        pooled.extend(finnhub_news(symbol))
-    except Exception:
-        pass  # optional source
-
+    # Deduplicated twice over.
+    #
+    # By URL first, which catches the same link arriving from three
+    # feeds. Then by headline, because a wire story runs on a dozen
+    # sites under one title at a dozen URLs, and a page showing the
+    # same sentence twelve times is worse than one showing it once.
+    #
+    # How many feeds carried a story is kept. It is the closest thing
+    # to a free importance signal there is: everybody picks up an
+    # earnings miss and nobody picks up a sponsored post.
     by_url: Dict[str, Dict[str, Any]] = {}
     for item in pooled:
         key = item["url"].split("?")[0]
@@ -178,6 +283,25 @@ def discover_all(symbol: str, company: str = "") -> List[Dict[str, Any]]:
         else:
             by_url[key] = item
 
-    articles = list(by_url.values())
+    by_title: Dict[str, Dict[str, Any]] = {}
+    for item in by_url.values():
+        key = _headline_key(item.get("title", ""))
+        if not key:
+            by_title[item["url"]] = item
+            continue
+        first = by_title.get(key)
+        if first is None:
+            by_title[key] = item
+            continue
+        carried = first.setdefault("also_via", [])
+        for v in [item["discovered_via"]] + (item.get("also_via") or []):
+            if v not in carried and v != first["discovered_via"]:
+                carried.append(v)
+
+    articles = list(by_title.values())
+    for a in articles:
+        a["feed_count"] = 1 + len(a.get("also_via") or [])
     articles.sort(key=lambda a: a.get("published") or "", reverse=True)
+    if articles:
+        articles[0]["_feeds_reached"] = sorted(reached)
     return articles

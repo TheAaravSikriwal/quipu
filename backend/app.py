@@ -632,8 +632,20 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
     )[0]
     discovered = discovery.data if discovery.ok else []
 
-    # Stage 3 -- full text, cheap tier first, bounded so no host gets hammered.
-    to_fetch = discovered[:articles]
+    # Stage 3 -- full text, cheap tier first, bounded so no host gets
+    # hammered.
+    #
+    # Ordered by how many feeds carried the story before it is cut to
+    # the budget. Seven feeds now find sixty-odd articles and only a
+    # couple of dozen can be read in the time a page has, so the ones
+    # that get read should be the ones several outlets thought worth
+    # running -- everybody carries an earnings miss and nobody carries
+    # a sponsored post. Recency breaks the tie.
+    ranked = sorted(
+        discovered,
+        key=lambda a: (a.get("feed_count") or 1, a.get("published") or ""),
+        reverse=True)
+    to_fetch = ranked[:articles]
     extract_started = time.monotonic()
     extracted = bounded_map(
         lambda item: extract(item["url"]).to_dict(),
@@ -653,6 +665,10 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
         result["title"] = result.get("title") or item.get("title")
         result["discovered_via"] = item.get("discovered_via")
         result["also_via"] = item.get("also_via", [])
+        # How many feeds carried it. Rebuilt results only copied across
+        # the fields that were named, so this was computed in discovery
+        # and then dropped on the floor before anything could use it.
+        result["feed_count"] = item.get("feed_count") or 1
         # A readable standfirst: the feed's own blurb if it wrote one, else the
         # opening of the article we extracted.
         feed_summary = (item.get("summary") or "").strip()
@@ -691,6 +707,12 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                 "tier": (got or {}).get("tier"),
                 "discovered_via": item.get("discovered_via"),
                 "also_via": item.get("also_via", []),
+                # How many of the seven feeds carried this story.
+                # Computed in discovery, and dropped twice on the way
+                # out -- once by the extractor rebuild and again here,
+                # where the response is a third projection listing only
+                # the fields somebody remembered to name.
+                "feed_count": item.get("feed_count") or 1,
                 "full_text": bool(got),
             }
         )
