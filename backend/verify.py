@@ -1474,7 +1474,7 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "setups", f"could not run: {exc}"))
 
-section("The four rooms are spelled the same everywhere")
+section("Every room is spelled the same everywhere")
 
 # A room is named in three places: the ROOMS table that labels it, the
 # palette that gives it a hue, and the rules that paint the tab edge and
@@ -1490,8 +1490,12 @@ try:
 
     table = _re.search(r"const ROOMS = \{([\s\S]*?)\};", js)
     rooms = set(_re.findall(r"^\s{2}(\w+):\s*\{", table.group(1), _re.M)) if table else set()
-    RESULTS.append((len(rooms) == 4, "there are four of them",
-                    ", ".join(sorted(rooms)) or "none found"))
+    # Counted rather than hard-coded at four: a fifth room was added
+    # and the check that was meant to protect the vocabulary became
+    # the thing standing in its way. What matters is that every room
+    # named in the table is also coloured and reachable, below.
+    RESULTS.append((len(rooms) >= 4, "the rooms are named in one place",
+                    f'{len(rooms)}: ' + ", ".join(sorted(rooms))))
 
     missing = []
     for r in sorted(rooms):
@@ -1502,7 +1506,7 @@ try:
         if ".r-" + r not in css:
             missing.append(r + ": no nav dot")
     RESULTS.append((not missing, "each has a hue, a tab rule and a dot",
-                    "all four" if not missing else "; ".join(missing[:4])))
+                    f"all {len(rooms)}" if not missing else "; ".join(missing[:4])))
 
     # Every room must be openable, or a nav button is a dead button.
     opener = _re.search(r"function openRoom\(which\) \{([\s\S]*?)\n\}", js)

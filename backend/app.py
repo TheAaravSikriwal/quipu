@@ -34,6 +34,7 @@ import presets as preset_engine  # noqa: E402
 import working as show_working  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
 from sources import deep, events, holdings, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
+from sources import world as world_news  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -631,6 +632,69 @@ def _events(symbol, earnings, fundamentals, dividends=None, filings=None):
 def market_events(horizon: int = 180) -> Dict[str, Any]:
     """The market-wide calendar on its own, with no ticker attached."""
     return events.upcoming(None, horizon=horizon)
+
+
+@app.get("/api/world")
+def world(horizon: int = 30) -> Dict[str, Any]:
+    """What is happening, rather than what is happening to one company.
+
+    A ticker page answers the second question. Nothing answered the
+    first, and it is the one you have before you open a ticker at all:
+    whether the tape is risk-on, whether the Fed spoke this morning,
+    whether the selling is in one name or in all of them.
+
+    Three things, fetched together because none depends on the others:
+    a row of index levels so "the market" is a set of numbers rather
+    than a word, the headlines from fifteen market-wide feeds ranked
+    by how much they look like they move everything at once, and the
+    dates already known to be coming.
+    """
+    started = time.monotonic()
+
+    def barometer() -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for sym, label, what in world_news.BAROMETER:
+            try:
+                q = quotes.fetch_quote(sym) or {}
+            except Exception:                              # noqa: BLE001
+                q = {}
+            rows.append({
+                "symbol": sym,
+                "label": label,
+                "what": what,
+                "price": q.get("price"),
+                "change_pct": q.get("change_pct"),
+                # Said rather than left to be inferred: a reader should
+                # not have to know that a rising VIX is the market
+                # pricing more movement, not less.
+                "note": ("higher means options are pricing a bigger month"
+                         if sym == "^VIX" else ""),
+            })
+        return rows
+
+    results = _result_map(
+        fanout(
+            {
+                "news": world_news.headlines,
+                "barometer": barometer,
+                "calendar": lambda: events.upcoming(None, horizon=horizon),
+            },
+            timeout_s=30,
+        )
+    )
+
+    news = results["news"].data if results["news"].ok else {}
+    return {
+        "at": time.strftime("%H:%M:%S", time.localtime()),
+        "ms": int((time.monotonic() - started) * 1000),
+        "barometer": results["barometer"].data if results["barometer"].ok else [],
+        "headlines": news.get("items", [])[:60],
+        "feeds_reached": news.get("feeds_reached", []),
+        "feeds_failed": news.get("feeds_failed", []),
+        "feeds_total": news.get("feeds_total", 0),
+        "found": news.get("count", 0),
+        "calendar": results["calendar"].data if results["calendar"].ok else None,
+    }
 
 
 @app.get("/api/ticker/{symbol}")

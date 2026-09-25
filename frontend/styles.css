@@ -148,6 +148,7 @@
   --room-position: #C0946B;   /* tan    -- building something     */
 
   --room-log:      #A98BB5;   /* lilac  -- what you already hold  */
+  --room-world:    #B5847E;   /* clay   -- everything at once   */
 
 
   --mast:   "Bodoni Moda", Georgia, serif;
@@ -2659,4 +2660,79 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: .14em; text-transform: uppercase; color: var(--attn);
   border: 1px solid color-mix(in srgb, var(--attn) 45%, transparent);
   border-radius: 2px; padding: 1px 4px; margin-right: 7px; vertical-align: 1px;
+}
+
+/* ---- the world ----
+   Where the market is, what happened, and what is coming -- in the
+   order somebody would ask. */
+.t-world { --room: var(--room-world); }
+.room.r-world { --room: var(--room-world); }
+.door.d-world { --room: var(--room-world); }
+
+.worldbody { padding: 18px 22px 40px; max-width: 1180px; }
+.worldbody h4 {
+  margin: 26px 0 10px; font-family: var(--ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
+}
+.worldbody h4:first-child { margin-top: 4px; }
+
+/* The barometer. "The market" as a set of numbers rather than a word. */
+.wxgrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(212px, 1fr));
+  gap: 1px; background: var(--rule);
+  border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+}
+.wxcell { background: var(--panel); padding: 12px 14px 13px; }
+.wxlab {
+  display: block; font-family: var(--ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.wxcell b {
+  display: block; margin-top: 5px;
+  font-family: var(--mono); font-size: 21px; font-weight: 400; color: var(--text);
+}
+.wxpx { font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
+.wxwhat {
+  display: block; margin-top: 6px; font-size: 10.5px; line-height: 1.5;
+  color: var(--faint); max-width: 34ch;
+}
+
+/* The headlines. */
+.wnews { border-top: 1px solid var(--rule); }
+.wnrow { padding: 11px 2px 12px; border-bottom: 1px solid var(--hline); }
+.wnrow.loud { box-shadow: inset 3px 0 0 var(--attn); padding-left: 12px; }
+.wnhl {
+  font-size: 14px; line-height: 1.4; color: var(--text); text-decoration: none;
+}
+.wnhl:hover { text-decoration: underline; }
+.wnmeta {
+  margin-top: 4px; font-size: 10.5px; color: var(--faint);
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+}
+.wnmeta b { color: var(--text2); font-family: var(--mono); }
+.wnsrc { color: var(--text2); }
+.wnloud {
+  font-family: var(--ui); font-size: 8px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--attn);
+  border: 1px solid color-mix(in srgb, var(--attn) 40%, transparent);
+  border-radius: 2px; padding: 1px 5px;
+}
+.wnsum {
+  margin-top: 5px; font-size: 11.5px; line-height: 1.55; color: var(--faint);
+  max-width: 96ch;
+}
+
+/* What is coming. */
+.wcals { border-top: 1px solid var(--rule); }
+.wcal {
+  display: grid; grid-template-columns: 110px minmax(180px, 300px) 1fr;
+  gap: 14px; padding: 9px 2px; border-bottom: 1px solid var(--hline);
+  align-items: baseline;
+}
+.wcd { font-family: var(--mono); font-size: 12px; color: var(--text2); }
+.wct { font-size: 13px; color: var(--text); }
+.wcw { font-size: 11px; color: var(--faint); line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .wcal { grid-template-columns: 1fr; gap: 3px; }
 }
