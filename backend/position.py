@@ -1196,6 +1196,159 @@ def _extreme_price(regions: Optional[List[Dict[str, Any]]]) -> Optional[float]:
     return r["lo"]
 
 
+def attribute(a: Dict[str, Any], open_spot: Optional[float],
+              open_vol: Optional[float], sessions: Optional[float],
+              avg_day_pct: Optional[float] = None,
+              now_vol: Optional[float] = None,
+              legs: Optional[List[Dict[str, Any]]] = None,
+              rate: float = 0.04,
+              div_yield: float = 0.0) -> Optional[Dict[str, Any]]:
+    """Why the position is up or down, split into the reasons.
+
+    "The stock moved" is not an answer for an option position, and on
+    some of them it is not even the main term. An iron condor that has
+    barely moved can be down on volatility alone; a calendar can be up
+    on a day the share fell. The question is which of the four things
+    that change an option price actually did it.
+
+    So the change is decomposed the way the greeks define it:
+
+        profit  =  delta x (move in the share)
+                +  half x gamma x (move squared)
+                +  theta x (sessions passed)
+                +  vega  x (points of volatility)
+                +  whatever is left
+
+    The greeks used are today's, not the ones at entry, so this is a
+    first-order account and not an identity -- the residual carries
+    the difference and is named rather than folded into one of the
+    others. That is the honest way round: a decomposition that always
+    adds up exactly is one that has hidden its error somewhere.
+
+    The share's move is also given against its OWN history rather than
+    in isolation. Down 1.1% means nothing until you know whether this
+    share moves 0.4% on a normal day or 4%.
+    """
+    g = a.get("greeks") or {}
+    pl = a.get("pl")
+    if pl is None or open_spot is None or not a.get("spot"):
+        return None
+
+    import working as W                                   # noqa: PLC0415
+
+    now_spot = float(a["spot"])
+    ds = now_spot - float(open_spot)
+    dt = float(sessions or 0)
+    vol_now = now_vol if now_vol is not None else a.get("vol_used")
+    dv = (None if open_vol is None or vol_now is None
+          else float(vol_now) - float(open_vol))
+
+    # What the position was already worth, against what it cost.
+    #
+    # Profit is measured from the ENTRY PRICES, and the greeks cannot
+    # explain the gap between what you paid and what the thing was
+    # worth the moment you paid it. That gap is the spread you crossed
+    # plus wherever the model sits relative to the market -- and on a
+    # four-leg structure it is not small. Left unnamed it swamped the
+    # account: $132 of "everything else" on a $137 loss, which is not
+    # an explanation of anything.
+    #
+    # Priced by re-running the legs at the share price and volatility
+    # they were opened at, with the extra time they had then.
+    day_one = 0.0
+    if legs and sessions:
+        try:
+            day_one = value_at(legs, float(open_spot), -float(sessions) / 252.0,
+                               (open_vol or 0.0) / 100.0, rate, div_yield)
+        except Exception:                                  # noqa: BLE001
+            day_one = 0.0
+
+    delta_pl = float(g.get("delta") or 0.0) * ds
+    gamma_pl = 0.5 * float(g.get("gamma") or 0.0) * ds * ds
+    theta_pl = float(g.get("theta") or 0.0) * dt
+    vega_pl = 0.0 if dv is None else float(g.get("vega") or 0.0) * dv
+    rest = pl - (day_one + delta_pl + gamma_pl + theta_pl + vega_pl)
+
+    moved_pct = (ds / float(open_spot) * 100.0) if open_spot else None
+    typical = None
+    if avg_day_pct and moved_pct is not None and avg_day_pct > 0:
+        typical = abs(moved_pct) / avg_day_pct
+
+    lines = []
+    if abs(day_one) >= 0.5:
+        lines.append(W.line(
+            "" if day_one >= 0 else "-",
+            W.term("what it was worth against what you paid, on day one",
+                   round(abs(day_one), 2), 2,
+                   note="The spread you crossed going in, plus wherever the "
+                        "model sits against the market. Nothing has to happen "
+                        "for this one -- it was true the moment you opened."),
+            gives=round(abs(day_one), 2)))
+
+    lines += [
+        W.line("+" if lines else "",
+               W.term("the share moving", round(ds, 2), 2,
+                          note=(f"From ${open_spot:,.2f} to ${now_spot:,.2f}."
+                                + (f" That is {abs(moved_pct):.1f}%, about "
+                                   f"{typical:.1f} times its average day "
+                                   f"of {avg_day_pct:.1f}%."
+                                   if typical is not None else ""))),
+               W.term("shares you behave like owning",
+                      round(float(g.get("delta") or 0.0), 1), 1),
+               gives=round(delta_pl, 2)),
+    ]
+    if abs(gamma_pl) >= 0.5:
+        lines.append(W.line(
+            "+" if gamma_pl >= 0 else "-",
+            W.term("and that exposure changing as it moved",
+                   round(abs(gamma_pl), 2), 2,
+                   note="Gamma: the further it travels, the more the first "
+                        "line above understates or overstates it."),
+            gives=round(abs(gamma_pl), 2)))
+
+    if dt:
+        lines.append(W.line(
+            "+" if theta_pl >= 0 else "-",
+            W.term(f"time passing, {dt:g} session{'' if dt == 1 else 's'}",
+                   round(abs(float(g.get("theta") or 0.0)), 2), 2,
+                   note="Per session. Working for you on anything sold and "
+                        "against you on anything bought."),
+            W.term("sessions", dt, 0),
+            gives=round(abs(theta_pl), 2)))
+
+    if dv is not None and abs(vega_pl) >= 0.5:
+        lines.append(W.line(
+            "+" if vega_pl >= 0 else "-",
+            W.term(f"volatility {'rising' if dv > 0 else 'falling'} "
+                   f"{abs(dv):.1f} points", round(abs(float(g.get("vega") or 0.0)), 2), 2,
+                   note=f"Implied volatility went from {open_vol:.1f}% to "
+                        f"{float(vol_now):.1f}%. Nothing about the share has to "
+                        f"happen for this to move your position."),
+            W.term("points", round(abs(dv), 2), 2),
+            gives=round(abs(vega_pl), 2)))
+
+    if abs(rest) >= 0.5:
+        lines.append(W.line(
+            "+" if rest >= 0 else "-",
+            W.term("everything the four above do not catch", round(abs(rest), 2), 2,
+                   note="The greeks describe small changes. Over a real move "
+                        "they drift, and this is the drift -- plus the spread "
+                        "you crossed on the way in."),
+            gives=round(abs(rest), 2)))
+
+    return {
+        **W.sum_of(round(pl, 2), lines, note=(
+            "A first-order account, using today's greeks rather than the ones "
+            "at entry, so it is an explanation and not an identity. The last "
+            "line carries the difference instead of it being hidden in the "
+            "others.")),
+        "moved_pct": None if moved_pct is None else round(moved_pct, 2),
+        "typical_days": None if typical is None else round(typical, 2),
+        "avg_day_pct": avg_day_pct,
+        "sessions": dt,
+    }
+
+
 def _position_working(legs: List[Dict[str, Any]], cost: float, value_now: float,
                       pl: float, risk: Optional[float],
                       ext: Dict[str, Any],

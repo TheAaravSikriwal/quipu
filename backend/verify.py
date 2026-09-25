@@ -1716,6 +1716,73 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "price-moving ranking", f"could not run: {exc}"))
 
+section("Why a position is up or down, split into the reasons")
+
+# "The stock moved" is not an answer for an option position, and on
+# some of them it is not even the main term: an iron condor that has
+# barely moved can be down on volatility alone. The split has to add
+# up, and it has to name the part the greeks cannot explain rather
+# than hiding it in one of the others.
+try:
+    import position as POS
+
+    EXP = "2026-12-18"
+
+    def _l(kind, side, strike, entry, qty=1):
+        return {"kind": kind, "side": side, "strike": strike, "qty": qty,
+                "entry": entry, "expiry": EXP}
+
+    raw = [_l("put", "long", 320, 3), _l("put", "short", 330, 6),
+           _l("call", "short", 350, 6), _l("call", "long", 360, 3)]
+    a = POS.analyse(raw, 338.0, 0.26, 0.04)
+    norm = [POS._norm(x) for x in raw]
+    att = POS.attribute(a, open_spot=341.0, open_vol=22.0, sessions=5,
+                        avg_day_pct=1.4, now_vol=26.0, legs=norm, rate=0.04)
+
+    RESULTS.append((att is not None, "a position with a starting point can be explained",
+                    "attributed" if att else "nothing came back"))
+
+    if att:
+        # The rows have to reach the figure they sit under, or the
+        # split is decoration.
+        total = None
+        for ln in att["lines"]:
+            v = float(ln["gives"])
+            op = ln.get("op") or ""
+            if total is None:
+                total = -v if op == "-" else v
+            elif op == "+":
+                total += v
+            elif op == "-":
+                total -= v
+        RESULTS.append((total is not None and abs(total - att["result"]) < 0.02,
+                        "and the reasons add up to the profit",
+                        f'{total:.2f} against {att["result"]}'))
+
+        # Each of the four forces gets its own line when it did
+        # anything, so none of them can hide inside another.
+        text = " ".join(t["label"] for ln in att["lines"] for t in ln["terms"])
+        for word, what in (("share moving", "the share"),
+                           ("time passing", "time"),
+                           ("volatility", "volatility"),
+                           ("day one", "the spread crossed going in")):
+            RESULTS.append((word in text, f"it names {what}",
+                            "present" if word in text else "missing"))
+
+        # The move is given against the share's own history, because
+        # "down 1%" means nothing until you know what a normal day is.
+        RESULTS.append((att.get("typical_days") is not None,
+                        "and measures the move against an average day",
+                        f'{att["moved_pct"]}% is {att["typical_days"]}x '
+                        f'a normal {att["avg_day_pct"]}% day'))
+
+    # Without a starting point it declines rather than guessing one.
+    RESULTS.append((POS.attribute(a, None, None, None) is None,
+                    "with no opening price it explains nothing",
+                    "declines"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "attribution", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

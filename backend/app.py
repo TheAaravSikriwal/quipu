@@ -508,6 +508,36 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     analysis["symbol"] = symbol
     analysis["name"] = quote.get("name")
     analysis["change_pct"] = quote.get("change_pct")
+    # Why it is up or down, if the caller can say where it started.
+    #
+    # The log knows the share price and the volatility a trade was
+    # opened at; the engine does not. Given those it can split the
+    # profit into the reasons for it rather than leaving "the stock
+    # moved" to stand in for four different things.
+    opened = payload.get("opened") or {}
+    if opened.get("spot"):
+        try:
+            rv = _realised_vol(symbol)
+            avg_day = None
+            if rv.get("rv20"):
+                # A day's worth of an annual figure. Comparing a move
+                # to this is the difference between "down 1%" and
+                # "down 1%, which is half a normal day for this share".
+                avg_day = float(rv["rv20"]) / (252 ** 0.5)
+            analysis["attribution"] = position_engine.attribute(
+                analysis,
+                open_spot=float(opened["spot"]),
+                open_vol=opened.get("vol"),
+                sessions=opened.get("sessions"),
+                avg_day_pct=avg_day,
+                now_vol=round(vol * 100, 2),
+                legs=[position_engine._norm(l) for l in legs],
+                rate=rate,
+                div_yield=div,
+            )
+        except Exception:                                  # noqa: BLE001
+            analysis["attribution"] = None
+
     analysis["spot_source"] = spot_source
     analysis["vol_used"] = round(vol * 100, 2)
     analysis["rate"] = round(rate * 100, 3)

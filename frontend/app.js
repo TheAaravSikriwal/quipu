@@ -2154,7 +2154,8 @@ function renderBook(tab) {
             &middot; opened ${whenText(t.opened_at, t.opened)}${t.closed
               ? ` &middot; closed ${whenText(t.closed_at, t.closed)}` : ""}</i></span>
         <span class="bpl ${cls}">${pl == null ? (a === null ? "&hellip;" : "&ndash;")
-          : (pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0)}</span>
+          : calc((pl >= 0 ? "+" : "&minus;") + money(Math.abs(pl), 0),
+                 t.closed ? null : a?.attribution)}</span>
         <span class="bpct ${cls}">${pctOfRisk(pct)}</span>
         <span class="bdays" title="${esc(sb?.consequence || x?.why || "")}">${
           t.closed ? "settled"
@@ -2403,6 +2404,29 @@ function legSummary(legs) {
 /* Price every open trade so the log shows where they stand. One request
  * each, fired together rather than in turn -- a log of six trades
  * should not take six round trips end to end. */
+/* Trading sessions between a date and now.
+ *
+ * Weekends are not decay. A position opened on Friday and looked at
+ * on Monday has aged one session, not three, and telling somebody
+ * their theta ran for three days over a weekend is telling them
+ * something false about where their money went.
+ */
+function sessionsSince(iso) {
+  if (!iso) return 0;
+  const from = new Date(iso);
+  if (Number.isNaN(from.getTime())) return 0;
+  let n = 0;
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  while (d < today) {
+    d.setDate(d.getDate() + 1);
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) n += 1;
+  }
+  return n;
+}
+
 async function markBook(tab) {
   const live = bookOpen(tab.ui.book);
   if (!live.length) return;
@@ -2414,7 +2438,17 @@ async function markBook(tab) {
       const res = await fetch(`${API}/api/position`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: t.symbol, legs: t.legs }),
+        body: JSON.stringify({
+          symbol: t.symbol,
+          legs: t.legs,
+          // Sessions are counted here rather than on the server: the
+          // log is the only thing that knows when this was opened.
+          opened: t.opened_spot ? {
+            spot: t.opened_spot,
+            vol: t.opened_vol,
+            sessions: sessionsSince(t.opened_at || t.opened),
+          } : undefined,
+        }),
       });
       const body = await res.json();
       tab.ui.marks[t.id] = res.ok ? body : undefined;
@@ -2472,9 +2506,16 @@ function commitTrade(tab, id = null) {
     saveBook(u.book);
     return u.book[at].id;
   }
+  // Where it started. Without the share price and the volatility at
+  // the moment of opening, "why is this down" can only ever be
+  // answered with "the stock moved", which for an option position is
+  // frequently not the main reason and sometimes not a reason at all.
+  const openedAt = tab.data || {};
   const trade = {
     id: "t" + Date.now() + Math.random().toString(36).slice(2, 6),
     symbol: u.symbol, legs,
+    opened_spot: at.spot ?? null,
+    opened_vol: at.vol_used ?? null,
     opened: new Date().toISOString().slice(0, 10),
     opened_at: stamp(),
     closed: null,
