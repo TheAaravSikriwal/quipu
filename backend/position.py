@@ -487,10 +487,30 @@ def analyse(raw_legs: List[Dict[str, Any]], spot: float, vol: float,
     risk = abs(ext["max_loss"]) if ext["max_loss"] is not None and ext["max_loss"] < 0 \
         else (abs(cost) if cost > 0 else None)
 
-    curve = []
-    for i in range(61):
-        x = lo + (hi - lo) * i / 60
-        curve.append({"s": round(x, 2), "pl": round(pay(x), 2)})
+    # The corners, not just an even grid.
+    #
+    # A payoff is piecewise linear with a bend at every strike, so the
+    # strikes ARE the shape -- and an evenly spaced grid walks straight
+    # past them. Sixty-one points from 40% of spot to nearly twice it
+    # put about seven inside the twelve-dollar window an iron condor
+    # actually lives in, none of them on a corner, so the drawn line
+    # was a smoothed guess at a shape made entirely of hard angles.
+    #
+    # Every strike, every break-even and today's price are added, plus
+    # a hair either side of each strike so the bend is unmistakable
+    # rather than interpolated across.
+    edges = set()
+    for k in strikes:
+        if lo <= k <= hi:
+            edges.update({k, k - 0.01, k + 0.01})
+    for b in bes:
+        if lo <= b <= hi:
+            edges.add(b)
+    if lo <= spot <= hi:
+        edges.add(spot)
+
+    xs = sorted(edges | {lo + (hi - lo) * i / 60 for i in range(61)})
+    curve = [{"s": round(x, 2), "pl": round(pay(x), 2)} for x in xs]
 
     pop, pop_parts = _chance_of_profit(pay, legs, spot, vol, rate, div_yield, bes)
 

@@ -1933,8 +1933,21 @@ try:
     import collections as _c
 
     root = Path(__file__).resolve().parent.parent / "frontend"
-    files = ["chart.js", "greeks.js", "glossary.js", "working.js",
-             "ledger.js", "app.js"]
+
+    # Read off the page rather than listed here.
+    #
+    # The list used to be hard-coded, so a new script added to
+    # index.html simply fell outside the guard -- and one did:
+    # payoff.js declared PAD and esc, both of which were already
+    # taken, and the console said "Identifier 'PAD' has already been
+    # declared" while this check reported everything fine. A guard
+    # that has to be updated by hand when the thing it guards changes
+    # is a guard that will be wrong exactly when it matters.
+    page = (root / "index.html").read_text(encoding="utf-8")
+    files = _re.findall(r'<script src="[^"]*?/?([\w.-]+\.js)"', page)
+    if not files:
+        files = ["chart.js", "greeks.js", "glossary.js", "working.js",
+                 "ledger.js", "payoff.js", "app.js"]
     seen = _c.defaultdict(list)
     checked = []
     for name in files:
@@ -1952,7 +1965,7 @@ try:
 
     clash = {k: sorted(set(v)) for k, v in seen.items() if len(set(v)) > 1}
     RESULTS.append((not clash, "no name is declared by two scripts",
-                    f"{len(checked)} unwrapped files" if not clash
+                    f"{len(checked)} unwrapped of {len(files)} the page loads" if not clash
                     else "; ".join(f"{k} in {v}" for k, v in list(clash.items())[:2])))
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "global collisions", f"could not run: {exc}"))
@@ -2143,7 +2156,8 @@ try:
                         ("ledger.test.js", "trade-log arithmetic passes"),
                         ("format.test.js", "the formatters name things correctly"),
                         ("expiry.test.js", "the expiry deadline is a real moment"),
-                        ("versus.test.js", "the comparison names the right winner")):
+                        ("versus.test.js", "the comparison names the right winner"),
+                        ("payoff.test.js", "the payoff diagram shows what it should")):
         proc = subprocess.run(
             ["node", str(root / "frontend" / name)],
             capture_output=True, text=True, timeout=60, cwd=str(root))

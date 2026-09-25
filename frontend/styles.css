@@ -2822,3 +2822,51 @@ a { color: inherit; text-decoration: none; }
   max-width: 88ch;
 }
 .tglegs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 9px; }
+
+/* ---- the payoff, drawn as a payoff ----
+   Profit against the price it finishes at. The winning region is
+   tinted apart from the losing one, every strike is marked with the
+   leg that put it there, and both extremes are labelled where they
+   happen -- because "I am down on an iron condor and I do not know
+   why" is answered by seeing the price has walked off the flat top
+   and onto a slope, and a bare line never says that. */
+.poschart { position: relative; }
+.pfsvg { width: 100%; height: 100%; display: block; overflow: visible; }
+.pfempty { padding: 10px 2px; font-size: 11.5px; color: var(--faint); }
+
+/* Money made and money lost: the one place a hue carries a fact. */
+.pfband.win  { fill: color-mix(in srgb, var(--pos) 16%, transparent); }
+.pfband.lose { fill: color-mix(in srgb, var(--neg) 16%, transparent); }
+
+.pfline { fill: none; stroke: var(--text); stroke-width: 1.6; }
+.pfzero { stroke: var(--text2); stroke-width: 1; }
+
+/* Where each leg sits. */
+.pfstrike line { stroke: var(--rule2); stroke-width: 1; stroke-dasharray: 2 4; }
+.pfstrike text {
+  font-family: var(--mono); font-size: 9.5px; fill: var(--text2);
+}
+.pfstrike text.pfleg {
+  font-family: var(--ui); font-size: 8px; letter-spacing: .06em; fill: var(--faint);
+}
+
+/* The two figures the reader came for. */
+.pfext line { stroke-width: 1; stroke-dasharray: 3 5; }
+.pfext text { font-family: var(--ui); font-size: 9.5px; letter-spacing: .04em; }
+.pfext.best line   { stroke: color-mix(in srgb, var(--pos) 55%, transparent); }
+.pfext.best circle { fill: var(--pos); }
+.pfext.best text   { fill: var(--pos); }
+.pfext.worst line   { stroke: color-mix(in srgb, var(--neg) 55%, transparent); }
+.pfext.worst circle { fill: var(--neg); }
+.pfext.worst text   { fill: var(--neg); }
+
+/* Where it stops losing, and where it trades now. */
+.pfbe line { stroke: var(--text2); stroke-width: 1.4; }
+.pfbe text { font-family: var(--mono); font-size: 9px; fill: var(--faint); }
+.pfspot line { stroke: var(--attn); stroke-width: 1; stroke-dasharray: 4 3; }
+.pfspot text {
+  font-family: var(--mono); font-size: 9.5px; fill: var(--attn);
+}
+
+.pfytick text { font-family: var(--mono); font-size: 9.5px; fill: var(--faint); }
+.pfytick.zero text { fill: var(--text2); }

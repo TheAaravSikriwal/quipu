@@ -3264,13 +3264,27 @@ function wirePosition(tab) {
 
   const host = document.querySelector(".poschart");
   if (host && tab.data?.curve?.length) {
-    // A payoff is profit against price, not a price series, so the
-    // reference line is zero rather than a previous close.
-    const c = window.QUIPU_CHART.makeChart(host, {
-      points: tab.data.curve.map((p) => ({ date: p.s.toFixed(2), close: p.pl })),
-      reference: 0,
+    // Drawn as a payoff rather than borrowed from the price-series
+    // chart. That one was handed {date: "342.50", close: -199} --
+    // share prices pretending to be dates -- and could draw the line
+    // but none of the things that make the line mean anything: where
+    // the strikes are, which side of zero you are on, where the most
+    // you can make and lose actually happen.
+    const d = tab.data;
+    host.innerHTML = window.QUIPU_PAYOFF.payoffSvg({
+      curve: d.curve,
+      legs: d.legs,
+      spot: d.spot,
+      breakevens: d.breakevens,
+      maxProfit: d.max_profit,
+      maxLoss: d.max_loss,
+      bestAt: d.best_at,
+      worstAt: d.worst_at,
+      unboundedUp: d.max_profit_unbounded,
+      unboundedDown: d.max_loss_unbounded,
+      width: Math.max(560, Math.round(host.clientWidth || 860)),
+      height: Math.max(240, Math.round(host.clientHeight || 300)),
     });
-    if (c) liveCharts.push(Object.assign(c, { key: "position" }));
   }
 }
 
