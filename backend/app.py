@@ -964,6 +964,12 @@ def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
                     "feed_count": item.get("feed_count"),
                     "published": (got or {}).get("published") or item.get("published"),
                 }),
+                # Which way the headline leans, and the words that decided
+                # it. Shown beside the scorecard; never scored.
+                "lean": news_rss.lean({
+                    "title": (got or {}).get("title") or item.get("title"),
+                    "excerpt": item.get("summary"),
+                }),
                 "full_text": bool(got),
             }
         )

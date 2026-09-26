@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import feedparser
 import requests
+from sources.news_rss import lean as _lean  # noqa: E402
 
 UA = "quipu/0.1 (personal research tool)"
 TIMEOUT = 12
@@ -221,6 +222,8 @@ def headlines(limit_per_feed: int = 20) -> Dict[str, Any]:
         # the one that matters, so a low score buries it rather than
         # dropping it.
         it["loud"] = bool(LOUD.search(it["title"]))
+        # Which way it leans for the market, with the words that decided it.
+        it["lean"] = _lean({"title": it["title"], "excerpt": it.get("summary")})
         it["score"] = it["weight"] * 2 + it["feeds"] + (3 if it["loud"] else 0)
 
     items.sort(key=lambda a: (a["score"], a.get("published") or ""), reverse=True)

@@ -301,6 +301,70 @@ def price_moving(article: Dict[str, Any]) -> Dict[str, Any]:
     return {"score": score, "why": why, "hits": hits}
 
 
+# ---- which way a headline leans ------------------------------------------
+#
+# Shown next to the direction scorecard and never added to it: a list of
+# words cannot read an article, and "Apple falls short of the hype, still
+# sells 80 million phones" defeats any of them. What it can do is sort a
+# pile of headlines into the ones that are plainly good news, plainly bad,
+# and the rest -- and say which words made it decide, so a wrong call is
+# visible as wrong.
+#
+# Longer phrases are matched first and their words consumed, so "cuts
+# price target" is bad news before "price target" gets a chance to be
+# nothing, and "to be acquired" is good news for the company being bought.
+
+_LEAN = [
+    # (phrase regex, +1 bullish / -1 bearish)
+    (r"raises? (?:its |full[- ]year |annual )?(?:guidance|outlook|forecast|price target|dividend)", 1),
+    (r"(?:cuts?|lowers?|slashes?|trims?|reduces?) (?:its |full[- ]year |annual )?(?:guidance|outlook|forecast|price target|dividend)", -1),
+    (r"(?:beats?|tops?|exceeds?|crushes?) (?:estimates|expectations|forecasts|consensus)", 1),
+    (r"(?:miss(?:es|ed)?|falls? short of|trails?) (?:estimates|expectations|forecasts|consensus)", -1),
+    (r"to be acquired|takeover (?:bid|offer)|buyout offer|agrees to be bought", 1),
+    (r"record (?:revenue|sales|profit|earnings|quarter|high)", 1),
+    (r"(?:share )?(?:buyback|repurchase)", 1),
+    (r"fda (?:approval|approves)|wins (?:approval|contract|deal)", 1),
+    (r"short[- ]seller|short report", -1),
+    (r"(?:sec|doj|ftc) (?:probe|investigation|charges|sues)|antitrust|class action", -1),
+    (r"(?:ceo|cfo) (?:resigns|steps down|departs|exits)", -1),
+    (r"upgrades?|upgraded|outperform|overweight|buy rating", 1),
+    (r"downgrades?|downgraded|underperform|underweight|sell rating", -1),
+    (r"surg(?:es?|ed|ing)|soar(?:s|ed|ing)?|jumps?|jumped|rall(?:y|ies|ied)|climbs?|gains?|spikes?|rockets?", 1),
+    (r"plung(?:es?|ed)|tumbl(?:es?|ed)|slid(?:es?)?|sinks?|sank|drops?|dropped|falls?|fell|slumps?|crash(?:es|ed)?|plummets?", -1),
+    (r"beats?|beat", 1),
+    (r"miss(?:es|ed)?", -1),
+    (r"lawsuit|sued|probe|recall(?:s|ed)?|fined?|penalty|warns?|warning|delay(?:s|ed)?|halts?|layoffs?|job cuts|bankruptcy|default", -1),
+    (r"partnership|expands?|strong demand|growth accelerates", 1),
+    (r"weak demand|slowdown|tariffs?|ban(?:s|ned)?", -1),
+]
+_LEAN_RE = [(re.compile(r"\b(?:" + p + r")\b", re.I), v) for p, v in _LEAN]
+_NEGATE = re.compile(r"\b(?:not|no|never|fails? to|failed to|without)\s+(?:\w+\s+){0,1}$", re.I)
+
+
+def lean(article: Dict[str, Any]) -> Dict[str, Any]:
+    """Bullish, bearish or neutral, and the words that decided it."""
+    text = f'{article.get("title") or ""}. {article.get("excerpt") or ""}'
+    taken = [False] * len(text)
+    hits: List[Dict[str, Any]] = []
+    for rx, v in _LEAN_RE:
+        for m in rx.finditer(text):
+            if any(taken[m.start():m.end()]):
+                continue
+            for i in range(m.start(), m.end()):
+                taken[i] = True
+            sign = v
+            if _NEGATE.search(text[max(0, m.start() - 24):m.start()]):
+                sign = -v
+            hits.append({"words": m.group(0).lower(), "reads": sign,
+                         "headline": m.start() < len(article.get("title") or "")})
+    # The headline outweighs the excerpt: it is what the story is about.
+    net = sum(h["reads"] * (2 if h["headline"] else 1) for h in hits)
+    reads = "bullish" if net > 0 else "bearish" if net < 0 else "neutral"
+    return {"reads": reads, "net": net,
+            "words": [("+" if h["reads"] > 0 else "-") + h["words"] for h in hits][:5],
+            "mixed": any(h["reads"] > 0 for h in hits) and any(h["reads"] < 0 for h in hits)}
+
+
 def _hours_since(iso: Optional[str]) -> Optional[float]:
     if not iso:
         return None

@@ -1945,6 +1945,29 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "IV history", f"could not run: {exc}"))
 
+section("News is tagged by which way it leans, and says why")
+
+# Tagged, never scored: a word list cannot read an article. What it must
+# get right is the plain cases, the words it decided on, and the traps --
+# a cut price target, a negated approval, a takeover of the company itself.
+try:
+    from sources.news_rss import lean as _lean
+    for title, want in (("Apple beats estimates, raises guidance", "bullish"),
+                        ("Nvidia misses expectations as growth slows", "bearish"),
+                        ("Analyst cuts price target on Tesla", "bearish"),
+                        ("Morgan Stanley upgrades Microsoft to overweight", "bullish"),
+                        ("Drug fails to win FDA approval", "bearish"),
+                        ("Acme to be acquired in $4bn takeover", "bullish"),
+                        ("Why I am still holding Acme", "neutral"),
+                        ("Stock surges; CEO steps down", "neutral")):
+        got = _lean({"title": title})
+        RESULTS.append((got["reads"] == want, f"'{title[:40]}' is {want}",
+                        f"{got['reads']} {got['words']}"))
+    RESULTS.append((_lean({"title": "Stock surges; CEO steps down"})["mixed"],
+                    "and a headline with both says it is mixed", "mixed"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "news lean", f"could not run: {exc}"))
+
 section("The curriculum's XYZ, end to end, gives the curriculum's numbers")
 
 # The curriculum carries one hypothetical stock through every step and
