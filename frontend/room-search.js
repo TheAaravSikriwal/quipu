@@ -2557,6 +2557,8 @@ function packGrid() {
   // Every grid on the page -- the company's panels and the curriculum's
   // squares below the bar -- packed by the same rules.
   document.querySelectorAll(".grid").forEach(packOne);
+  // Every square is refilled at its new size.
+  window.QUIPU_FILL?.tiles();
   window.QUIPU_COURSE?.redraw?.();
 }
 
@@ -3599,6 +3601,8 @@ function setTileBody(id) {
   // with the body -- otherwise a repaint shows new numbers under an old label.
   const badge = tile.querySelector("h3 .badge");
   if (badge) badge.innerHTML = BADGES[id] || "";
+  // New contents, so the square is filled again.
+  window.QUIPU_FILL?.one(tile);
 }
 
 /* Everything a TILE BODY can contain, wired inside one given root.
@@ -3738,6 +3742,8 @@ function showSearch(tab, view, scroll) {
   drawStoryArrows(tab);
   view.scrollTop = scroll;
   wireDashboard(tab);
+  // After the glossary and the charts, which both change what a square holds.
+  window.QUIPU_FILL?.tiles();
   window.QUIPU_COURSE?.mount(tab);
 }
 

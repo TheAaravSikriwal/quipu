@@ -3203,3 +3203,8 @@ a { color: inherit; text-decoration: none; }
  * screen, rather than a fixed box with the bottom third empty. */
 .zoom:has(.cg-zoom) { height: auto; max-height: min(92vh, 1000px); }
 .zoom:has(.cg-zoom) > .inner { overflow: auto; }
+
+/* Filled squares (fill.js): the zoom is measured as it is set, so nothing
+ * inside may animate its size. */
+.fill, .fill * { transition: none !important; }
+.pcard > .fill { display: flex; flex-direction: column; gap: 5px; }

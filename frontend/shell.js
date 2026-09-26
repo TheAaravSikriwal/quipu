@@ -331,6 +331,8 @@ function render(keepScroll = false) {
   gloss(view);
   v.wire(tab);
   view.scrollTop = scroll;
+  // Whatever squares this room drew are filled to their edges.
+  window.QUIPU_FILL?.all();
 }
 
 /* ---- wiring ---------------------------------------------------------- */
