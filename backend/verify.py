@@ -1524,13 +1524,27 @@ try:
     RESULTS.append((not missing, "each has a hue, a tab rule and a dot",
                     f"all {len(rooms)}" if not missing else "; ".join(missing[:4])))
 
-    # Every room must be openable, or a nav button is a dead button.
-    opener = _re.search(r"function openRoom\(which\) \{([\s\S]*?)\n\}", js)
-    body = opener.group(1) if opener else ""
-    dead = [r for r in sorted(rooms) if r != "search" and '"' + r + '"' not in body]
-    RESULTS.append((bool(opener) and not dead,
-                    "and every one of them can be opened",
-                    "all reachable" if not dead else ", ".join(dead)))
+    # Every room must be openable and drawable, or a nav button is a
+    # dead button. Each room registers itself with room("id", {...});
+    # a registration needs a way to open a tab, and either draw+wire or
+    # a show of its own.
+    regs = dict(_re.findall(r'^room\("(\w+)", \{([\s\S]*?)^\}\);', js, _re.M))
+    dead = []
+    for r in sorted(rooms):
+        body = regs.get(r)
+        if body is None:
+            dead.append(r + ": not registered")
+            continue
+        has = lambda k: _re.search(r"^\s{2}" + k + r":", body, _re.M)
+        if not has("open"):
+            dead.append(r + ": no open")
+        if not (has("show") or (has("draw") and has("wire"))):
+            dead.append(r + ": cannot be drawn")
+    stray = sorted(set(regs) - rooms)
+    RESULTS.append((not dead and not stray,
+                    "and every one of them can be opened and drawn",
+                    "all registered" if not dead and not stray
+                    else ", ".join(dead + [s + ": not in ROOMS" for s in stray])))
 
     # Four DIFFERENT colours, which is the entire point of colouring them.
     hues = _re.findall(r"--room-(\w+):\s*(#[0-9A-Fa-f]{6})", css)

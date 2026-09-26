@@ -791,3 +791,20 @@ function wireBookRows(tab) {
     };
   });
 }
+
+/* ---- the room ------------------------------------------------------ */
+
+room("log", {
+  open: newLogTab,
+  draw: renderLogTab,
+  wire: wireLog,
+  // The log has one piece of state worth stepping back through: which
+  // trade, if any, has its closing form open.
+  place: (u) => ({ closing: u.closing }),
+  resume: (tab) => markBook(tab),
+  name: () => "Trade log",
+  badge: (tab) => {
+    const n = bookOpen(tab.ui.book || []).length;
+    return n ? `${n} open` : "";
+  },
+});

@@ -36,6 +36,30 @@ const ROOMS = {
   world:    { label: "World",     what: "the market as a whole, and why" },
 };
 
+/* What each room does, filled in by the room's own file.
+ *
+ * Everything the frame needs to know about a room -- how to open one,
+ * how to draw it, what to wire once it is drawn, what is worth keeping
+ * in the back/forward trail -- is one entry, registered at the bottom
+ * of that room's file with room(). Adding a room or retiring one is
+ * that entry plus a line in ROOMS, instead of a branch in each of the
+ * five places that used to ask "which kind of tab is this".
+ *
+ *   open()               make a tab of this room and return it
+ *   draw(tab)            the room's HTML
+ *   wire(tab)            handlers, once that HTML is on the page
+ *   show(tab, view, y)   optional: replaces draw+wire when a room needs
+ *                        more than that (the search room packs a grid
+ *                        and mounts charts)
+ *   place(ui)            what the back/forward trail remembers
+ *   resume(tab)          what to redo after stepping back to a place
+ *   name(tab)            the words on its tab when there is no ticker
+ *   badge(tab)           optional small text after the name
+ */
+const VIEWS = {};
+function room(id, view) { VIEWS[id] = view; }
+const roomOf = (tab) => tab?.kind || "search";
+
 /* Going somewhere else, from anywhere.
  *
  * Every room used to be reachable only from the front page, so getting
@@ -61,15 +85,7 @@ function roomNav(here) {
 
 /* One way in to each room, so "open a new tab" is decided once. */
 function openRoom(which) {
-  if (which === "finder") {
-    (FINDER_RANKINGS.length ? Promise.resolve() : loadRankings())
-      .then(() => newFinderTab());
-    return;
-  }
-  if (which === "world") return newWorldTab();
-  if (which === "log") return newLogTab();
-  if (which === "position") return newPositionTab();
-  return newTab();                       // search: a fresh blank tab
+  return (VIEWS[which] || VIEWS.search).open();
 }
 
 function wireRooms() {
@@ -104,19 +120,8 @@ const current = () => state.tabs.find((t) => t.id === state.active);
  * screen. Data, chains and analyses are deliberately left out -- going
  * back should return you to a view, not to a stale copy of the numbers
  * it was showing an hour ago. */
-const PLACE = {
-  position: (u) => ({ view: u.view, route: u.route, editing: u.editing,
-                      preset: u.preset, symbol: u.symbol,
-                      legs: JSON.stringify(u.legs || []) }),
-  finder: (u) => ({ ranking: u.ranking, study: u.study }),
-  // The log has one piece of state worth stepping back through: which
-  // trade, if any, has its closing form open.
-  log: (u) => ({ closing: u.closing }),
-  world: (u) => ({ group: u.group }),
-  ticker: (u) => ({ zoom: u.zoom }),
-};
-
-const placeOf = (tab) => (PLACE[tab.kind] || PLACE.ticker)(tab.ui || {});
+// What each room remembers is its own business: see `place` in VIEWS.
+const placeOf = (tab) => (VIEWS[roomOf(tab)]?.place || (() => ({})))(tab.ui || {});
 const samePlace = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Record where the tab is now, if it has moved. */
@@ -146,8 +151,7 @@ function step(tab, delta) {
   // analysis of them did not, and showing the old one would be showing
   // numbers for a different trade.
   render(true);
-  if (tab.kind === "log") markBook(tab);
-  else if (tab.kind === "position" && tab.ui.legs?.length) analysePosition(tab);
+  VIEWS[roomOf(tab)]?.resume?.(tab);
 }
 
 const canStep = (tab, d) => {
@@ -243,20 +247,15 @@ function renderTabs() {
     const el = document.createElement("div");
     // One class per room, so a glance at the strip says what kind of
     // thing each tab is before you read the name on it.
-    const room = tab.kind || "search";
+    const room = roomOf(tab);
+    const v = VIEWS[room] || {};
     el.className = `tab t-${room}` + (tab.id === state.active ? " active" : "");
     const q = tab.data?.quote;
     const chg = q?.change_pct;
     el.innerHTML =
       (tab.status === "ready" ? `<span class="livedot ${tab.live ? "" : "off"}"></span>` : "") +
-      `<span class="sym">${esc(tab.symbol
-        || (room === "finder" ? "Finder"
-          : room === "world" ? "World"
-          : room === "log" ? "Trade log"
-          : room === "position" ? (tab.ui.symbol ? tab.ui.symbol + " workshop" : "Workshop")
-          : "New search"))}</span>` +
-      (room === "log" && bookOpen(tab.ui.book || []).length
-        ? `<span class="chg dim">${bookOpen(tab.ui.book).length} open</span>` : "") +
+      `<span class="sym">${esc(tab.symbol || v.name?.(tab) || ROOMS[room]?.label || "")}</span>` +
+      (v.badge?.(tab) ? `<span class="chg dim">${esc(v.badge(tab))}</span>` : "") +
       (tab.status === "loading" ? `<span class="chg dim">...</span>` : "") +
       (q?.price ? `<span class="px">${money(q.price)}</span>` : "") +
       (chg !== undefined && chg !== null ? `<span class="chg ${sign(chg)}">${signed(chg, 2)}</span>` : "") +
@@ -326,65 +325,12 @@ function render(keepScroll = false) {
 
   if (!tab || tab.status === "blank") { view.innerHTML = renderLauncher(); wireLauncher(); return; }
 
-  if (tab.kind === "world") {
-    view.innerHTML = renderWorld(tab);
-    gloss(view);
-    wireWorld(tab);
-    view.scrollTop = scroll;
-    return;
-  }
-
-  if (tab.kind === "log") {
-    view.innerHTML = renderLogTab(tab);
-    gloss(view);
-    wireLog(tab);
-    view.scrollTop = scroll;
-    return;
-  }
-
-  if (tab.kind === "position") {
-    view.innerHTML = renderPosition(tab);
-    gloss(view);
-    wirePosition(tab);
-    view.scrollTop = scroll;
-    return;
-  }
-
-  if (tab.kind === "finder") {
-    view.innerHTML = renderFinder(tab);
-    gloss(view);
-    wireFinder(tab);
-    view.scrollTop = scroll;
-    return;
-  }
-
-  if (tab.status === "loading") {
-    view.innerHTML = `<div class="loading"><div class="spinner"></div>
-      <div>Gathering everything on <b>${esc(tab.symbol)}</b></div>
-      <div class="stage">price &middot; options &middot; financials &middot; filings &middot; ownership &middot; news &middot; cross-referencing</div></div>`;
-    return;
-  }
-
-  if (tab.status === "error") {
-    view.innerHTML = `<div class="empty"><div class="down">Could not load ${esc(tab.symbol)}</div>
-      <div class="stage">${esc(tab.error)}</div></div>`;
-    return;
-  }
-
-  view.innerHTML = renderDashboard(tab.data, tab);
-  // The entrance stagger runs on a genuine first paint only, never on the
-  // re-renders that a refresh or a toggle causes.
-  if (tab.ui.introDone) document.querySelector(".grid")?.classList.remove("intro");
-  else { document.querySelector(".grid")?.classList.add("intro"); tab.ui.introDone = true; }
-  packGrid();
-  watchGrid();
+  const v = VIEWS[roomOf(tab)];
+  if (v.show) { v.show(tab, view, scroll); return; }
+  view.innerHTML = v.draw(tab);
   gloss(view);
-  mountCharts(tab);
-  mountZoomCharts(tab);
-  if (tab.ui.zoom) wireZoom(tab);
-  drawStoryArrows(tab);
+  v.wire(tab);
   view.scrollTop = scroll;
-  wireDashboard(tab);
 }
 
 /* ---- wiring ---------------------------------------------------------- */

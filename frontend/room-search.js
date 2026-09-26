@@ -3702,3 +3702,45 @@ function reWireGreeksTile(tab) {
     repaintGreeks(tab);
   });
 }
+
+/* ---- the room ------------------------------------------------------ */
+
+/* Search draws more than HTML: the grid is packed by hand, the charts
+ * are mounted into it, and the story arrows are drawn over the result,
+ * so it takes the whole of the showing rather than just draw and wire. */
+function showSearch(tab, view, scroll) {
+  if (tab.status === "loading") {
+    view.innerHTML = `<div class="loading"><div class="spinner"></div>
+      <div>Gathering everything on <b>${esc(tab.symbol)}</b></div>
+      <div class="stage">price &middot; options &middot; financials &middot; filings &middot; ownership &middot; news &middot; cross-referencing</div></div>`;
+    return;
+  }
+
+  if (tab.status === "error") {
+    view.innerHTML = `<div class="empty"><div class="down">Could not load ${esc(tab.symbol)}</div>
+      <div class="stage">${esc(tab.error)}</div></div>`;
+    return;
+  }
+
+  view.innerHTML = renderDashboard(tab.data, tab);
+  // The entrance stagger runs on a genuine first paint only, never on the
+  // re-renders that a refresh or a toggle causes.
+  if (tab.ui.introDone) document.querySelector(".grid")?.classList.remove("intro");
+  else { document.querySelector(".grid")?.classList.add("intro"); tab.ui.introDone = true; }
+  packGrid();
+  watchGrid();
+  gloss(view);
+  mountCharts(tab);
+  mountZoomCharts(tab);
+  if (tab.ui.zoom) wireZoom(tab);
+  drawStoryArrows(tab);
+  view.scrollTop = scroll;
+  wireDashboard(tab);
+}
+
+room("search", {
+  open: () => newTab(),                  // a fresh blank tab
+  show: showSearch,
+  place: (u) => ({ zoom: u.zoom }),
+  name: () => "New search",
+});

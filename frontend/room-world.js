@@ -146,3 +146,13 @@ function wireWorld(tab) {
     b.onclick = () => { tab.ui.group = b.dataset.wgroup; render(true); };
   });
 }
+
+/* ---- the room ------------------------------------------------------ */
+
+room("world", {
+  open: newWorldTab,
+  draw: renderWorld,
+  wire: wireWorld,
+  place: (u) => ({ group: u.group }),
+  name: () => "World",
+});

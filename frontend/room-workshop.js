@@ -1698,3 +1698,18 @@ function wirePosition(tab) {
     });
   }
 }
+
+/* ---- the room ------------------------------------------------------ */
+
+room("position", {
+  open: newPositionTab,
+  draw: renderPosition,
+  wire: wirePosition,
+  place: (u) => ({ view: u.view, route: u.route, editing: u.editing,
+                   preset: u.preset, symbol: u.symbol,
+                   legs: JSON.stringify(u.legs || []) }),
+  // The legs came back, the analysis of them did not, and showing the
+  // old one would be showing numbers for a different trade.
+  resume: (tab) => { if (tab.ui.legs?.length) analysePosition(tab); },
+  name: (tab) => (tab.ui.symbol ? tab.ui.symbol + " workshop" : "Workshop"),
+});

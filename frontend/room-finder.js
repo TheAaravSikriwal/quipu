@@ -183,3 +183,16 @@ function wireFinder(tab) {
     loadScreen(tab);
   };
 }
+
+/* ---- the room ------------------------------------------------------ */
+
+room("finder", {
+  // The rankings are the finder's menu; fetch them first so the tab
+  // never opens onto an empty choice.
+  open: () => (FINDER_RANKINGS.length ? Promise.resolve() : loadRankings())
+    .then(() => newFinderTab()),
+  draw: renderFinder,
+  wire: wireFinder,
+  place: (u) => ({ ranking: u.ranking, study: u.study }),
+  name: () => "Finder",
+});
