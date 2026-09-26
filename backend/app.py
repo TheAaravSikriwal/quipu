@@ -35,6 +35,8 @@ import working as show_working  # noqa: E402
 from screener import backtest as screen_backtest, rank as screen_rank, store as screen_store, universe as screen_universe  # noqa: E402
 from sources import deep, events, holdings, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
 from sources import world as world_news  # noqa: E402
+from sources import alpaca  # noqa: E402
+import ivhistory  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -702,6 +704,42 @@ def by_target(symbol: str, price: float, expiry: str = "") -> Dict[str, Any]:
     out["trading_days"] = exp.get("trading_days")
     out["vol_used"] = round(vol * 100, 2)
     return out
+
+
+@app.get("/api/settings")
+def settings() -> Dict[str, Any]:
+    """What the optional sources are doing."""
+    return {"alpaca": alpaca.status()}
+
+
+@app.post("/api/settings/alpaca")
+def settings_alpaca(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Switch the Alpaca history on or off. It is extra, never required."""
+    alpaca.set_enabled(bool(payload.get("enabled")))
+    return {"alpaca": alpaca.status()}
+
+
+@app.get("/api/ivhistory/{symbol}")
+def iv_history(symbol: str, wait: float = 0.0) -> Dict[str, Any]:
+    """A year of this stock's options, rebuilt from Alpaca's traded prices.
+
+    Returns the three series and what the curriculum reads off them:
+    IV Rank and Percentile (Lesson 1.2), the put/call z-score (2.8) and
+    where the 25-delta risk reversal sits against its own year (2.9).
+    Optional: with Alpaca off or absent this says so, and nothing that
+    depends on it is invented.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 12:
+        raise HTTPException(status_code=400, detail="invalid symbol")
+    h = ivhistory.get(symbol, options.risk_free_rate(), _div_yield(symbol),
+                      wait=min(max(wait, 0.0), 30.0))
+    if h.get("status") == "ready":
+        h = {**h,
+             "iv_rank": ivhistory.rank(h["iv30"]),
+             "rr25_norm": ivhistory.zscore(h["rr25"], 252),
+             "pc_norm": ivhistory.zscore(h["pc"])}
+    return h
 
 
 @app.get("/api/world")

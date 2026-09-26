@@ -1875,6 +1875,74 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "open interest", f"could not run: {exc}"))
 
+section("IV history: rebuilt the way the curriculum defines it, and optional")
+
+# Offline. The history itself comes from Alpaca, but what is read off it
+# -- rank, percentile, z-score, which expiries a day uses -- is plain
+# arithmetic, and is checked here against the curriculum's own numbers.
+try:
+    import ivhistory as IVH
+    from sources import alpaca as ALP
+    from datetime import date as _d
+
+    # Lesson 1.2: IV 40%, 52-week low 22%, high 55% -> IV Rank 54.5.
+    ser = [{"date": f"d{i}", "value": v} for i, v in
+           enumerate([0.22] + [0.30] * 58 + [0.55] + [0.40])]
+    rk = IVH.rank(ser)
+    check("IV Rank matches Lesson 1.2's worked example", round(rk["rank"], 1), 54.5, 1e-9)
+    # 59 of the 60 prior days sat below 40% (all but the 55% day).
+    check("IV Percentile counts the days below today", round(rk["percentile"], 2),
+          round(59 / 60 * 100, 2), 1e-9)
+    RESULTS.append((IVH.rank(ser[:30]) is None, "fewer than 60 sessions ranks nothing",
+                    "declines"))
+
+    # Lesson 2.8's z-score: (today - average) / stdev of the days before.
+    zs = IVH.zscore([{"date": str(i), "value": v} for i, v in
+                     enumerate([0.6, 0.8] * 15 + [1.1])])
+    check("put/call z-score is against the days before today",
+          round(zs["z"], 4), round((1.1 - 0.7) / (0.1 * (30 / 29) ** 0.5), 4), 1e-9)
+
+    # Standard monthlies, including the one the market is shut for.
+    for got, want, what in ((IVH._third_friday(2026, 10).isoformat(), "2026-10-16",
+                             "third Friday of October 2026"),
+                            (IVH._third_friday(2025, 4).isoformat(), "2025-04-17",
+                             "Good Friday moves April 2025's expiry to Thursday")):
+        RESULTS.append((got == want, what, f"got {got}  want {want}"))
+
+    # 30 days is bracketed; a near expiry inside a week is not used.
+    ms = IVH._monthlies(_d(2026, 1, 1), _d(2026, 6, 30))
+    pair = IVH._pair(_d(2026, 1, 2), ms)
+    RESULTS.append((pair and (pair[0] - _d(2026, 1, 2)).days < 30 <= (pair[-1] - _d(2026, 1, 2)).days,
+                    "the two expiries used bracket 30 days",
+                    " / ".join(p.isoformat() for p in pair)))
+    pair = IVH._pair(_d(2026, 1, 12), ms)
+    RESULTS.append((len(pair) == 1 and (pair[0] - _d(2026, 1, 12)).days >= 30,
+                    "a near expiry under a week out is skipped",
+                    " / ".join(p.isoformat() for p in pair)))
+
+    # Optional: switched off, it declines rather than building.
+    was = ALP._SETTINGS.read_text(encoding="utf-8") if ALP._SETTINGS.exists() else None
+    try:
+        ALP.set_enabled(False)
+        off = IVH.get("AAPL", 0.04, 0.0)
+        RESULTS.append((off["status"] == "off", "switched off, nothing is fetched",
+                        off.get("why") or off["status"]))
+    finally:
+        if was is None:
+            ALP._SETTINGS.unlink(missing_ok=True)
+        else:
+            ALP._SETTINGS.write_text(was, encoding="utf-8")
+
+    # Only ever paper keys and read-only hosts.
+    src = (Path(__file__).resolve().parent / "sources" / "alpaca.py").read_text(encoding="utf-8")
+    RESULTS.append(("ALPACA_LIVE" not in src.replace("Live-account", "")
+                    and "https://api.alpaca.markets" not in src
+                    and "/v2/orders" not in src,
+                    "the client reads no live keys and touches no order endpoint",
+                    "paper, data only"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "IV history", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.
