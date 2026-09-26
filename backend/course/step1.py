@@ -184,8 +184,14 @@ def iv_environment(atm: Dict[str, Any], closes: List[float],
                            formula="IV Percentile = days below today's IV / total days x 100"))
 
     if h:
+        h60 = hv(closes, 60)
         out.append(metric(
             "hv20", "1.2", "Historical volatility, 20 days", h["value"], pct(h["value"]),
+            compare=[{"label": "IV now, at the money", "show": pct(iv_now)}]
+            + ([{"label": "HV over 60 days", "show": pct(h60["value"]),
+                 "reads": None}] if h60 else [])
+            + ([{"label": "the last month against the last quarter",
+                 "show": "calmer" if h["value"] < h60["value"] else "busier"}] if h60 else []),
             working=sum_of(h["value"], [
                 line("", term("stdev of the last 20 daily log returns", h["daily_sd"], 5)),
                 line("x", term("sqrt(252 trading days)", math.sqrt(252), 3)),
@@ -280,7 +286,9 @@ def catalysts(earnings: Dict[str, Any], market: List[Dict[str, Any]],
     big = [e for e in market if (e.get("weight") or 0) >= 2 and 0 <= (e.get("days") or 99) <= dte]
     out.append(metric(
         "market_events", "1.3", "Market-wide events before expiry", len(big), str(len(big)),
-        compare=[{"label": e["date"], "show": e["title"]} for e in big[:6]],
+        compare=[{"label": e["date"], "show": e["title"]} for e in big[:6]]
+        or [{"label": "window checked", "show": f"today to {exp} ({dte} days)"},
+            {"label": "counted", "show": "Fed decisions, CPI, jobs, GDP and other heavy releases"}],
         means=("Scheduled releases that move everything, not just this stock." if big else
                "Nothing heavy on the calendar before this expiry."),
         extra={"events": big[:6]},
@@ -293,12 +301,14 @@ def catalysts(earnings: Dict[str, Any], market: List[Dict[str, Any]],
 def unusual(board: Dict[str, Any]) -> Dict[str, Any]:
     ua = board.get("unusual_activity") or []
     top = sorted(ua, key=lambda r: -(r.get("vol_oi_ratio") or 0))[:4]
+    checked = len(board.get("calls") or []) + len(board.get("puts") or [])
     return metric(
         "unusual", "1.4", "Unusual options activity", len(ua), str(len(ua)),
         formula="Flag: volume > open interest at a strike",
         compare=[{"label": f"${fmt(r['strike'])} {r['type']}",
                   "show": f"{r['volume']:,} vs {r['open_interest']:,} open ({fmt(r['vol_oi_ratio'], 1)}x)",
-                  "reads": BULL if r["type"] == "call" else BEAR} for r in top],
+                  "reads": BULL if r["type"] == "call" else BEAR} for r in top]
+        or [{"label": f"contracts checked on {board['expiry']}", "show": f"{checked:,}, none flagged"}],
         means=("A source of ideas to research, never a trade to copy: you cannot see whether "
                "it is a hedge, one leg of a spread, or small next to the trader's book."),
     )

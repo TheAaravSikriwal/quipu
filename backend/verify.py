@@ -2106,6 +2106,87 @@ except Exception as exc:                                   # noqa: BLE001
     import traceback as _tb
     RESULTS.append((False, "XYZ end to end", f"could not run: {exc} {_tb.format_exc().splitlines()[-3][:80]}"))
 
+section("All four steps run offline, and the page can draw what they give")
+
+# The whole chain on XYZ, with a seeded two-year price history standing in
+# for Yahoo and Alpaca switched off. Every step must come back, and the
+# result is written where frontend/course.test.js draws it -- so the page
+# is tested against what the backend produces today, not a saved copy of
+# what it used to.
+try:
+    import json as _json
+    import random as _rnd
+    from datetime import timedelta as _td2
+    import course as _course
+    from course import step1 as C1, step2 as C2, step3 as C3, step4 as C4
+    from sources import options as _O2
+
+    today = _O2.market_now().date()
+    rng = _rnd.Random(7)
+
+    def _series(start, drift, vol, n=500):
+        d, c, dates = start, [], []
+        day = today - _td2(days=int(n * 1.45))
+        while len(c) < n:
+            day += _td2(days=1)
+            if day.weekday() >= 5:
+                continue
+            d *= _m.exp(drift + vol * rng.gauss(0, 1))
+            c.append(d)
+            dates.append(day.isoformat())
+        return {"date": dates, "close": c, "open": c, "high": [x * 1.006 for x in c],
+                "low": [x * 0.994 for x in c], "volume": [1e6 * (0.7 + rng.random()) for _ in c]}
+
+    daily = _series(62.0, 0.0010, 0.018)
+    k = 100.0 / daily["close"][-1]
+    for f_ in ("close", "open", "high", "low"):
+        daily[f_] = [x * k for x in daily[f_]]
+    spy = _series(420.0, 0.0004, 0.010)
+    spy["date"] = daily["date"]
+    hist = [{"date": daily["date"][-1 - 63 * i], "surprise_pct": 2.0 + i} for i in range(1, 8)]
+    ctx = {"symbol": "XYZ", "rate": 0.045, "div": 0.0, "daily": daily, "spy": spy,
+           "all_expiries": [exp], "board30": {**xyz, "stats": {"put_call_volume_ratio": 0.65, "put_volume": 650,
+                                                                "call_volume": 1000, "put_oi": 700, "call_oi": 1000}},
+           "board_for": lambda _e: xyz, "earnings": {"next_date": (today + _td2(days=12)).isoformat(), "history": hist},
+           "market_events": [], "info": {"trailingPE": 24.0}, "eps": None, "peers": {"peers": []}, "scan": None,
+           "ivh": {"status": "off", "why": "switched off"}, "implied_event": None, "ex_dividend": None,
+           "spy_price": spy["close"][-1]}
+    s1 = C1.build(ctx)
+    s2 = C2.build(ctx, s1)
+    ctx["beta"] = {"value": next(m for sec in s2["sections"] for m in sec["metrics"] if m["id"] == "rs").get("beta")}
+    s3 = C3.build(ctx, s1, s2)
+    s4 = C4.build(ctx, s2, s3, 25000, 2.0)
+    fx = {"symbol": "XYZ", "available": True, "spot": 100.0, "iv_history": {"status": "off", "why": "switched off"},
+          "steps": {"1": s1, "2": s2, "3": s3, "4": s4}}
+    RESULTS.append((all(s.get("available", True) for s in (s1, s2)) and bool(s3.get("name"))
+                    and ("thesis" in s4 or s3.get("strategy") == "none"),
+                    "all four steps run on XYZ with no network", f"{s3.get('name')}: {s2['output']['direction']}"))
+    # The same page, but with the curriculum's own XYZ call from the answer
+    # key above -- bullish, tempered to defined risk -- so Steps 3 and 4
+    # are drawn with a trade in them whatever the seeded history decides.
+    s2t = {**s2, "scorecard": card, "output": v}
+    s3t = C3.build(ctx, s1, s2t)
+    s4t = C4.build(ctx, s2t, s3t, 25000, 2.0)
+    RESULTS.append((s3t.get("strategy") == "bull_call" and "thesis" in s4t,
+                    "and with XYZ's own bullish call, a full trade", s3t.get("name")))
+    fx_trade = {**fx, "steps": {"1": s1, "2": s2t, "3": s3t, "4": s4t}}
+    metrics = [m for s in (s1, s2) for sec in s["sections"] for m in sec["metrics"]]
+    gone = [m["id"] for m in metrics if not m["available"]]
+    RESULTS.append((set(gone) >= {"iv_rank", "iv_pct", "pc", "skew"},
+                    "with Alpaca off, exactly the history-dependent numbers decline",
+                    ", ".join(gone)))
+    RESULTS.append((all(m.get("means") for m in metrics),
+                    "every number says what it means", f"{len(metrics)} numbers"))
+    RESULTS.append((all(m.get("against") or m.get("compare") or not m["available"] for m in metrics),
+                    "and every available one is compared with something",
+                    ", ".join(m["id"] for m in metrics if m["available"] and not (m.get("against") or m.get("compare"))) or "all"))
+    out_path = Path(__file__).resolve().parent / "cache" / "course_fixture.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(_json.dumps({"as_computed": fx, "with_trade": fx_trade}, default=str), encoding="utf-8")
+except Exception as exc:                                   # noqa: BLE001
+    import traceback as _tb
+    RESULTS.append((False, "offline course", f"could not run: {exc} {_tb.format_exc().splitlines()[-3][:90]}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.
@@ -2553,7 +2634,8 @@ try:
                         ("expiry.test.js", "the expiry deadline is a real moment"),
                         ("versus.test.js", "the comparison names the right winner"),
                         ("payoff.test.js", "the payoff diagram shows what it should"),
-                        ("layout.test.js", "the layout names real panels, once each")):
+                        ("layout.test.js", "the layout names real panels, once each"),
+                        ("course.test.js", "the guide draws every number the steps give it")):
         proc = subprocess.run(
             ["node", str(root / "frontend" / name)],
             capture_output=True, text=True, timeout=60, cwd=str(root))
