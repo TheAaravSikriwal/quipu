@@ -58,16 +58,20 @@ console.log(`  (hidden, registered but not in the layout: ${hidden.length ? hidd
 
 section("The search page draws both halves, in the order given");
 
-ok("SEARCH_ORDER names only the guide and the tiles",
-   P.SEARCH_ORDER.every((k) => k === "guide" || k === "tiles"), P.SEARCH_ORDER.join(", "));
+ok("SEARCH_ORDER names only the page's parts",
+   P.SEARCH_ORDER.every((k) => ["tiles", "bar", "steps"].includes(k)), P.SEARCH_ORDER.join(", "));
+ok("the steps come after the company's panels, with the bar between",
+   P.SEARCH_ORDER.indexOf("tiles") < P.SEARCH_ORDER.indexOf("bar")
+   && P.SEARCH_ORDER.indexOf("bar") < P.SEARCH_ORDER.indexOf("steps"), P.SEARCH_ORDER.join(" > "));
 
 section("The search rail is the layout, not a second copy of it");
 
-const groups = P.LAYOUT.search.map((g) => g.id);
+const bandsOf = [...P.LAYOUT.search, ...P.LAYOUT.steps];
+const groups = bandsOf.map((g) => g.id);
 ok("group ids are unique", new Set(groups).size === groups.length, groups.join(", "));
 ok("the rail has exactly the layout's groups",
    JSON.stringify(P.REGIONS.map((r) => r.keys)) ===
-   JSON.stringify(P.LAYOUT.search.map((g) => g.panels)));
+   JSON.stringify(bandsOf.map((g) => g.panels)));
 
 section("A room survives any panel being taken away");
 

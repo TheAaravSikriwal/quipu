@@ -271,7 +271,10 @@ const CLASS_NOTE = {
  */
 // Read off the layout, so the rail's regions and the order the tiles
 // are drawn in are one list rather than two that have to agree.
-const REGIONS = LAYOUT.search.map((g) => ({ id: g.id, label: g.label, keys: g.panels }));
+// The curriculum's four steps are regions too, after the page's own, so
+// the rail and the packer treat them as the four bands they are.
+const REGIONS = [...LAYOUT.search, ...(LAYOUT.steps || [])]
+  .map((g) => ({ id: g.id, label: g.label, keys: g.panels }));
 
 /* Which region a panel belongs to, by reading order. The packer uses this to
  * keep a region in one run down the page; the rail is useless if "Business"
@@ -2526,8 +2529,11 @@ function renderDashboard(d, tab) {
   // packing order: packGrid() closes any gaps the ordering leaves, so
   // there is no need to sort by size and bury the quote.
   const half = {
-    guide: () => `<section class="guide">${compose("guide", tab)}</section>`,
     tiles: () => `<div class="grid">${compose("search", d, tab)}</div>`,
+    bar: () => window.QUIPU_COURSE?.bar(tab) || "",
+    // The same grid, packed the same way, in its own box so the bar can
+    // sit between the page and the steps.
+    steps: () => `<div class="grid steps">${compose("steps", d, tab)}</div>`,
   };
   return liveBar(tab)
     + SEARCH_ORDER.map((k) => (half[k] ? half[k]() : "")).join("")
@@ -2548,7 +2554,13 @@ function renderDashboard(d, tab) {
  */
 
 function packGrid() {
-  const grid = document.querySelector(".grid");
+  // Every grid on the page -- the company's panels and the curriculum's
+  // squares below the bar -- packed by the same rules.
+  document.querySelectorAll(".grid").forEach(packOne);
+  window.QUIPU_COURSE?.redraw?.();
+}
+
+function packOne(grid) {
   if (!grid) return;
 
   // Work the column count out from the width, the same way auto-fill would.
@@ -2567,7 +2579,8 @@ function packGrid() {
   }
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
-  const items = [...grid.children].map((el) => {
+  // Tiles only: an arrow layer drawn over the grid is not something to place.
+  const items = [...grid.children].filter((el) => el.classList.contains("tile")).map((el) => {
     const w = Math.min(Number((el.className.match(/\bw(\d)\b/) || [, 1])[1]), cols);
     const h = Number((el.className.match(/\bh(\d)\b/) || [, 1])[1]);
     el.style.gridArea = "";
@@ -2611,6 +2624,10 @@ function packGrid() {
    * Gaps left at the foot of a band are closed by the grow pass below, using
    * that band's own panels.
    */
+  // The curriculum's squares are read in order, so their grid keeps that
+  // order even where a tighter packing was possible.
+  const keepOrder = grid.classList.contains("steps");
+
   const bands = new Map();
   items.forEach((it, i) => {
     if (!bands.has(it.region)) bands.set(it.region, []);
@@ -2648,6 +2665,28 @@ function packGrid() {
 
     const box = {};
     const pend = order.slice();
+    if (keepOrder) {
+      // Each square at the first place it fits that comes AFTER the one
+      // before it, reading left to right, top to bottom -- so a later,
+      // smaller square can never slip into a hole ahead of its turn, and
+      // the path through them never doubles back.
+      let ly = 0, lx = -1;
+      pend.splice(0).forEach((idx) => {
+        const it = items[idx];
+        for (let y = ly; y < 500; y++) {
+          let placed = false;
+          for (let x = y === ly ? lx + 1 : 0; x + it.w <= cols; x++) {
+            if (freeL(y, x, it.w, it.h)) {
+              box[idx] = { x, y, w: it.w, h: it.h };
+              fillL(y, x, it.w, it.h, idx);
+              ly = y; lx = x; placed = true;
+              break;
+            }
+          }
+          if (placed) break;
+        }
+      });
+    }
     for (let y = 0; pend.length && y < 400; y++) {
       for (let x = 0; x < cols && pend.length; x++) {
         if (rowL(y)[x] !== undefined) continue;
@@ -2772,7 +2811,7 @@ function packGrid() {
     const byTall = [...group].sort((a, b) => (items[b].h - items[a].h) || (items[b].w - items[a].w));
 
     let best = null;
-    for (const order of [group, byArea, byWide, byTall]) {
+    for (const order of keepOrder ? [group] : [group, byArea, byWide, byTall]) {
       const got = packBand(order);
       if (!best || got.holes < best.holes
                 || (got.holes === best.holes && got.rows < best.rows)) best = got;

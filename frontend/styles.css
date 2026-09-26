@@ -741,7 +741,7 @@ span.q.px { color: var(--rule2); }
   padding-right: 112px;
 }
 /* ---- spans ---- */
-.w2 { grid-column: span 2; } .w3 { grid-column: span 3; } .w4 { grid-column: span 4; }
+.w2 { grid-column: span 2; } .w3 { grid-column: span 3; } .w4 { grid-column: span 4; } .w5 { grid-column: span 5; }
 .h2 { grid-row: span 2; } .h3 { grid-row: span 3; } .h4 { grid-row: span 4; } .h5 { grid-row: span 5; }
 
 /* ---- the panel ----
@@ -3026,3 +3026,85 @@ a { color: inherit; text-decoration: none; }
 .cg-art.t-bullish .cg-words { color: var(--pos); } .cg-art.t-bearish .cg-words { color: var(--neg); }
 .cg-mixed { grid-column: 1; }
 .cg-means .t-bullish { color: var(--pos); } .cg-means .t-bearish { color: var(--neg); }
+
+/* ==== the curriculum as squares (course.js) =============================
+ *
+ * The steps live in the same packed grid as the rest of the page, below a
+ * thin bar. A square's face is the figure, its lean, and the rule that
+ * applied; everything else is inside it. The path is deliberately quiet:
+ * a hairline and a small number in each corner, tinted by the lean, so the
+ * grid still reads as a grid until you follow it.
+ */
+.stepbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  height: auto; min-height: 38px; padding: 5px 112px 5px 14px;
+  background: var(--black); border-top: 1px solid var(--rule2); border-bottom: 1px solid var(--rule2);
+  position: sticky; top: 0; z-index: 30; }
+.stepbar .grow { flex: 1; }
+.sb-title { font-family: var(--ui); font-size: 9.5px; font-weight: 700; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint); margin-right: 6px; }
+.stepbar button { font-family: var(--ui); font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  background: transparent; color: var(--text2); border: 1px solid var(--rule2); padding: 4px 10px; cursor: pointer; }
+.stepbar button:hover { color: var(--text); border-color: var(--text2); }
+.stepbar .sb-path { color: var(--text); border-color: var(--text2); }
+.stepbar .sb-path.on { color: var(--black); background: var(--attn); border-color: var(--attn); }
+.stepbar .sb-open { color: var(--black); background: var(--text); border-color: var(--text); }
+.sb-verdict { font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
+.sb-verdict b { text-transform: capitalize; }
+.sb-verdict.v-bullish b { color: var(--pos); } .sb-verdict.v-bearish b { color: var(--neg); }
+
+.grid.steps { border-top: 0; }
+.tile.ct > h3 .ct-step { font-family: var(--mono); color: var(--faint); letter-spacing: 0; margin-right: 4px; }
+.ct-face { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.ct-big { font-family: var(--mono); font-size: 26px; font-weight: 700; color: var(--text); line-height: 1.1; }
+.ct-face.m-bullish .ct-big { color: var(--pos); }
+.ct-face.m-bearish .ct-big { color: var(--neg); }
+.ct-face.off .ct-big { color: var(--faint); }
+.ct-unit { font-size: 12px; font-style: normal; font-weight: 400; color: var(--faint); }
+.ct-split { display: flex; gap: 14px; font-size: 20px; }
+.ct-split .t-bullish { color: var(--pos); } .ct-split .t-bearish { color: var(--neg); }
+.ct-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.ct-chips .cg-reads, .ct-chips .cg-stance, .ct-chips .cg-score { font-size: 9px; padding: 2px 5px; }
+.ct-hit { font-family: var(--mono); font-size: 11px; color: var(--attn); line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ct-means { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text2);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.h3 .ct-means { -webkit-line-clamp: 6; }
+.ct-line { font-family: var(--mono); font-size: 11.5px; color: var(--text2); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.ct-line.t-bullish, .ct-line.t-bullish b { color: var(--pos); } .ct-line.t-bearish, .ct-line.t-bearish b { color: var(--neg); }
+.ct-line i { color: var(--faint); font-style: normal; }
+.ct-thesis { margin: 0 0 8px; font-size: 13.5px; line-height: 1.5; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+.ct-exits { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 1.4; }
+.ct-exits li { padding: 4px 0; border-bottom: 1px solid var(--rule); color: var(--text2); }
+.ct-exits b { font-family: var(--ui); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; margin-right: 6px; }
+.ct-exits .x-price b, .ct-exits .x-premium b { color: var(--neg); } .ct-exits .x-target b { color: var(--pos); }
+.ct-payoff { flex: 1; min-height: 150px; }
+.ct-payoff svg { width: 100%; height: 100%; }
+.ct .cg-big3 { margin: 2px 0; gap: 6px; }
+.ct .cg-big3 > div { padding: 5px 9px; min-width: 0; }
+.ct .cg-big3 b { font-size: 17px; }
+.ct .cg-kv dd { font-size: 12px; }
+.cg-matrix.small { font-size: 10.5px; }
+.cg-matrix.small td { padding: 2px 5px; }
+.ct .cg-meter { margin: 2px 0 4px; }
+
+/* inside an opened square */
+.cg-zoom { max-width: 1100px; }
+.cg-zoom .cg-metric { border-top: 0; padding-top: 0; }
+.cg-zoom .cg-big { font-size: 34px; }
+.cg-sumhead { font-family: var(--ui); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint); margin: 14px 0 6px; }
+.cg-zoom .cg-payoff svg { width: 100%; height: auto; }
+
+/* the path */
+.pathlayer { position: absolute; inset: 0; pointer-events: none; z-index: 4; overflow: visible; }
+.pathline { fill: none; stroke: var(--text2); stroke-width: 1; stroke-dasharray: 3 4; opacity: .38; }
+.pathhead { fill: var(--text2); opacity: .5; }
+.ct-order { position: absolute; left: 6px; top: 6px; z-index: 5; width: 22px; height: 22px;
+  display: grid; place-items: center; font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  color: var(--text); background: var(--black); border: 1px solid var(--rule2); border-radius: 50%;
+  pointer-events: none; }
+.ct-order.o-bullish { border-color: var(--pos); color: var(--pos); }
+.ct-order.o-bearish { border-color: var(--neg); color: var(--neg); }
+.grid.steps.pathing .tile > h3 { padding-left: 24px; }

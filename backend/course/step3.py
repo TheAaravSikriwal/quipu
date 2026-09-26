@@ -288,6 +288,31 @@ def formula_working(pick: str, legs: List[Dict[str, Any]]) -> Optional[Dict[str,
             ("Breakeven", be, sum_of(be, [line("", term("short strike", sh["strike"])),
                                           line("-" if kind == "put" else "+", term("credit C", c))])),
         ]}
+    if pick == "iron_condor" and len(legs) == 4:
+        sp, sc = L[("put", "short")], L[("call", "short")]
+        lp, lc = L[("put", "long")], L[("call", "long")]
+        c = sp["entry"] + sc["entry"] - lp["entry"] - lc["entry"]
+        w = max(sp["strike"] - lp["strike"], lc["strike"] - sc["strike"])
+        return {"C": c, "W": w, "rows": [
+            ("Credit C", c, sum_of(c, [line("", term(f"${fmt(sp['strike'])} put sold", sp["entry"])),
+                                       line("+", term(f"${fmt(sc['strike'])} call sold", sc["entry"])),
+                                       line("-", term(f"${fmt(lp['strike'])} put bought", lp["entry"])),
+                                       line("-", term(f"${fmt(lc['strike'])} call bought", lc["entry"]))], per_share=True)),
+            ("Max profit", c, sum_of(c, [line("", term("total credit", c))], per_share=True)),
+            ("Max loss", w - c, sum_of(w - c, [line("", term("wider wing's width", w)), line("-", term("total credit", c))], per_share=True)),
+            ("Breakeven", sp["strike"] - c, sum_of(sp["strike"] - c, [line("", term("short put", sp["strike"])), line("-", term("credit", c))])),
+            ("Breakeven", sc["strike"] + c, sum_of(sc["strike"] + c, [line("", term("short call", sc["strike"])), line("+", term("credit", c))])),
+        ]}
+    if pick in ("straddle", "strangle") and len(legs) == 2:
+        call, put = L[("call", "long")], L[("put", "long")]
+        tot = call["entry"] + put["entry"]
+        return {"rows": [
+            ("Total premium", tot, sum_of(tot, [line("", term(f"${fmt(call['strike'])} call", call["entry"])),
+                                                line("+", term(f"${fmt(put['strike'])} put", put["entry"]))], per_share=True)),
+            ("Max loss", tot, sum_of(tot, [line("", term("total premium", tot))], per_share=True)),
+            ("Breakeven", call["strike"] + tot, sum_of(call["strike"] + tot, [line("", term("call strike", call["strike"])), line("+", term("total premium", tot))])),
+            ("Breakeven", put["strike"] - tot, sum_of(put["strike"] - tot, [line("", term("put strike", put["strike"])), line("-", term("total premium", tot))])),
+        ]}
     if pick in ("long_call", "long_put") and len(legs) == 1:
         l = legs[0]; p = l["entry"]
         be = l["strike"] + p if l["kind"] == "call" else l["strike"] - p

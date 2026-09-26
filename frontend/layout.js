@@ -15,19 +15,7 @@
  * inventory() in the console.
  */
 const LAYOUT = {
-  /* The curriculum, "From Chart to Trade", run on this company: the
-   * step-by-step guide at the top of a search. The answer first, then
-   * each step, each consuming the one before it. */
-  guide: [
-    "verdict",          // direction, conviction, target, the trade, the thesis
-    "step1",            // find: liquidity, IV environment, expected move, catalysts
-    "step2",            // direction: nine weighted signals and the scorecard
-    "news",             // headlines tagged bullish / bearish -- shown, not scored
-    "step3",            // build: matrix, expiry, strikes, payoff, odds, greeks
-    "step4",            // size: contracts, exposure, stops, target, time, thesis
-  ],
-
-  /* One company, everything else on it. The groups are the rail's regions, top to bottom,
+  /* One company. The groups are the rail's regions, top to bottom,
    * and the packer keeps each group in one run down the page. */
   search: [
     { id: "price", label: "Price", panels: [
@@ -92,6 +80,56 @@ const LAYOUT = {
     "footnote",         // what the log keeps and where
   ],
 
+  /* "From Chart to Trade", the curriculum, run on this company: every
+   * number it produces is a square in its own grid below the page, in
+   * the order the curriculum reads them -- which is also the order
+   * "Create the path" numbers them. The groups are rail regions too. */
+  steps: [
+    { id: "find", label: "Find", panels: [
+      "c-spread",       // 1.1 bid-ask spread at the strike you would trade
+      "c-oi",           // 1.1 open interest there
+      "c-vol_oi",       // 1.1 today's volume against it
+      "c-iv_rank",      // 1.2 IV Rank (Alpaca history)
+      "c-iv_pct",       // 1.2 IV Percentile
+      "c-hv20",         // 1.2 what the stock has actually been doing
+      "c-iv_hv",        // 1.2 implied against realised
+      "c-em_model",     // 1.3 the expected move, from IV
+      "c-em_market",    // 1.3 the expected move, from the straddle
+      "c-daily_move",   // 0.5 a normal day, the rule of 16
+      "c-earnings_date",// 1.3 the next report, and whether it is in the window
+      "c-market_events",// 1.3 Fed, CPI, jobs before expiry
+      "c-unusual",      // 1.4 unusual activity
+      "c-pc_screen",    // 1.5 put/call, raw
+    ] },
+    { id: "direction", label: "Direction", panels: [
+      "c-trend",        // 2.1 the moving averages
+      "c-levels",       // 2.2 support, resistance, pivots, reward/risk
+      "c-pattern",      // 2.3 RVOL and breakouts
+      "c-catalyst",     // 2.4 earnings reactions against what is priced
+      "c-fundamentals", // 2.5 estimate revisions, P/E against peers
+      "c-rs",           // 2.6 RS line, RS Rating, beta, alpha
+      "c-rsi",          // 2.7 RSI and divergence
+      "c-pc",           // 2.8 put/call against its own normal
+      "c-skew",         // 2.9 25-delta skew against its normal
+      "c-news",         // headlines tagged bullish / bearish -- not scored
+      "c-scorecard",    // 2.10 the weighted total, and the verdict
+    ] },
+    { id: "build", label: "Build", panels: [
+      "c-matrix",       // 3.1 the strategy matrix
+      "c-expiry",       // 3.3 the expiration
+      "c-strikes",      // 3.4 the strikes
+      "c-payoff",       // 3.2 what you pay, most you make and lose
+      "c-odds",         // 3.5 probability of profit, touch, EV
+      "c-greeks",       // 3.5 net delta, theta, vega
+    ] },
+    { id: "size", label: "Size", panels: [
+      "c-size",         // 4.1 how many contracts
+      "c-exposure",     // 4.2 beta-weighted delta
+      "c-exits",        // 4.3-4.5 stops, target, time exit
+      "c-thesis",       // the one sentence, and Open in Workshop
+    ] },
+  ],
+
   /* The market as a whole. */
   world: [
     "barometer",        // indices, VIX, Treasuries, gold, oil: where it is
@@ -101,9 +139,9 @@ const LAYOUT = {
 };
 
 /* Lists above that are part of a room rather than a room of their own. */
-const LAYOUT_PARTS = { guide: "search" };
+const LAYOUT_PARTS = { steps: "search" };
 
-/* The search page's two halves, top to bottom: the step-by-step guide,
- * then every panel the page had before it. Swap them to put the panels
- * first; drop one to show only the other. */
-const SEARCH_ORDER = ["guide", "tiles"];
+/* The search page, top to bottom: every panel it had, the thin bar with
+ * "Create the path", then the curriculum's squares. Reorder to move a
+ * part; drop one to hide it. */
+const SEARCH_ORDER = ["tiles", "bar", "steps"];
