@@ -2880,3 +2880,149 @@ a { color: inherit; text-decoration: none; }
 .q.oi.thin { color: var(--warn); }
 .q.oi.deep { color: var(--text); }
 .q.oi.none::after { content: "\00a0!"; font-size: .85em; }
+
+/* ==== the step-by-step guide (course.js) ================================
+ *
+ * The curriculum at the top of a search. Every number is drawn the same
+ * way -- label, big figure, which way it points, score x weight, then the
+ * table it is read against with its row lit -- so the shape is learned
+ * once. Direction colour is the app's own pos/neg and nothing else; the
+ * lit table row is the attention hue, because it answers "which rule
+ * applied" rather than "good or bad".
+ */
+.guide { display: flex; flex-direction: column; gap: 14px; padding: 14px 112px 22px 18px;  /* clear of the fixed rail, as the grid is */
+  border-bottom: 1px solid var(--rule2); }
+.cg-block { background: var(--panel); border: 1px solid var(--rule); padding: 18px 20px; }
+.cg-wait { font-family: var(--ui); color: var(--text2); font-size: 13px; padding: 10px 0; }
+.cg-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; scroll-margin-top: 12px; }
+.cg-head h3 { margin: 0; font-family: var(--ui); font-size: 17px; letter-spacing: .02em; color: var(--text); }
+.cg-head p { margin: 3px 0 0; color: var(--text2); font-size: 13px; }
+.cg-n { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--black);
+  background: var(--text); min-width: 34px; height: 34px; display: grid; place-items: center; }
+.cg-section { margin: 14px 0 6px; }
+.cg-section > h5, .cg-card > h5, .cg-news > h5 { font-family: var(--ui); font-size: 11px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--text2); margin: 0 0 8px; font-weight: 700; }
+.cg-lesson { font-family: var(--mono); font-size: 10.5px; color: var(--faint); border: 1px solid var(--rule2);
+  padding: 1px 5px; margin-right: 6px; letter-spacing: 0; text-transform: none; }
+.cg-context { color: var(--faint); font-size: 12px; margin: 4px 0 8px; }
+
+.cg-metric { border-top: 1px solid var(--rule); padding: 12px 0 10px; }
+.cg-metric.off { opacity: .62; }
+.cg-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cg-top .grow { flex: 1; }
+.cg-label { font-family: var(--ui); font-size: 14px; color: var(--text); font-weight: 600; }
+.cg-big { font-family: var(--mono); font-size: 24px; font-weight: 700; color: var(--text); }
+.m-bullish .cg-big { color: var(--pos); }
+.m-bearish .cg-big { color: var(--neg); }
+.cg-reads, .cg-stance, .cg-score, .cg-mixed { font-family: var(--ui); font-size: 10.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; padding: 3px 7px; border: 1px solid var(--rule2); color: var(--text2); }
+.cg-reads.r-bullish { color: var(--pos); border-color: var(--pos); }
+.cg-reads.r-bearish { color: var(--neg); border-color: var(--neg); }
+.cg-stance.s-buy, .cg-stance.s-pass { color: var(--pos); border-color: var(--pos); }
+.cg-stance.s-sell, .cg-stance.s-credit, .cg-stance.s-fail { color: var(--neg); border-color: var(--neg); }
+.cg-stance.s-debit { color: var(--attn); border-color: var(--attn); }
+.cg-score { font-family: var(--mono); text-transform: none; letter-spacing: 0; }
+.cg-score.pos b { color: var(--pos); } .cg-score.neg b { color: var(--neg); }
+.cg-means { color: var(--text2); font-size: 13.5px; line-height: 1.5; margin: 6px 0 8px; max-width: 980px; }
+.cg-means.down, .cg-wait.down { color: var(--neg); }
+.cg-against { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 1.2fr); gap: 8px 22px; }
+@media (max-width: 900px) { .cg-against { grid-template-columns: 1fr; } }
+.cg-foot { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+.cg-formula { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+.cg-src { font-size: 11px; color: var(--faint); font-style: italic; }
+
+.cg-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.cg-table td { padding: 4px 8px; border-bottom: 1px solid var(--rule); color: var(--text2); vertical-align: top; }
+.cg-table .cg-when { font-family: var(--mono); white-space: nowrap; color: var(--faint); }
+.cg-table tr.hit td { color: var(--text); background: rgba(199, 154, 82, .12); }
+.cg-table tr.hit .cg-when { color: var(--attn); }
+.cg-table tr.th td { font-family: var(--ui); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.cg-table tr.total td { border-top: 1px solid var(--rule2); color: var(--text); }
+.cg-table tr.off td { opacity: .55; }
+.cg-table tr.t-bullish td b { color: var(--pos); } .cg-table tr.t-bearish td b { color: var(--neg); }
+
+.cg-cmp { margin: 0; display: flex; flex-direction: column; }
+.cg-cmp > div { display: flex; justify-content: space-between; gap: 14px; padding: 4px 0; border-bottom: 1px dotted var(--rule); }
+.cg-cmp dt { color: var(--faint); font-size: 12.5px; }
+.cg-cmp dd { margin: 0; font-family: var(--mono); font-size: 12.5px; color: var(--text); text-align: right; }
+.cg-cmp .t-bullish dd, .cg-cmp .t-bullish .cg-arrow { color: var(--pos); }
+.cg-cmp .t-bearish dd, .cg-cmp .t-bearish .cg-arrow { color: var(--neg); }
+.cg-arrow { font-style: normal; margin-right: 6px; }
+.cg-eq dd i { color: var(--faint); font-style: normal; }
+
+.cg-output { margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--attn); background: var(--raised);
+  font-size: 13.5px; line-height: 1.5; color: var(--text); }
+.cg-output .cg-context { display: block; margin: 6px 0 0; }
+.cg-card { margin-top: 16px; }
+
+/* the verdict */
+.cg-verdict { border-width: 1px 1px 1px 4px; }
+.cg-verdict.v-bullish { border-left-color: var(--pos); }
+.cg-verdict.v-bearish { border-left-color: var(--neg); }
+.cg-verdict.v-neutral { border-left-color: var(--text2); }
+.cg-steps { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
+.cg-steps a { font-family: var(--ui); font-size: 12px; color: var(--text2); text-decoration: none;
+  padding: 5px 10px; border: 1px solid var(--rule2); }
+.cg-steps a b { font-family: var(--mono); color: var(--text); margin-right: 4px; }
+.cg-steps a:hover { color: var(--text); border-color: var(--text2); }
+.cg-steps .grow { flex: 1; }
+.cg-iv { font-size: 11.5px; color: var(--faint); margin-right: 8px; }
+.cg-toggle, .cg-open { font-family: var(--ui); font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  background: transparent; color: var(--text2); border: 1px solid var(--rule2); padding: 5px 10px; cursor: pointer; }
+.cg-open { color: var(--black); background: var(--text); border-color: var(--text); padding: 9px 14px; font-size: 12px; }
+.cg-open:hover { background: var(--attn); border-color: var(--attn); }
+.cg-call { display: grid; grid-template-columns: auto minmax(220px, 1fr) minmax(280px, 1.3fr) auto;
+  gap: 18px 26px; align-items: center; }
+@media (max-width: 1100px) { .cg-call { grid-template-columns: 1fr 1fr; } }
+.cg-dir { display: flex; gap: 12px; align-items: center; }
+.cg-dir-arrow { font-size: 44px; line-height: 1; font-weight: 700; color: var(--text2); }
+.v-bullish .cg-dir-arrow, .v-bullish .cg-dir b { color: var(--pos); }
+.v-bearish .cg-dir-arrow, .v-bearish .cg-dir b { color: var(--neg); }
+.cg-dir b { display: block; font-family: var(--ui); font-size: 26px; text-transform: capitalize; }
+.cg-dir span { font-size: 12.5px; color: var(--text2); }
+.cg-meter-bar { position: relative; height: 8px; background: linear-gradient(90deg, var(--neg), var(--rule2) 50%, var(--pos)); }
+.cg-meter-bar i { position: absolute; top: -5px; width: 3px; height: 18px; background: var(--text); transform: translateX(-1px); }
+.cg-meter-lab { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); margin-top: 6px; }
+.cg-meter-lab b { font-family: var(--mono); font-size: 15px; color: var(--text); }
+.cg-kv { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+.cg-kv dt { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.cg-kv dd { margin: 1px 0 0; font-family: var(--mono); font-size: 13.5px; color: var(--text); }
+.cg-thesis { margin: 16px 0 4px; font-size: 15px; line-height: 1.55; color: var(--text); max-width: 1100px; }
+.cg-temper { margin: 10px 0 0; font-size: 12.5px; color: var(--attn); }
+.cg-disclaimer { margin: 6px 0 0; font-size: 11px; color: var(--faint); }
+
+/* the numbers that matter most on a trade, big */
+.cg-big3 { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+.cg-big3 > div { background: var(--raised); border: 1px solid var(--rule); padding: 10px 14px; min-width: 150px; }
+.cg-big3 span { display: block; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.cg-big3 b { font-family: var(--mono); font-size: 22px; color: var(--text); }
+.cg-big3 .pos b { color: var(--pos); } .cg-big3 .neg b { color: var(--neg); }
+.cg-payoff { margin-top: 8px; }
+.cg-matrix td.col { background: rgba(255, 255, 255, .03); }
+.cg-matrix tr.row td:first-child { color: var(--text); }
+.cg-matrix td.hit { color: var(--black) !important; background: var(--attn) !important; font-weight: 700; }
+.cg-why { margin: 8px 0 0 18px; padding: 0; color: var(--text2); font-size: 13px; line-height: 1.55; }
+.cg-legs tr.t-bullish td:first-child b { color: var(--pos); }
+.cg-legs tr.t-bearish td:first-child b { color: var(--neg); }
+
+.cg-inputs { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
+.cg-inputs label { font-size: 12px; color: var(--text2); display: flex; gap: 8px; align-items: center; }
+.cg-inputs input { font-family: var(--mono); font-size: 14px; background: var(--black); color: var(--text);
+  border: 1px solid var(--rule2); padding: 6px 8px; width: 120px; }
+.cg-exits { list-style: none; margin: 0; padding: 0; }
+.cg-exits li { padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; color: var(--text); }
+.cg-exits li b:first-child { display: inline-block; min-width: 118px; font-family: var(--ui); font-size: 10.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.cg-exits li span { display: block; margin: 3px 0 0 122px; color: var(--faint); font-size: 12px; }
+.cg-exits .x-price b:first-child, .cg-exits .x-premium b:first-child { color: var(--neg); }
+.cg-exits .x-target b:first-child { color: var(--pos); }
+
+/* the news, beside the scorecard */
+.cg-art { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
+.cg-art a { color: var(--text); text-decoration: none; font-size: 13.5px; }
+.cg-art a:hover { text-decoration: underline; }
+.cg-art .cg-words, .cg-art .cg-src { grid-column: 2; font-size: 11.5px; color: var(--faint); }
+.cg-art .cg-words { font-family: var(--mono); }
+.cg-art.t-bullish .cg-words { color: var(--pos); } .cg-art.t-bearish .cg-words { color: var(--neg); }
+.cg-mixed { grid-column: 1; }
+.cg-means .t-bullish { color: var(--pos); } .cg-means .t-bearish { color: var(--neg); }

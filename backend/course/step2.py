@@ -154,7 +154,7 @@ def levels(d: Dict[str, List], em: float, day: float = 0.0) -> Dict[str, Any]:
     lv = _cluster(sh + sl)
 
     gap = max(day, p * 0.005)
-    testing = [g for g in lv if abs(g["price"] - p) <= gap and g["touches"] >= 2]
+    testing = [g for g in lv if abs(g["price"] - p) <= gap]
 
     def pick(above: bool) -> Tuple[Optional[Dict[str, Any]], str]:
         side = [g for g in lv if (g["price"] > p + gap if above else g["price"] < p - gap)]
@@ -191,8 +191,10 @@ def levels(d: Dict[str, List], em: float, day: float = 0.0) -> Dict[str, Any]:
              "working": sum_of(down, [line("", term("price", p)), line("-", term("support", s_price)),
                                       line("/", term("price", p)), line("x", term("as a percent", 100, 0))], unit="%")}]
     for g in testing:
-        comp.append({"label": "being tested now", "show": f"{money(g['price'])}, touched {g['touches']} times -- "
-                     "closer than a normal day, so not the target", "reads": BULL if g["price"] > p else BEAR})
+        comp.append({"label": "being tested now",
+                     "show": f"{money(g['price'])}, touched {g['touches']} time{'s' if g['touches'] > 1 else ''} -- "
+                             "closer than a normal day's move, so not the target",
+                     "reads": BULL if g["price"] > p else BEAR})
     for name, pv in (("last week", wk), ("last month", mo)):
         if pv:
             comp.append({"label": f"pivots off {name}",
@@ -337,8 +339,9 @@ def catalyst(d: Dict[str, List], earnings: Dict[str, Any], implied: Optional[Dic
         compare=[{"label": "next report", "show": f"{nxt} ({days} days)" if nxt else "not confirmed"},
                  {"label": "reactions up", "show": f"{ups} of {n}"}] + comp,
         reads=_DIR[score], score=score, weight=WEIGHTS["catalyst"],
-        means=((f"The report falls inside the trade window. " if inside else
-                "No report inside the trade window, so it scores nothing for direction. ")
+        means=((f"The report is {days} days out: inside the life of any trade built here "
+                f"(up to {window} days), so it is the catalyst. " if inside else
+                f"No report in the next {window} days, so it scores nothing for direction. ")
                + (f"{ups} of the last {n} reactions were up" + (" -- one-sided enough to lean on."
                   if score else ", which is not one-sided enough to lean on.") if inside else "")
                + (" It has beaten the implied move less than half the time: sell the event rather than buy it."

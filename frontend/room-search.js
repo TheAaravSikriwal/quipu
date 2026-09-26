@@ -8,6 +8,10 @@ async function load(tab) {
   tab.status = "loading";
   tab.error = null;
   render();
+  // The four steps are their own request, started alongside rather than
+  // after: they need none of the news and filings the page waits for.
+  tab.course = null;
+  window.QUIPU_COURSE?.load(tab);
   try {
     const res = await fetch(`${API}/api/ticker/${encodeURIComponent(tab.symbol)}`);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -2521,8 +2525,12 @@ function renderDashboard(d, tab) {
   // One dense grid, in the order layout.js gives. Reading order, not
   // packing order: packGrid() closes any gaps the ordering leaves, so
   // there is no need to sort by size and bury the quote.
+  const half = {
+    guide: () => `<section class="guide">${compose("guide", tab)}</section>`,
+    tiles: () => `<div class="grid">${compose("search", d, tab)}</div>`,
+  };
   return liveBar(tab)
-    + `<div class="grid">${compose("search", d, tab)}</div>`
+    + SEARCH_ORDER.map((k) => (half[k] ? half[k]() : "")).join("")
     + renderRail()
     + renderZoom(tab);
 }
@@ -3691,6 +3699,7 @@ function showSearch(tab, view, scroll) {
   drawStoryArrows(tab);
   view.scrollTop = scroll;
   wireDashboard(tab);
+  window.QUIPU_COURSE?.mount(tab);
 }
 
 room("search", {

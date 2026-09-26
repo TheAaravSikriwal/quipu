@@ -10,7 +10,7 @@
 
 const { page } = require("./lift.js");
 
-const P = page("LAYOUT", "PANELS", "ROOMS", "VIEWS", "REGIONS",
+const P = page("LAYOUT", "LAYOUT_PARTS", "SEARCH_ORDER", "PANELS", "ROOMS", "VIEWS", "REGIONS",
                "layoutOf", "compose", "bookView");
 
 let pass = 0, fail = 0;
@@ -31,7 +31,9 @@ for (const room of Object.keys(P.LAYOUT)) {
   const twice = names.filter((n, i) => names.indexOf(n) !== i);
   ok(`${room}: no panel is listed twice`, !twice.length, twice.join(", "));
 
-  ok(`${room}: is a room the app has`, room in P.ROOMS && room in P.VIEWS);
+  const owner = P.LAYOUT_PARTS[room] || room;
+  ok(`${room}: is a room the app has${owner !== room ? ` (part of ${owner})` : ""}`,
+     owner in P.ROOMS && owner in P.VIEWS);
 }
 
 section("Every panel says what it is");
@@ -53,6 +55,11 @@ for (const [room, panels] of Object.entries(P.PANELS)) {
   Object.keys(panels).forEach((id) => { if (!on.includes(id)) hidden.push(`${room}/${id}`); });
 }
 console.log(`  (hidden, registered but not in the layout: ${hidden.length ? hidden.join(", ") : "none"})`);
+
+section("The search page draws both halves, in the order given");
+
+ok("SEARCH_ORDER names only the guide and the tiles",
+   P.SEARCH_ORDER.every((k) => k === "guide" || k === "tiles"), P.SEARCH_ORDER.join(", "));
 
 section("The search rail is the layout, not a second copy of it");
 

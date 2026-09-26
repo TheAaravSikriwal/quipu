@@ -53,10 +53,29 @@ def _annualised(returns: pd.DataFrame, window: int) -> pd.Series:
     return returns.tail(window).std() * math.sqrt(TRADING_DAYS) * 100
 
 
+def _back(close: pd.DataFrame, days: int) -> pd.Series:
+    """Each symbol's close `days` of ITS OWN sessions ago.
+
+    Counted per symbol, not by row. A download batch is indexed on the
+    union of every symbol's dates, so one stock with a stray bar leaves a
+    row that is blank for all the others -- and reading returns off a row
+    position turned every such blank into a missing return. That cost
+    seven stocks in eight their 3- to 12-month returns, and with them
+    every ranking and the RS Rating built on those.
+    """
+    out = {}
+    for col in close.columns:
+        v = close[col].dropna().to_numpy()
+        out[col] = v[-1 - days] if len(v) > days else np.nan
+    return pd.Series(out)
+
+
+def _last(close: pd.DataFrame) -> pd.Series:
+    return close.ffill().iloc[-1]
+
+
 def _pct_change_over(close: pd.DataFrame, days: int) -> pd.Series:
-    if len(close) <= days:
-        return pd.Series(np.nan, index=close.columns)
-    return (close.iloc[-1] / close.iloc[-1 - days] - 1) * 100
+    return (_last(close) / _back(close, days) - 1) * 100
 
 
 def _trend_r2(close: pd.DataFrame, window: int = 126) -> pd.Series:
@@ -208,10 +227,7 @@ def measure(frame: pd.DataFrame) -> pd.DataFrame:
     # Classic 12-1 momentum: the year's return excluding the most recent
     # month, because the last month reliably reverses and would otherwise
     # cancel the signal it is meant to measure.
-    if len(close) > TRADING_DAYS + 1:
-        out["mom_12_1"] = (close.iloc[-22] / close.iloc[-1 - TRADING_DAYS] - 1) * 100
-    else:
-        out["mom_12_1"] = np.nan
+    out["mom_12_1"] = (_back(close, 21) / _back(close, TRADING_DAYS) - 1) * 100
 
     return out
 

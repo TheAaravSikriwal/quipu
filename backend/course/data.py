@@ -109,7 +109,22 @@ def peers(symbol: str) -> Dict[str, Any]:
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         rows = [r for r in pool.map(one, names) if r]
-    out = {"industry": info(symbol).get("industry") or key, "key": key,
+    label = info(symbol).get("industry") or key
+    # An industry whose largest names are mostly small or loss-making has
+    # too few forward P/Es to take a median of (Apple's is "consumer
+    # electronics"). The sector's largest companies stand in, and the
+    # label says so.
+    valid = lambda rs: [r for r in rs if isinstance(r.get("forward_pe"), (int, float)) and r["forward_pe"] > 0]
+    sector = info(symbol).get("sectorKey")
+    if len(valid(rows)) < 5 and sector:
+        try:
+            more = list(yf.Sector(sector).top_companies.index[:16])
+        except Exception:                                    # noqa: BLE001
+            more = []
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            rows = [r for r in pool.map(one, [m for m in more if m != symbol]) if r]
+        label = f"{info(symbol).get('sector') or sector} sector (too few in {label})"
+    out = {"industry": label, "key": key,
            "peers": rows, "on": date.today().isoformat()}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

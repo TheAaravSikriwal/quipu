@@ -15,7 +15,19 @@
  * inventory() in the console.
  */
 const LAYOUT = {
-  /* One company. The groups are the rail's regions, top to bottom,
+  /* The curriculum, "From Chart to Trade", run on this company: the
+   * step-by-step guide at the top of a search. The answer first, then
+   * each step, each consuming the one before it. */
+  guide: [
+    "verdict",          // direction, conviction, target, the trade, the thesis
+    "step1",            // find: liquidity, IV environment, expected move, catalysts
+    "step2",            // direction: nine weighted signals and the scorecard
+    "news",             // headlines tagged bullish / bearish -- shown, not scored
+    "step3",            // build: matrix, expiry, strikes, payoff, odds, greeks
+    "step4",            // size: contracts, exposure, stops, target, time, thesis
+  ],
+
+  /* One company, everything else on it. The groups are the rail's regions, top to bottom,
    * and the packer keeps each group in one run down the page. */
   search: [
     { id: "price", label: "Price", panels: [
@@ -87,3 +99,11 @@ const LAYOUT = {
     "calendar",         // what is coming
   ],
 };
+
+/* Lists above that are part of a room rather than a room of their own. */
+const LAYOUT_PARTS = { guide: "search" };
+
+/* The search page's two halves, top to bottom: the step-by-step guide,
+ * then every panel the page had before it. Swap them to put the panels
+ * first; drop one to show only the other. */
+const SEARCH_ORDER = ["guide", "tiles"];

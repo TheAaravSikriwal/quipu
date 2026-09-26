@@ -403,6 +403,7 @@ def build(ctx: Dict[str, Any], step1: Dict[str, Any], step2: Dict[str, Any]) -> 
             "breakevens": bes, "chance": an.get("chance"), "chance_working": an.get("chance_working"),
             "reward_risk": (maxp / abs(maxl)) if maxp and maxl and not an.get("max_profit_unbounded") else None,
             "curve": an.get("curve"), "working": an.get("working"),
+            "best_at": an.get("best_at"), "worst_at": an.get("worst_at"),
         },
         "probability": {"breakevens": probs, "touch": touch, "ev": evv},
         "greeks": {"legs": gl, "net": net, "naked": naked,
