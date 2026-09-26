@@ -175,7 +175,14 @@ backend/
     claims.py         Diff claims: corroborated vs unique
 frontend/
   greeks.js           The translator: greeks -> sentences with real dollars
-  app.js              Tabs, live loop, search, tiles
+  core.js             Formatting, tab state, trade-log storage, calc()
+  shell.js            Tab strip, room ring, launcher, render()
+  room-search.js      One company: live loop, every tile, zoom, rail
+  room-workshop.js    Build a position: routes, board, money, analysis
+  room-log.js         Trade log: book, expiry, closing, settling
+  room-world.js       The market as a whole
+  room-finder.js      Rank the market
+  boot.js             Start (loads last)
   styles.css          Newsprint
 electron/main.js      Desktop shell; runs the API as a child process
 ```

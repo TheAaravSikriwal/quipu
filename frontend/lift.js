@@ -13,6 +13,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 
 const cache = {};
 
@@ -59,28 +60,23 @@ function one(name, file = whereIs(name)) {
   if (isFn) start = src.search(asFn);
   if (start < 0) throw new Error(`could not find "${name}" in ${file}`);
 
-  // Scanned rather than matched with a regex: these have block bodies,
-  // and "up to the first semicolon" stops at the first `return` inside
-  // the body and lifts half a function.
-  let depth = 0, str = null, sawBody = false;
-  for (let i = start; i < src.length; i++) {
-    const c = src[i], prev = src[i - 1];
-    if (str) {
-      if (c === str && prev !== "\\") str = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
-    if ("([{".includes(c)) {
-      // The BODY brace, not the parameter list. Closing on depth-zero
-      // alone ended a function declaration at its own `)` and lifted
-      // just the signature.
-      if (c === "{" && depth === 0) sawBody = true;
-      depth++;
-    } else if (")]}".includes(c)) {
-      depth--;
-      if (isFn && sawBody && depth === 0) return src.slice(start, i + 1);
-    } else if (!isFn && c === ";" && depth === 0) {
-      return src.slice(start, i + 1);
+  // The declaration ends at the first closing `}` (a function) or `;`
+  // (a const) where the text so far is a complete program -- asked of
+  // the JavaScript parser rather than worked out by counting brackets.
+  //
+  // It was counted, and the counter knew about quotes but not comments,
+  // so an apostrophe in a comment ("the market's close") opened a string
+  // that ran on until some unrelated quote further down happened to
+  // close it. In one 7,000-line file that always turned up eventually;
+  // split by room, it ran off the end of the file.
+  const closer = isFn ? "}" : ";";
+  for (let i = src.indexOf(closer, start); i >= 0; i = src.indexOf(closer, i + 1)) {
+    const text = src.slice(start, i + 1);
+    try {
+      new vm.Script(text);
+      return text;
+    } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e;
     }
   }
   throw new Error(`"${name}" in ${file} never ends`);

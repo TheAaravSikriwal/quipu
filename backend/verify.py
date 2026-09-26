@@ -2095,7 +2095,9 @@ try:
     files = _re.findall(r'<script src="[^"]*?/?([\w.-]+\.js)"', page)
     if not files:
         files = ["chart.js", "greeks.js", "glossary.js", "working.js",
-                 "ledger.js", "payoff.js", "app.js"]
+                 "ledger.js", "payoff.js", "core.js", "shell.js",
+                 "room-search.js", "room-workshop.js", "room-log.js",
+                 "room-world.js", "room-finder.js", "boot.js"]
     seen = _c.defaultdict(list)
     checked = []
     for name in files:
