@@ -194,6 +194,9 @@ def measure(frame: pd.DataFrame) -> pd.DataFrame:
         "ret_1m": _pct_change_over(close, 21),
         "ret_3m": _pct_change_over(close, 63),
         "ret_6m": _pct_change_over(close, 126),
+        # For the IBD-style RS Rating (Lesson 2.6), which weights 3, 6, 9
+        # and 12 months.
+        "ret_9m": _pct_change_over(close, 189),
         "ret_12m": _pct_change_over(close, TRADING_DAYS),
         "trend_r2": _trend_r2(close),
         "from_20": (last / sma20 - 1) * 100,

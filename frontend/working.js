@@ -66,7 +66,7 @@ function renderWorking(w) {
           { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`;
     const op = ln.op === "" ? "" : ln.op === "-" ? "&minus;"
       : ln.op === "x" ? "&times;" : ln.op === "/" ? "&divide;"
-      : ln.op === "floor" ? "" : ln.op;
+      : ln.op === "floor" ? "" : ln.op === "whole" ? "&lfloor;&rfloor;" : ln.op;
     return `<div class="wrow${ln.op === "floor" ? " wfloor" : ""}">
       <span class="wsign">${op}</span>
       <span class="wterms">${terms}</span>${gives}</div>`;

@@ -1241,6 +1241,8 @@ def _walk(w):
             total = total / v if v else None
         elif op == "floor":
             total = max(total, v)
+        elif op == "whole":
+            total = float(math.floor(total + 1e-9))
         else:
             return None
         if total is None:
@@ -1942,6 +1944,144 @@ try:
                     "paper, data only"))
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "IV history", f"could not run: {exc}"))
+
+section("The curriculum's XYZ, end to end, gives the curriculum's numbers")
+
+# The curriculum carries one hypothetical stock through every step and
+# prints every intermediate figure, which makes it an answer key. XYZ:
+# $100, IV 40%, 30 days, r = 4.5%, HV20 32%, earnings in 12 days,
+# support $96, resistance $110. Offline: the board is XYZ's own chain.
+try:
+    import math as _m
+    from datetime import timedelta as _td
+    from course import step1 as C1, step2 as C2, step3 as C3, step4 as C4
+    from sources import options as _O
+
+    exp = (_O.market_now().date() + _td(days=30)).isoformat()
+
+    def _r(kind, k, mark, delta, theta, vega, bid=None, ask=None):
+        return {"type": kind, "strike": k, "mark": mark, "bid": bid if bid is not None else mark - 0.05,
+                "ask": ask if ask is not None else mark + 0.05, "iv": 40.0, "delta": delta,
+                "theta": theta, "vega": vega, "open_interest": 2400, "volume": 850}
+
+    xyz = {"spot": 100.0, "expiry": exp, "days_to_expiry": 30, "rate": 0.045, "div_yield": 0.0,
+           "calls": [_r("call", 95, 7.63, 0.70, -0.074, 0.099), _r("call", 100, 4.75, 0.536, -0.082, 0.114, 4.70, 4.80),
+                     _r("call", 105, 2.73, 0.37, -0.076, 0.108), _r("call", 110, 1.44, 0.229, -0.061, 0.087)],
+           "puts": [_r("put", 90, 0.99, -0.16, -0.044, 0.069), _r("put", 95, 2.28, -0.30, -0.062, 0.099),
+                    _r("put", 100, 4.38, -0.46, -0.070, 0.114)],
+           "stats": {}, "unusual_activity": []}
+
+    atm = C1.atm_pair(xyz)
+    liq = {m["id"]: m for m in C1.liquidity(atm, xyz)}
+    check("1.1 spread %: 0.10 / 4.75", round(liq["spread"]["value"], 1), 2.1, 1e-9)
+    RESULTS.append((liq["spread"]["stance"] == "pass" and liq["oi"]["stance"] == "pass",
+                    "1.1 and it passes the liquidity gate", "OI 2,400, spread 2.1%"))
+
+    em = {m["id"]: m for m in C1.expected_move(atm, xyz)}
+    check("1.3 model expected move: 100 x 0.40 x sqrt(30/365)", round(em["em_model"]["value"], 2), 11.47, 1e-9)
+    check("1.3 market expected move: the straddle, 4.75 + 4.38", round(em["em_market"]["value"], 2), 9.13, 1e-9)
+
+    # A price series whose 20-day HV is exactly 32%.
+    a = 0.32 / _m.sqrt(252) * _m.sqrt(19 / 20)
+    closes = [100.0]
+    for i in range(20):
+        closes.append(closes[-1] * _m.exp(a if i % 2 else -a))
+    ivm = {m["id"]: m for m in C1.iv_environment(atm, closes, {"status": "off"})}
+    check("1.2 HV20 from the series", round(ivm["hv20"]["value"], 2), 32.0, 1e-6)
+    check("1.2 IV / HV: 40 / 32", round(ivm["iv_hv"]["value"], 2), 1.25, 1e-9)
+    RESULTS.append((ivm["iv_hv"]["stance"] == "sell", "1.2 and 1.25 reads as rich", ivm["iv_hv"]["stance"]))
+    RESULTS.append((not ivm["iv_rank"]["available"], "1.2 without the history, IV Rank declines",
+                    ivm["iv_rank"]["why"][:48]))
+
+    # 2.10: XYZ's scorecard as the curriculum filled it in.
+    sig = [{"id": i, "lesson": "", "label": i, "score": sc, "weight": C2.WEIGHTS[i], "available": True}
+           for i, sc in (("trend", 1), ("levels", 1), ("pattern", 1), ("catalyst", 0), ("fundamentals", 1),
+                         ("rs", 1), ("rsi", 1), ("pc", 0), ("skew", 0))]
+    s1 = {"output": {"iv_column": {"column": "high"}, "earnings": {"inside": True, "days": 12}}}
+    card = C2.scorecard(sig, s1)
+    check("2.10 direction score", card["total"], 11, 1e-9)
+    check("2.10 conviction = 11 / 15", round(card["conviction"], 2), 0.73, 1e-9)
+    RESULTS.append((card["label"] == "Moderate-to-strong" and card["direction"] == "bullish",
+                    "2.10 rich IV + earnings temper it to moderate-to-strong", card["label"]))
+
+    # 2.7: RSI = 100 - 100 / (1 + 0.90 / 0.60).
+    check("2.7 RSI from AvgGain 0.90, AvgLoss 0.60", round(100 - 100 / (1 + 0.90 / 0.60), 1), 60.0, 1e-9)
+    # And Wilder's own smoothing, on the StockCharts reference series.
+    ref = [44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03, 45.61, 46.28, 46.28]
+    # From the closes as printed (2dp), the first 14 changes gain 3.34 and
+    # lose 1.40 in total, so the first reading is 100 - 100 / (1 + 3.34/1.40)
+    # = 70.46. (StockCharts prints 70.53, from its unrounded prices.)
+    ser, _, _ = C2.rsi_series(ref)
+    check("2.7 first RSI on the StockCharts series, 15th close", round(ser[-1], 2),
+          round(100 - 100 / (1 + 3.34 / 1.40), 2), 1e-9)
+    # One more close, down 0.28: Wilder folds it in as (prev x 13 + today) / 14.
+    ser, _, _ = C2.rsi_series(ref + [46.00])
+    ag, al = (3.34 / 14 * 13 + 0) / 14, (1.40 / 14 * 13 + 0.28) / 14
+    check("2.7 the next reading uses Wilder's smoothing", round(ser[-1], 4),
+          round(100 - 100 / (1 + ag / al), 4), 1e-6)
+
+    # 3.1: bullish, moderate-to-strong, IV Rank 54.5 -> bull call spread.
+    rowk, pick, _why = C3.choose(card, "high", True)
+    RESULTS.append((pick == "bull_call", "3.1 the matrix picks the bull call spread", C3.NAMES[pick]))
+
+    # 3.3: earnings in 12 days, a 2-5 week view -> 30 days.
+    v = {"direction": "bullish", "target": 110.0, "support": 96.0, "resistance": 110.0,
+         "invalidation": 96.0, "invalidation_text": "a daily close below $96.00",
+         "timeframe": {"low": 14, "high": 35}}
+    e, ex = C3.expiration([exp], pick, v, {"inside": True, "days": 12})
+    check("3.3 expiration needs 30 days", ex["need"], 30, 1e-9)
+
+    # 3.4 / 3.2: buy the 100 call, sell the 110 at the target.
+    legs, _w = C3.strikes(pick, xyz, v)
+    RESULTS.append(([(l["side"], l["strike"]) for l in legs] == [("long", 100), ("short", 110)],
+                    "3.4 long the $100 call, short the $110 at the target",
+                    " / ".join(f"{l['side']} {l['strike']:g}" for l in legs)))
+    f = {r[0]: r for r in C3.formula_working(pick, legs)["rows"]}
+    check("3.4 debit D = 4.75 - 1.44", round(f["Debit D"][1], 2), 3.31, 1e-9)
+    check("3.4 max profit = 10 - 3.31", round(f["Max profit"][1], 2), 6.69, 1e-9)
+    check("3.4 breakeven = 100 + 3.31", round(f["Breakeven"][1], 2), 103.31, 1e-9)
+    check("3.4 reward/risk = 6.69 / 3.31", round(f["Reward/risk"][1], 2), 2.02, 1e-9)
+    bad = [r[0] for r in f.values() if abs((_walk(r[2]) or 0) - r[1]) > 1e-6]
+    RESULTS.append((not bad, "3.2 and every formula's sum comes to its figure", ", ".join(bad) or "all"))
+
+    ctx = {"all_expiries": [exp], "board_for": lambda _e: xyz, "rate": 0.045, "div": 0.0,
+           "symbol": "XYZ", "beta": {"value": 1.3}, "spy_price": 650.0}
+    s2 = {"scorecard": card, "output": v}
+    s3 = C3.build(ctx, s1, s2)
+    check("3.5 probability of profit, P(finish above $103.31)",
+          round(s3["probability"]["breakevens"][0]["value"], 1), 37.9, 0.2)
+    check("3.5 touch $110 ~ 2 x P(finish above it)", round(s3["probability"]["touch"]["touch"]), 39, 1.5)
+    check("3.5 net delta 0.536 - 0.229", round(s3["greeks"]["net"]["delta"], 2), 0.31, 1e-9)
+    check("3.5 net theta -0.082 + 0.061", round(s3["greeks"]["net"]["theta"], 3), -0.021, 1e-9)
+    check("3.5 net vega 0.114 - 0.087", round(s3["greeks"]["net"]["vega"], 3), 0.027, 1e-9)
+
+    s4 = C4.build(ctx, s2, s3, 25000, 2.0)
+    check("4.1 contracts = floor(25,000 x 2% / 331)", s4["sizing"]["contracts"], 1, 1e-9)
+    check("4.1 and the sum rounds down to the same", _walk(s4["sizing"]["working"]), 1, 1e-9)
+    check("4.2 beta-weighted delta ~ 6.2 SPY shares", round(s4["beta_weighted"]["value"], 1), 6.2, 0.15)
+    check("4.1 a 50% drawdown needs 100% to recover",
+          next(x["gain"] for x in s4["recovery"] if x["loss"] == 50), 100, 1e-9)
+    RESULTS.append(("$96.00" in s4["thesis"] and "bull call spread" in s4["thesis"],
+                    "the thesis names the structure and the stop", s4["thesis"][:60] + "..."))
+
+    # Every sum in all of it adds up to the number it sits under.
+    def _all(x):
+        if isinstance(x, dict):
+            if "lines" in x and "result" in x:
+                yield x
+            for v_ in x.values():
+                yield from _all(v_)
+        elif isinstance(x, list):
+            for v_ in x:
+                yield from _all(v_)
+    sums = list(_all([liq, em, ivm, card, s3["formulas"], s3["probability"], s4]))
+    off = [round(w["result"], 4) for w in sums if w["result"] is not None
+           and _walk(w) is not None and abs(_walk(w) - w["result"]) > 1e-6 * max(1, abs(w["result"]))]
+    RESULTS.append((not off, "every sum shown comes to the figure it explains",
+                    f"{len(sums)} sums" if not off else f"off: {off[:4]}"))
+except Exception as exc:                                   # noqa: BLE001
+    import traceback as _tb
+    RESULTS.append((False, "XYZ end to end", f"could not run: {exc} {_tb.format_exc().splitlines()[-3][:80]}"))
 
 section("Calendar days and sessions agree with each other")
 

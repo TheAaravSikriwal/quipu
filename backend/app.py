@@ -37,6 +37,7 @@ from sources import deep, events, holdings, news_rss, options, quotes, sec_edgar
 from sources import world as world_news  # noqa: E402
 from sources import alpaca  # noqa: E402
 import ivhistory  # noqa: E402
+import course  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -740,6 +741,27 @@ def iv_history(symbol: str, wait: float = 0.0) -> Dict[str, Any]:
              "rr25_norm": ivhistory.zscore(h["rr25"], 252),
              "pc_norm": ivhistory.zscore(h["pc"])}
     return h
+
+
+@app.get("/api/course/{symbol}")
+def course_steps(symbol: str, account: float = None, risk: float = 2.0) -> Dict[str, Any]:
+    """The curriculum's four steps, run on one stock.
+
+    Find (liquidity, IV environment, expected move, catalysts), direction
+    (nine weighted signals, target, invalidation), build (strategy,
+    expiry, strikes, payoff, odds) and size (contracts, stops, exits, the
+    thesis). Every number carries its sum, the table it is read against,
+    and which way it points. `account` and `risk` (percent) size Step 4;
+    without an account it says what it needs.
+    """
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 12:
+        raise HTTPException(status_code=400, detail="invalid symbol")
+    if account is not None and account <= 0:
+        account = None
+    risk = min(max(risk or 2.0, 0.1), 10.0)
+    return course.build(symbol, options.risk_free_rate(), _div_yield(symbol),
+                        dividends=_div_schedule(symbol), account=account, risk_pct=risk)
 
 
 @app.get("/api/world")
