@@ -3108,3 +3108,98 @@ a { color: inherit; text-decoration: none; }
 .ct-order.o-bullish { border-color: var(--pos); color: var(--pos); }
 .ct-order.o-bearish { border-color: var(--neg); color: var(--neg); }
 .grid.steps.pathing .tile > h3 { padding-left: 24px; }
+
+/* ==== filled squares ======================================================
+ *
+ * Every size on a square's face is in em, off one scale the fit sets per
+ * square (--s), so a square can grow its type as a whole until it is full.
+ * These rules come after the earlier .ct-* ones and replace their pixel
+ * sizes.
+ */
+.tile.ct > .body { overflow: hidden; }
+.ct-face { font-size: calc(var(--s, 1) * 12px); gap: .42em; }
+.ct-face .ct-b[hidden] { display: none; }
+.ct-face .ct-big { font-size: 2.2em; line-height: 1.05; white-space: nowrap; }
+.ct-face .ct-split { font-size: 1.7em; gap: .8em; }
+.ct-face .ct-chips { gap: .4em; }
+.ct-face .ct-chips .cg-reads, .ct-face .ct-chips .cg-stance, .ct-face .ct-chips .cg-score {
+  font-size: .72em; padding: .22em .5em; }
+.ct-face .ct-hit { font-size: .92em; -webkit-line-clamp: unset; display: block; }
+.ct-face .ct-means { font-size: 1em; -webkit-line-clamp: unset; display: block; line-height: 1.45; }
+.ct-face .ct-line { font-size: .95em; white-space: normal; }
+.ct-face .ct-line i { display: block; font-size: .85em; }
+.ct-face .ct-thesis { font-size: 1.2em; -webkit-line-clamp: unset; display: block; }
+.ct-face .ct-why { margin: 0; font-size: .9em; line-height: 1.4; color: var(--faint); }
+.ct-face .ct-why b, .ct-face .ct-formula { font-family: var(--mono); }
+.ct-face .ct-why b { display: block; font-size: .78em; letter-spacing: .12em; text-transform: uppercase; }
+.ct-face .ct-formula { font-size: .82em; color: var(--faint); }
+.ct-face .ct-rows { font-size: .85em; color: var(--faint); line-height: 1.4; }
+.ct-face .ct-rows .t-bullish b { color: var(--pos); } .ct-face .ct-rows .t-bearish b { color: var(--neg); }
+.ct-face .ct-rows b { float: right; font-family: var(--mono); }
+.ct-cmp { margin: 0; font-size: .9em; }
+.ct-cmp > div { display: flex; justify-content: space-between; gap: .8em; padding: .12em 0; border-bottom: 1px dotted var(--rule); }
+.ct-cmp dt { color: var(--faint); }
+.ct-cmp dd { margin: 0; font-family: var(--mono); color: var(--text); text-align: right; }
+.ct-cmp .t-bullish dd { color: var(--pos); } .ct-cmp .t-bearish dd { color: var(--neg); }
+.ct-leg { font-family: var(--mono); font-size: 1.15em; color: var(--text); }
+.ct-leg.t-bullish b { color: var(--pos); } .ct-leg.t-bearish b { color: var(--neg); }
+.ct-leg span { color: var(--text2); } .ct-leg i { display: block; font-size: .72em; color: var(--faint); font-style: normal; }
+.ct-exit { font-size: 1em; line-height: 1.35; padding: .25em 0; border-bottom: 1px solid var(--rule); color: var(--text2); }
+.ct-exit b { font-family: var(--ui); font-size: .72em; letter-spacing: .12em; text-transform: uppercase; margin-right: .5em; }
+.ct-exit.x-price b, .ct-exit.x-premium b { color: var(--neg); } .ct-exit.x-target b { color: var(--pos); }
+.ct-face .cg-matrix.small { font-size: .88em; }
+.ct-face .cg-table.cg-greeks { font-size: .85em; }
+.ct-face .cg-kv dd { font-size: 1em; } .ct-face .cg-kv dt { font-size: .75em; }
+.ct-face .cg-meter-lab { font-size: .8em; }
+.ct-face .cg-open { font-size: .95em; align-self: flex-start; }
+.ct-fixed { display: flex; flex-direction: column; height: 100%; }
+
+/* ==== an opened square, using all of the box ============================ */
+.cg-zoom { max-width: none; font-size: 15px; }
+.cz-cols { display: grid; grid-template-columns: minmax(300px, 0.9fr) minmax(360px, 1.1fr); gap: 28px 40px; margin-top: 8px; }
+@media (max-width: 1000px) { .cz-cols { grid-template-columns: 1fr; } }
+.cz-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cz-big { font-family: var(--mono); font-size: 58px; font-weight: 700; line-height: 1.05; color: var(--text); margin: 10px 0 8px; }
+.cz-big.m-bullish { color: var(--pos); } .cz-big.m-bearish { color: var(--neg); }
+.cz-big .ct-unit { font-size: 18px; }
+.cz-big.ct-split { display: flex; gap: 28px; font-size: 44px; }
+.cz-big .t-bullish { color: var(--pos); } .cz-big .t-bearish { color: var(--neg); }
+.cz-means { font-size: 16px; line-height: 1.55; color: var(--text2); margin: 6px 0 12px; }
+.cz-means.down { color: var(--neg); }
+.cz-formula { font-family: var(--mono); font-size: 13px; color: var(--text2); padding: 10px 12px;
+  border: 1px solid var(--rule2); background: var(--black); margin: 10px 0; }
+.cz-guide { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.cz-guide > div { font-size: 14px; line-height: 1.5; color: var(--text2); padding-left: 12px; border-left: 2px solid var(--rule2); }
+.cz-guide span { display: block; font-family: var(--ui); font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 2px; }
+.cg-zoom .cg-table { font-size: 14px; }
+.cg-zoom .cg-table td { padding: 7px 10px; }
+.cg-zoom .cg-cmp dt, .cg-zoom .cg-cmp dd { font-size: 14px; }
+.cg-zoom .cg-cmp > div { padding: 7px 0; }
+.cg-zoom .cg-art a { font-size: 15px; }
+.cz-sibs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.cz-sib { text-align: left; background: var(--raised); border: 1px solid var(--rule); padding: 10px 12px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px; color: var(--text2); font-family: var(--ui); }
+.cz-sib:hover { border-color: var(--text2); }
+.cz-sib span { font-size: 11px; letter-spacing: .06em; }
+.cz-sib b { font-family: var(--mono); font-size: 20px; color: var(--text); }
+.cz-sib i { font-style: normal; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; }
+.cz-sib.t-bullish b, .cz-sib.t-bullish i { color: var(--pos); }
+.cz-sib.t-bearish b, .cz-sib.t-bearish i { color: var(--neg); }
+.cg-zoom .cg-output { margin-top: 22px; font-size: 15px; }
+
+/* The fit measures a square while it sets its type, so nothing inside a
+ * face may animate: a transition on font-size -- which a global rule gives
+ * everything -- means the measurement reads the old size mid-flight, and
+ * the square is fitted to a size it no longer has. */
+.ct-face, .ct-face * { transition: none !important; }
+
+/* Each square is laid out on its own: what happens inside a face cannot
+ * move anything outside it, so the fit can measure a square without the
+ * whole page being laid out again for every guess. */
+.tile.ct > .body { contain: strict; }
+
+/* An opened curriculum square is as tall as what it holds, up to the
+ * screen, rather than a fixed box with the bottom third empty. */
+.zoom:has(.cg-zoom) { height: auto; max-height: min(92vh, 1000px); }
+.zoom:has(.cg-zoom) > .inner { overflow: auto; }

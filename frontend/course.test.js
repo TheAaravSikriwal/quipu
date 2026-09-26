@@ -82,6 +82,16 @@ for (const [which, course] of Object.entries(FIXTURES)) {
   ok("an unavailable one says why, on the face", !quiet.length, quiet.map((m) => m.id).join(", ") || "all");
 
   const inside = (m) => details["c-" + m.id] || "";
+
+  // A face is blocks the page fits to the square: at least one must be the
+  // kind that is never dropped, or a small square could end up blank.
+  const faceOf = (id) => { const i = faces.indexOf(`data-tile="${id}"`); const j = faces.indexOf('data-tile="', i + 12);
+                           return faces.slice(i, j < 0 ? undefined : j); };
+  const noAnchor = drawn.filter((id) => !id.startsWith("c-payoff") && !/data-pri="0"/.test(faceOf(id)));
+  ok("every face has a block that is never dropped", !noAnchor.length, noAnchor.join(", ") || "all");
+  const unguided = metrics.filter((m) => !inside(m).includes("cz-guide"));
+  ok("every number opens with the curriculum's what / why / when", !unguided.length,
+     unguided.map((m) => `${m.id} (${m.lesson})`).join(", ") || "all");
   const noTable = metrics.filter((m) => m.available && m.against && !inside(m).includes("cg-table"));
   ok("opened, each has the curriculum's table", !noTable.length, noTable.map((m) => m.id).join(", ") || "all");
   const noCmp = metrics.filter((m) => m.available && m.compare?.length

@@ -248,7 +248,7 @@ const TERMS = {
   "bid-ask spread": {
     alt: ["bid/ask spread", "spread", "bid", "ask"],
     plain: "The gap between the highest price a buyer will pay and the lowest a seller will take.",
-    formula: "(ask − bid) ÷ ask",
+    formula: "(ask − bid) ÷ mid, where mid = (bid + ask) ÷ 2",
     note: "A cost you pay on the way in and again on the way out. Wide spreads quietly ruin otherwise sound trades.",
     use: "Half of it is your cost to get in and the other half your cost to get out. " +
          "On a wide spread the trade has to work by more than it appears to.",

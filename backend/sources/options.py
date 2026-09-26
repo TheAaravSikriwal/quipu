@@ -422,7 +422,10 @@ def _rows(frame, spot: float, years: float, rate: float, is_call: bool,
                 "bid": bid,
                 "ask": ask,
                 "mark": round(mark, 4) if mark else None,
-                "spread_pct": round(((ask - bid) / ask) * 100, 2)
+                # Of the MID, as the curriculum defines it (Lesson 1.1) and as
+                # Step 1 computes it. It was of the ask, so the board and
+                # Step 1 printed two different spreads for one contract.
+                "spread_pct": round(((ask - bid) / ((ask + bid) / 2)) * 100, 2)
                 if bid and ask else None,
                 "volume": volume,
                 "open_interest": oi,
