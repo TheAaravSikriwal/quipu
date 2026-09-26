@@ -1783,6 +1783,68 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "attribution", f"could not run: {exc}"))
 
+section("Open interest says what it means, not just how much")
+
+# A bare number cannot answer the only question open interest is for:
+# can you get back out. 1,240 is a deep strike on one board and a
+# backwater on another, and the figure alone does not know which.
+try:
+    import sources.options as OPT
+
+    def _row(oi, spread=None, vol=0, ratio=None):
+        return {"open_interest": oi, "spread_pct": spread,
+                "volume": vol, "vol_oi_ratio": ratio}
+
+    board = [_row(3000), _row(1500), _row(80), _row(75), _row(70),
+             _row(60), _row(30), _row(2), _row(0)]
+    OPT._read_open_interest(board)
+    reads = [r["oi_read"] for r in board]
+
+    RESULTS.append((all(r for r in reads), "every strike gets a reading",
+                    f"{sum(1 for r in reads if r)} of {len(board)}"))
+
+    levels = [r["level"] for r in reads]
+    RESULTS.append((levels[0] == "deep" and levels[-1] == "none",
+                    "the busiest is deep and the empty one is not",
+                    f"{levels[0]} ... {levels[-1]}"))
+    RESULTS.append((levels[-2] == "none" and levels[-3] == "thin",
+                    "two contracts is nothing, thirty is thin",
+                    f"{levels[-2]}, {levels[-3]}"))
+
+    # Never plural when it is one. Small, and the sort of thing that
+    # makes a page look like it was not read before it shipped.
+    one = [_row(1), _row(500), _row(400)]
+    OPT._read_open_interest(one)
+    RESULTS.append(("1 contract open" in one[0]["oi_read"]["say"],
+                    "one contract is not 1 contracts",
+                    one[0]["oi_read"]["say"][:34]))
+
+    # A busy strike with a wide quote is still expensive to leave, and
+    # saying only the first half would be the reassuring half.
+    wide = [_row(3000, spread=28), _row(1500), _row(80)]
+    OPT._read_open_interest(wide)
+    RESULTS.append(("wide" in wide[0]["oi_read"]["say"],
+                    "a busy strike with a wide quote says so",
+                    wide[0]["oi_read"]["say"][-52:]))
+
+    # And the middle band must not assert "normal" for something
+    # twenty-four times the median -- the page contradicting the
+    # numbers printed next to it.
+    lop = [_row(2000)] + [_row(70) for _ in range(8)] + [_row(1700)]
+    OPT._read_open_interest(lop)
+    mids = [r["oi_read"] for r in lop if r["oi_read"]["level"] == "usable"]
+    RESULTS.append((all("about normal" not in m["say"] for m in mids),
+                    "and never calls a lopsided figure normal",
+                    mids[0]["say"][:50] if mids else "no middle band here"))
+
+    # An empty board explains nothing rather than inventing a median.
+    empty = [_row(0), _row(0)]
+    OPT._read_open_interest(empty)
+    RESULTS.append((all(r["oi_read"] is None for r in empty),
+                    "a board with nothing open reads nothing", "declines"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "open interest", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.
@@ -1810,7 +1872,11 @@ try:
         if td > cal:
             bad.append(f'{e["expiry"]}: {td} sessions but only {cal} days')
         # And the calendar gap must be the real gap between the dates.
-        want = (_d2.fromisoformat(e["expiry"]) - _d2.today()).days
+        # The market's date, not this machine's. They are the same
+        # here and would not be on a laptop in another timezone --
+        # and "today" for a US option is the New York day whoever is
+        # looking at it.
+        want = (_d2.fromisoformat(e["expiry"]) - O.market_now().date()).days
         if cal != max(want, 0):
             bad.append(f'{e["expiry"]}: says {cal} days, dates give {want}')
 

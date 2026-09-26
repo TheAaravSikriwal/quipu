@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
 import yfinance as yf
@@ -220,6 +221,29 @@ def market_holidays(year: int) -> set:
     return out
 
 
+#: The exchange whose calendar every date on this board belongs to.
+_MARKET_TZ = ZoneInfo("America/New_York")
+
+
+def market_now() -> datetime:
+    """Now, on the market's clock rather than on UTC's.
+
+    These are US equity options, so the day they are counted in is the
+    New York day. UTC rolls over at 8pm Eastern in summer and 7pm in
+    winter, and counting from it meant that every evening after the
+    close the board quietly lost a day: on a Friday night, the
+    following Monday came back as two days out instead of three.
+
+    That is not only a wrong label. `trading_days` feeds the time to
+    expiry, which feeds every price and every greek on the board, so
+    for the last four hours of each day a three-day option was being
+    priced as a two-day one -- roughly a fifth of its time value gone,
+    and no sign on screen that anything was different from an hour
+    earlier.
+    """
+    return datetime.now(_MARKET_TZ)
+
+
 def trading_days(start: datetime, end: datetime) -> int:
     """Sessions between two dates: weekdays, less the days the market shuts.
 
@@ -277,6 +301,86 @@ def _binomial_fields(spot, strike, years, vol, rate, is_call, div_yield):
     if not b.get("available"):
         return {"binomial": None, "early_exercise": None}
     return {"binomial": b["price"], "early_exercise": b["early_exercise_value"]}
+
+
+def _read_open_interest(rows: List[Dict[str, Any]]) -> None:
+    """Say what each strike's open interest actually means, in place.
+
+    A bare number tells a reader nothing. "1,240" is a deep, liquid
+    strike on one board and a quiet backwater on another, and the
+    figure alone cannot say which -- it only means something next to
+    the rest of the board.
+
+    What it is FOR is one question: can you get back out. Open
+    interest is how many contracts are standing open at that strike,
+    so it is the size of the crowd you would be selling to. A few
+    dozen and you are negotiating with whoever happens to be there;
+    a few thousand and there is a market.
+
+    The spread is the other half of the same question and is read
+    alongside, because a strike can be busy and still expensive to
+    leave, and the two together are what it costs to change your
+    mind.
+    """
+    live = [r["open_interest"] for r in rows if r.get("open_interest")]
+    if not live:
+        for r in rows:
+            r["oi_read"] = None
+        return
+
+    ordered = sorted(live)
+    mid = ordered[len(ordered) // 2]
+    big = ordered[int(len(ordered) * 0.8)] if len(ordered) > 4 else max(ordered)
+
+    for r in rows:
+        oi = r.get("open_interest") or 0
+        spread = r.get("spread_pct")
+        wide = spread is not None and spread > 15
+
+        if oi <= 0:
+            level, say = "none", ("Nothing is open here at all. Whatever you "
+                                  "buy, you would be looking for the first "
+                                  "person willing to take it back.")
+        elif oi < 25:
+            level, say = "none", (
+                f"{oi} contract{'' if oi == 1 else 's'} open across the whole "
+                "market. Getting out means finding one specific buyer, at "
+                "their price.")
+        elif oi < max(mid * 0.4, 50):
+            level, say = "thin", (f"{oi:,} open, against a typical {mid:,} on "
+                                  "this board. Quiet enough that closing early "
+                                  "may cost more than the screen suggests.")
+        elif oi >= big:
+            level, say = "deep", (f"{oi:,} open, among the busiest strikes "
+                                  "here. Somebody is generally around to take "
+                                  "the other side.")
+        else:
+            # Stated as the comparison it is, not asserted to be
+            # normal: 1,748 against a typical 73 is twenty-four times
+            # the median, and calling that "about normal" is the page
+            # telling the reader something the numbers beside it
+            # contradict.
+            times = oi / mid if mid else 0
+            how = ("well above the " if times >= 3
+                   else "around the " if times >= 0.7 else "below the ")
+            level, say = "usable", (f"{oi:,} open, {how}{mid:,} typical on this "
+                                    "board. Ordinary to trade in and out of.")
+
+        if wide and level in ("deep", "usable"):
+            say += (f" The quote is still {spread:.0f}% wide, though, so "
+                    "leaving is not free.")
+        elif wide:
+            say += f" And the quote is {spread:.0f}% wide on top of that."
+
+        # Volume against open interest says whether today's trading is
+        # NEW positioning or existing holders passing paper around.
+        ratio = r.get("vol_oi_ratio")
+        if ratio and ratio > 2 and (r.get("volume") or 0) > 100:
+            say += (f" Today's volume is {ratio:g} times what was open, so "
+                    "most of this is new positions rather than old ones "
+                    "being closed.")
+
+        r["oi_read"] = {"level": level, "say": say, "typical": mid}
 
 
 def _rows(frame, spot: float, years: float, rate: float, is_call: bool,
@@ -537,7 +641,7 @@ def escrowed_spot(spot: float, dividends: Optional[List[Dict]], expiry: str,
     schedule is not known -- which is most non-payers, where it is zero
     and the distinction does not arise.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or market_now()
     if not dividends or not spot:
         return {"spot": spot, "pv": 0.0, "used": [], "model": "yield"}
 
@@ -622,7 +726,7 @@ def fetch_options(symbol: str, max_expiries: int = 4,
         # The expiry is still listed and still selectable -- someone
         # closing a position today needs it -- it is just not what the
         # board opens on.
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = market_now().date().isoformat()
         future = [e for e in listed if e > today] or listed
         expiries = future[:max_expiries]
     if not expiries:
@@ -640,7 +744,7 @@ def fetch_options(symbol: str, max_expiries: int = 4,
     info = ticker.info or {}
     spot = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0.0)
     rate = risk_free_rate()
-    now = datetime.now(timezone.utc)
+    now = market_now()
 
     chains: List[Dict[str, Any]] = []
     for expiry in expiries:
@@ -649,7 +753,9 @@ def fetch_options(symbol: str, max_expiries: int = 4,
         except Exception:
             continue
 
-        expiry_dt = datetime.strptime(expiry, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # Midnight on the expiry date, on the market's clock, so the
+        # comparison with `now` is between two points on one calendar.
+        expiry_dt = datetime.strptime(expiry, "%Y-%m-%d").replace(tzinfo=_MARKET_TZ)
 
         # Counted between DATES, the same way trading_days counts them.
         #
@@ -675,6 +781,11 @@ def fetch_options(symbol: str, max_expiries: int = 4,
 
         calls = _rows(chain.calls, use_spot, years, rate, True, use_q)
         puts = _rows(chain.puts, use_spot, years, rate, False, use_q)
+
+        # Read against the rest of the board, which is the only thing
+        # that makes one strike's figure mean anything.
+        _read_open_interest(calls)
+        _read_open_interest(puts)
 
         call_vol = sum(r["volume"] for r in calls)
         put_vol = sum(r["volume"] for r in puts)

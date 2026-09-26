@@ -1593,7 +1593,13 @@ function renderLadder(tab, withPresets = true) {
       : (ed > 0 ? "+" : "−") + nf(Math.abs(ed), inVol ? 1 : 2);
     const bid = r.bid, ask = r.ask;
     const cells = [
-      `<span class="q oi" title="${big(r.open_interest)} contracts open">${big(r.open_interest)}</span>`,
+      // Open interest says one thing: whether you can get back out.
+      // The number alone cannot -- 1,240 is a deep strike on one board
+      // and a backwater on another -- so the read against the rest of
+      // this board travels with it, and the thin ones are marked.
+      `<span class="q oi ${esc((r.oi_read?.level) || "")}"
+         title="${esc(r.oi_read?.say || `${big(r.open_interest)} contracts open`)}"
+         >${big(r.open_interest)}</span>`,
       `<span class="q">${big(r.volume)}</span>`,
       `<span class="q">${r.iv == null ? "&ndash;" : nf(r.iv, 1)}</span>`,
       // Implied against what the stock has actually been doing. One
@@ -1700,6 +1706,12 @@ function renderLadder(tab, withPresets = true) {
       ${body}
     </div>
     <div class="cfoot">
+      <b>open int</b> is how many contracts are standing open at that strike,
+      which is the size of the crowd you would be selling back to. It is the
+      one number on the board that answers &ldquo;can I get out of this&rdquo;
+      &mdash; hover any of them for what it means against the rest of this
+      board, since a thousand contracts is deep on one chain and quiet on
+      another. Strikes with almost nothing open are marked.
       <b>iv &minus; hv</b> is this strike&rsquo;s implied volatility less what the
       share has actually done over the last twenty sessions, in points. Positive
       means the option is priced for more movement than the stock has been

@@ -2870,3 +2870,13 @@ a { color: inherit; text-decoration: none; }
 
 .pfytick text { font-family: var(--mono); font-size: 9.5px; fill: var(--faint); }
 .pfytick.zero text { fill: var(--text2); }
+
+/* Open interest, marked by what it means for getting out.
+   The number alone cannot say: 1,240 is a deep strike on one board and
+   a backwater on another. Only the two extremes are marked -- flagging
+   the ordinary middle would be colour carrying no information, and
+   both carry the reading in the tooltip. */
+.q.oi.none { color: var(--neg); }
+.q.oi.thin { color: var(--warn); }
+.q.oi.deep { color: var(--text); }
+.q.oi.none::after { content: "\00a0!"; font-size: .85em; }
