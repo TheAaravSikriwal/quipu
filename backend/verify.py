@@ -42,6 +42,22 @@ def check(name: str, got: Any, want: Any, tol: float = 1e-4, note: str = "") -> 
     RESULTS.append((ok, name, (detail + ("  " + note if note else "")).strip()))
 
 
+def shipped_js() -> str:
+    """Every script the page loads, joined in the order it loads them.
+
+    Read off index.html, so the frontend can be split into as many
+    files as it likes -- by room, by panel -- and a check that scans
+    "the app" still scans all of it rather than whichever file used to
+    hold everything.
+    """
+    import re
+    root = Path(__file__).resolve().parent.parent / "frontend"
+    page = (root / "index.html").read_text(encoding="utf-8")
+    names = re.findall(r'<script src="[^"]*?/?([\w.-]+\.js)"', page)
+    return "\n".join((root / n).read_text(encoding="utf-8")
+                     for n in names if (root / n).exists())
+
+
 def section(title: str) -> None:
     RESULTS.append((None, title, ""))
 
@@ -1485,7 +1501,7 @@ try:
     import re as _re
 
     root = Path(__file__).resolve().parent.parent
-    js = (root / "frontend" / "app.js").read_text(encoding="utf-8")
+    js = shipped_js()
     css = (root / "frontend" / "styles.css").read_text(encoding="utf-8")
 
     table = _re.search(r"const ROOMS = \{([\s\S]*?)\};", js)
@@ -2021,8 +2037,7 @@ section("A missing number is never shown as a real one")
 try:
     import re as _re
 
-    js = (Path(__file__).resolve().parent.parent / "frontend" / "app.js") \
-        .read_text(encoding="utf-8")
+    js = shipped_js()
 
     # Flag only the unguarded ones. A multiplication sitting after an
     # explicit null test on the same value is fine, and so is the safe

@@ -10,44 +10,15 @@
  * which contract you are about to buy, and in the leg table, and in
  * the assignment warning. It shipped because nothing here tested it.
  *
- * app.js is a classic script rather than a module, so the definitions
+ * The frontend is classic scripts rather than modules, so the definitions
  * are lifted out of the source and evaluated. That is deliberate: it
  * tests the code that actually runs, not a copy of it that can drift.
  */
 
-const fs = require("fs");
-const path = require("path");
-
-const SRC = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
-
-/** Pull one top-level `const name = ...;` declaration out of the source.
- *
- * Scanned rather than matched with a regex: these are arrow functions
- * with block bodies, and "up to the first semicolon" stops at the
- * first `return` inside the body and lifts half a function.
- */
-function lift(name) {
-  const start = SRC.search(new RegExp(`^const ${name} = `, "m"));
-  if (start < 0) throw new Error(`could not find "const ${name}" in app.js`);
-
-  let depth = 0, str = null;
-  for (let i = start; i < SRC.length; i++) {
-    const c = SRC[i], prev = SRC[i - 1];
-    if (str) {                                  // inside a literal
-      if (c === str && prev !== "\\") str = null;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") { str = c; continue; }
-    if ("([{".includes(c)) depth++;
-    else if (")]}".includes(c)) depth--;
-    else if (c === ";" && depth === 0) return SRC.slice(start, i + 1);
-  }
-  throw new Error(`"const ${name}" in app.js never ends`);
-}
+const { lift } = require("./lift.js");
 
 // nf is what strikeOf formats through, so it has to be the real one.
-const { nf, strikeOf } = new Function(
-  `${lift("nf")}\n${lift("strikeOf")}\nreturn { nf, strikeOf };`)();
+const { nf, strikeOf } = lift("nf", "strikeOf");
 
 let pass = 0, fail = 0;
 

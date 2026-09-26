@@ -23,8 +23,34 @@ function source(file) {
   return cache[file];
 }
 
+/* Every script the page loads, in the order it loads them.
+ *
+ * Read off index.html rather than listed, so a declaration can move
+ * from one file to another -- which is the whole point of splitting
+ * the app by room -- without a single test having to be told.
+ */
+function shipped() {
+  const page = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+  return [...page.matchAll(/<script src="[^"]*?\/?([\w.-]+\.js)"/g)].map((m) => m[1]);
+}
+
+/* Which shipped file declares `name` at the top level. Exactly one
+ * may: two would be a SyntaxError on the page before it is a question
+ * here. */
+function whereIs(name) {
+  const decl = new RegExp(`^(?:const ${name} = |function ${name}\\()`, "m");
+  // A file wrapped in an IIFE declares nothing on the page, so a name
+  // inside one is not the page's -- ask for it as "file.js:name".
+  const wrapped = (f) => /^\(function \(\) \{/m.test(source(f))
+    && source(f).trimEnd().endsWith("}());");
+  const hits = shipped().filter((f) => !wrapped(f) && decl.test(source(f)));
+  if (hits.length === 1) return hits[0];
+  if (!hits.length) throw new Error(`no shipped script declares "${name}"`);
+  throw new Error(`"${name}" is declared by ${hits.join(" and ")}`);
+}
+
 /** The source text of one top-level `const name = ...;` or `function name`. */
-function one(name, file = "app.js") {
+function one(name, file = whereIs(name)) {
   const src = source(file);
   const asConst = new RegExp(`^const ${name} = `, "m");
   const asFn = new RegExp(`^function ${name}\\(`, "m");
@@ -62,12 +88,13 @@ function one(name, file = "app.js") {
 
 /** Evaluate several declarations together and hand them back.
  *
- * Names may be given as "name" (from app.js) or "file.js:name".
+ * Names may be given as "name" (found in whichever shipped script
+ * declares it) or "file.js:name" to insist on one file.
  */
 function lift(...names) {
   const parts = names.map((n) => {
     const i = n.indexOf(":");
-    return i < 0 ? { file: "app.js", name: n }
+    return i < 0 ? { file: undefined, name: n }
                  : { file: n.slice(0, i), name: n.slice(i + 1) };
   });
   const body = parts.map((p) => one(p.name, p.file)).join("\n");
@@ -75,4 +102,4 @@ function lift(...names) {
   return new Function(`${body}\nreturn { ${keys.join(", ")} };`)();
 }
 
-module.exports = { lift, one, source };
+module.exports = { lift, one, source, shipped, whereIs };
