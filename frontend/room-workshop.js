@@ -1262,73 +1262,95 @@ function renderCommit(tab) {
 }
 
 function renderAnalysis(tab) {
-  const u = tab.ui, d = tab.data;
   if (tab.error) {
     return `<div class="empty" style="height:140px"><div class="down">Could not price that</div>
       <div class="stage">${esc(tab.error)}</div></div>`;
   }
-  if (!d) return "";
+  if (!tab.data) return "";
+  // Which parts, and in what order, is layout.js's call.
+  return `<div class="posbody">${compose("position", tab)}</div>`;
+}
 
-  const s = d.strategy;
-  const plCls = d.pl >= 0 ? "up" : "down";
-  const DASH = "−";
-  const chip = (label, value, cls = "") =>
-    `<div class="pstat"><span>${label}</span><b class="${cls}">${value}</b></div>`;
-  const optLegs = d.legs.filter((l) => l.kind !== "stock").length;
+/* ---- the analysis, piece by piece ----------------------------------
+ *
+ * Each piece is drawn from the priced position alone, so any of them
+ * can be moved, dropped, or reused somewhere else without the others
+ * noticing.
+ */
+const posChip = (label, value, cls = "") =>
+  `<div class="pstat"><span>${label}</span><b class="${cls}">${value}</b></div>`;
+const MINUS = "−";
 
-  return `
-    <div class="posbody">
-      <div class="phead">
+panel("position", "head", "The strategy's name, its family, and what it is", (tab) => {
+  const s = tab.data.strategy;
+  return `<div class="phead">
         <h2>${esc(s.name)}</h2>
         <span class="fam">${esc(s.family)}</span>
         ${s.note ? `<p>${esc(s.note)}</p>` : ""}
-      </div>
+      </div>`;
+});
 
-      ${moneyBlock(d, u.symbol, d.spot, u.size || 1)}
+panel("position", "money", "The big numbers: what you pay, the most you can win and lose, and the sums",
+  (tab) => moneyBlock(tab.data, tab.ui.symbol, tab.data.spot, tab.ui.size || 1));
 
-      ${d.plain ? `<div class="plain">
+panel("position", "plain", "The position in two plain sentences", (tab) => {
+  const d = tab.data;
+  return d.plain ? `<div class="plain">
         <p>${d.plain.position}</p>
         ${d.plain.behaviour ? `<p>${d.plain.behaviour}</p>` : ""}
-      </div>` : ""}
+      </div>` : "";
+});
 
-      <div class="pstats">
-        ${chip("profit / loss right now",
-          calc((d.pl >= 0 ? "+" : DASH) + money(Math.abs(d.pl), 0), d.working?.profit), plCls)}
-        ${chip("of what is at risk",
+panel("position", "now", "Profit now, of risk, value if closed, break-even, chance, time left", (tab) => {
+  const d = tab.data;
+  const plCls = d.pl >= 0 ? "up" : "down";
+  return `<div class="pstats">
+        ${posChip("profit / loss right now",
+          calc((d.pl >= 0 ? "+" : MINUS) + money(Math.abs(d.pl), 0), d.working?.profit), plCls)}
+        ${posChip("of what is at risk",
           d.pl_pct == null ? "--" : calc(signed(d.pl_pct, 0), d.working?.pl_pct), plCls)}
-        ${chip("worth if closed now", money(d.value_now, 0))}
-        ${chip("break-even", (d.breakevens || []).length
+        ${posChip("worth if closed now", money(d.value_now, 0))}
+        ${posChip("break-even", (d.breakevens || []).length
           ? d.breakevens.map((b, i) =>
               calc(money(b), d.breakeven_working?.[i])).join("  /  ")
           : "--")}
-        ${chip("chance of making money", d.chance == null ? "--"
+        ${posChip("chance of making money", d.chance == null ? "--"
           : calc(nf(d.chance, 0) + "%", d.chance_working))}
-        ${chip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
-      </div>
+        ${posChip("sessions left", d.days_left == null ? "--" : String(d.days_left))}
+      </div>`;
+});
 
-      <h4>${d.valued_at ? `Profit on ${esc(d.valued_at)}, the first expiry`
+panel("position", "payoff", "The payoff diagram: strikes, break-evens, max win and loss", (tab) => {
+  const d = tab.data;
+  return `<h4>${d.valued_at ? `Profit on ${esc(d.valued_at)}, the first expiry`
         : "Profit at expiry"}, against where it finishes</h4>
       ${d.valued_at ? `<div class="fnote" style="padding-top:0">The legs expiring
         later are still alive on that date, so they are valued rather than
         settled &mdash; which is the whole of how this position makes money.</div>` : ""}
-      <div class="qchart-host poschart" style="height:250px"></div>
+      <div class="qchart-host poschart" style="height:250px"></div>`;
+});
 
-      <h4>The same thing, as figures</h4>
+panel("position", "figures", "The greeks, as shares and dollars", (tab) => {
+  const d = tab.data;
+  return `<h4>The same thing, as figures</h4>
       <div class="pstats">
-        ${chip("behaves like owning",
+        ${posChip("behaves like owning",
           calc(nf(d.share_equivalent, 0) + " shares", d.greek_working?.delta))}
-        ${chip("gain per $1 rise", money(d.greeks.delta, 0))}
-        ${chip("and that grows by",
+        ${posChip("gain per $1 rise", money(d.greeks.delta, 0))}
+        ${posChip("and that grows by",
           calc(nf(d.greeks.gamma, 1) + " shares / $1", d.greek_working?.gamma))}
-        ${chip("time, each day",
-          calc((d.greeks.theta >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.theta)),
+        ${posChip("time, each day",
+          calc((d.greeks.theta >= 0 ? "+" : MINUS) + money(Math.abs(d.greeks.theta)),
                d.greek_working?.theta), d.greeks.theta >= 0 ? "up" : "down")}
-        ${chip("if volatility rises 1pt",
-          calc((d.greeks.vega >= 0 ? "+" : DASH) + money(Math.abs(d.greeks.vega)),
+        ${posChip("if volatility rises 1pt",
+          calc((d.greeks.vega >= 0 ? "+" : MINUS) + money(Math.abs(d.greeks.vega)),
                d.greek_working?.vega))}
-      </div>
+      </div>`;
+});
 
-      <h4>Each leg</h4>
+panel("position", "legs", "Each leg: expiry, entry, mark, delta, profit", (tab) => {
+  const d = tab.data;
+  return `<h4>Each leg</h4>
       <div class="plegs">
         <div class="pleg plhead"><span>leg</span><span>expiry</span><span>sessions</span>
           <span>entry</span><span>mark</span><span>delta</span><span>profit</span></div>
@@ -1339,11 +1361,14 @@ function renderAnalysis(tab) {
           <span>${money(l.entry)}</span>
           <span>${money(l.mark)}</span>
           <span>${l.delta == null ? "--" : nf(l.delta, 3)}</span>
-          <span class="${l.pl >= 0 ? "up" : "down"}">${(l.pl >= 0 ? "+" : DASH) + money(Math.abs(l.pl), 0)}</span>
+          <span class="${l.pl >= 0 ? "up" : "down"}">${(l.pl >= 0 ? "+" : MINUS) + money(Math.abs(l.pl), 0)}</span>
         </div>`).join("")}
-      </div>
+      </div>`;
+});
 
-      <h4>What to do with it</h4>
+panel("position", "guidance", "What to do with it, step by step", (tab) => {
+  const d = tab.data;
+  return `<h4>What to do with it</h4>
       <div class="story-steps full">
         ${(d.guidance || []).map((g, i) => `
           <div class="sstep">
@@ -1362,20 +1387,23 @@ function renderAnalysis(tab) {
                 ${wcalc(g.working)}</details>` : ""}
             </div>
           </div>`).join("")}
-      </div>
+      </div>`;
+});
 
-      ${renderCommit(tab)}
+panel("position", "commit", "Put it in the trade log", (tab) => renderCommit(tab));
 
-      <div class="fnote prose">
+panel("position", "footnote", "Where the marks came from, and what is not included", (tab) => {
+  const d = tab.data;
+  const optLegs = d.legs.filter((l) => l.kind !== "stock").length;
+  return `<div class="fnote prose">
         Marks come from the live chain where the contract is listed and from
         Black-Scholes where it is not &mdash; ${d.marks_live} of ${optLegs} option
         legs here are real quotes. Entry prices default to today's mark, which is
         not what you paid: edit them on the chips above. The spread you would
         cross to get out is not included either. Volatility
         ${pct(d.vol_used, 1)}, rate ${pct(d.rate, 2)}, dividend yield ${pct(d.div_yield, 2)}.
-      </div>
-    </div>`;
-}
+      </div>`;
+});
 
 function wirePosition(tab) {
   const u = tab.ui;

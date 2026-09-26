@@ -2321,7 +2321,8 @@ try:
                         ("format.test.js", "the formatters name things correctly"),
                         ("expiry.test.js", "the expiry deadline is a real moment"),
                         ("versus.test.js", "the comparison names the right winner"),
-                        ("payoff.test.js", "the payoff diagram shows what it should")):
+                        ("payoff.test.js", "the payoff diagram shows what it should"),
+                        ("layout.test.js", "the layout names real panels, once each")):
         proc = subprocess.run(
             ["node", str(root / "frontend" / name)],
             capture_output=True, text=True, timeout=60, cwd=str(root))

@@ -98,4 +98,41 @@ function lift(...names) {
   return new Function(`${body}\nreturn { ${keys.join(", ")} };`)();
 }
 
-module.exports = { lift, one, source, shipped, whereIs };
+/** Load the whole page, script by script, into one sandbox.
+ *
+ * For the tests that are about how the pieces fit together rather than
+ * what one function returns: every script runs in page order against
+ * a document that answers anything, so what comes back is the page's
+ * real global scope. boot.js is left out -- it opens a tab.
+ *
+ * Top-level `const` and `let` do not become properties of the global
+ * object, so they are handed back by evaluating their names inside it.
+ */
+function page(...names) {
+  const any = new Proxy(function () {}, {
+    get: (t, k) => (k === Symbol.toPrimitive ? () => "" : k === "length" ? 0 : any),
+    apply: () => any, construct: () => any, set: () => true,
+  });
+  const ctx = {
+    console: { ...console, warn: (...a) => ctx.warnings.push(a.join(" ")) },
+    warnings: [],
+    setTimeout: () => 0, setInterval: () => 0, clearTimeout() {}, clearInterval() {},
+    fetch: () => new Promise(() => {}),
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    document: any, navigator: any, location: any, requestAnimationFrame: () => 0,
+    ResizeObserver: function () { return any; }, matchMedia: () => any,
+    addEventListener() {}, removeEventListener() {},
+  };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  for (const f of shipped().filter((f) => f !== "boot.js")) {
+    vm.runInContext(source(f), ctx, { filename: f });
+  }
+  const out = vm.runInContext(`({ ${names.join(", ")} })`, ctx);
+  out.warnings = ctx.warnings;
+  // Anything else, evaluated inside the page's own scope.
+  out.run = (code) => vm.runInContext(code, ctx);
+  return out;
+}
+
+module.exports = { lift, one, source, shipped, whereIs, page };

@@ -65,22 +65,22 @@ function renderWorld(tab) {
       <div class="stage">${esc(tab.error)}</div></div>`;
   }
 
+  // Which parts, and in what order, is layout.js's call.
+  return bar + `<div class="worldbody">${compose("world", tab)}</div>`;
+}
+
+/* ---- the panels ---------------------------------------------------- */
+
+const WORLD_GROUPS = {
+  all: "everything",
+  policy: "central banks and regulators",
+  data: "the statistics agencies",
+  markets: "the tape",
+  wire: "the wires",
+};
+
+panel("world", "barometer", "Index funds, VIX, Treasuries, gold and oil: where the market is", (tab) => {
   const d = tab.data || {};
-  const group = tab.ui.group || "all";
-  const heads = (d.headlines || []).filter(
-    (h) => group === "all" || h.group === group);
-
-  const counts = {};
-  (d.headlines || []).forEach((h) => { counts[h.group] = (counts[h.group] || 0) + 1; });
-
-  const GROUPS = {
-    all: "everything",
-    policy: "central banks and regulators",
-    data: "the statistics agencies",
-    markets: "the tape",
-    wire: "the wires",
-  };
-
   const baro = (d.barometer || []).map((b) => `
     <div class="wxcell">
       <span class="wxlab">${esc(b.label)}</span>
@@ -89,26 +89,26 @@ function renderWorld(tab) {
       <span class="wxpx">${b.price == null ? "" : money(b.price)}</span>
       <span class="wxwhat">${esc(b.what)}${b.note ? ` &mdash; ${esc(b.note)}` : ""}</span>
     </div>`).join("");
-
-  const cal = ((d.calendar || {}).events || []).slice(0, 8).map((e) => `
-    <div class="wcal">
-      <span class="wcd">${esc(e.date)}</span>
-      <span class="wct">${esc(e.title)}</span>
-      <span class="wcw">${esc((e.why || "").slice(0, 110))}</span>
-    </div>`).join("");
-
-  return bar + `<div class="worldbody">
-    <h4>Where the market is</h4>
+  return `<h4>Where the market is</h4>
     <div class="wxgrid">${baro}</div>
     <div class="fnote">Index funds rather than the indices themselves, because
       those are what actually trade. A day is not a trend and none of this is
-      a forecast.</div>
+      a forecast.</div>`;
+});
 
-    <h4>What happened</h4>
+panel("world", "headlines", "What happened, ranked by source, reach and weight", (tab) => {
+  const d = tab.data || {};
+  const group = tab.ui.group || "all";
+  const heads = (d.headlines || []).filter(
+    (h) => group === "all" || h.group === group);
+  const counts = {};
+  (d.headlines || []).forEach((h) => { counts[h.group] = (counts[h.group] || 0) + 1; });
+
+  return `<h4>What happened</h4>
     <div class="expbar">
       <span class="explab">show</span>
       <div class="cseg">
-        ${Object.entries(GROUPS).map(([k, label]) => `
+        ${Object.entries(WORLD_GROUPS).map(([k, label]) => `
           <button data-wgroup="${k}" class="${group === k ? "on" : ""}">${label}${
             k === "all" ? "" : counts[k] ? ` ${counts[k]}` : ""}</button>`).join("")}
       </div>
@@ -132,11 +132,19 @@ function renderWorld(tab) {
       blog about one &mdash; by how many outlets ran it, and by whether the
       headline contains the kind of word that moves a whole market rather than
       one company. A story nobody else carried can still be the one that
-      matters, so a low rank buries it rather than dropping it.</div>
+      matters, so a low rank buries it rather than dropping it.</div>`;
+});
 
-    ${cal ? `<h4>What is coming</h4><div class="wcals">${cal}</div>` : ""}
-  </div>`;
-}
+panel("world", "calendar", "What is coming: the next scheduled releases", (tab) => {
+  const d = tab.data || {};
+  const cal = ((d.calendar || {}).events || []).slice(0, 8).map((e) => `
+    <div class="wcal">
+      <span class="wcd">${esc(e.date)}</span>
+      <span class="wct">${esc(e.title)}</span>
+      <span class="wcw">${esc((e.why || "").slice(0, 110))}</span>
+    </div>`).join("");
+  return cal ? `<h4>What is coming</h4><div class="wcals">${cal}</div>` : "";
+});
 
 function wireWorld(tab) {
   wireRooms();

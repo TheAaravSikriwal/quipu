@@ -265,17 +265,9 @@ const CLASS_NOTE = {
  * them, marks the one you are in, and jumps to any other -- and because the
  * grid lays tiles out in reading order, every region is one contiguous run.
  */
-const REGIONS = [
-  { id: "price",    label: "Price",    keys: ["quote", "price", "returns", "volume"] },
-  { id: "options",  label: "Options",  keys: ["vol", "options", "optionstory", "probability",
-                                              "unusual", "greeks", "chain"] },
-  { id: "business", label: "Business", keys: ["profile", "holdings", "secfin", "secmargins", "financials",
-                                              "valuation", "earnings", "analysts", "ownership",
-                                              "short", "filings"] },
-  { id: "news",     label: "News",     keys: ["calendar", "news", "unique",
-                                              "corroborated", "stories", "social",
-                                              "pipeline"] },
-];
+// Read off the layout, so the rail's regions and the order the tiles
+// are drawn in are one list rather than two that have to agree.
+const REGIONS = LAYOUT.search.map((g) => ({ id: g.id, label: g.label, keys: g.panels }));
 
 /* Which region a panel belongs to, by reading order. The packer uses this to
  * keep a region in one run down the page; the rail is useless if "Business"
@@ -2526,48 +2518,11 @@ function renderDashboard(d, tab) {
   SPANS = {};
   BADGES = {};
 
-  // One dense grid. Order groups related tiles together; the coloured top rule
-  // on each tile keeps the grouping legible once dense packing shuffles them.
-  const tiles = [
-    quoteTile(d.quote, tab),
-    priceChartTile(d, tab),
-    returnsTile(d.long_history),
-    volumeTile(d.volume),
-
-    volatilityTile(d),
-    optionsTile(d.options),
-    optionStoryTile(d, tab),
-    probabilityTile(d, tab),
-    unusualTile(d.options),
-    greeksTile(d, tab),
-    chainTile(d, tab),
-
-    profileTile(d.profile),
-    holdingsTile(d),
-    secFinTile(d),
-    secMarginsTile(d),
-    financialsTile(d.financials),
-    valuationTile(d.fundamentals),
-    earningsTile(d.earnings),
-    analystTile(d.fundamentals),
-    ownershipTile(d.ownership),
-    shortTile(d.fundamentals),
-    filingsTile(d.filings),
-
-    eventsTile(d, tab),
-    newsTile(d.news),
-    uniqueTile(d.crossref),
-    corroboratedTile(d.crossref),
-    storiesTile(d.crossref),
-    socialTile(d.social),
-    pipelineTile(d, tab),
-  ];
-
-  // Reading order, not packing order: the price leads, then volatility and
-  // options, then the business, then the news. packGrid() closes any gaps this
-  // ordering leaves, so there is no need to sort by size and bury the quote.
+  // One dense grid, in the order layout.js gives. Reading order, not
+  // packing order: packGrid() closes any gaps the ordering leaves, so
+  // there is no need to sort by size and bury the quote.
   return liveBar(tab)
-    + `<div class="grid">${tiles.filter(Boolean).join("")}</div>`
+    + `<div class="grid">${compose("search", d, tab)}</div>`
     + renderRail()
     + renderZoom(tab);
 }
@@ -3744,3 +3699,42 @@ room("search", {
   place: (u) => ({ zoom: u.zoom }),
   name: () => "New search",
 });
+
+/* ---- the panels ---------------------------------------------------- */
+
+/* Every tile this room can draw, by the id it carries on the page.
+ * The ids are the ones the rail, the story arrows and the live patch
+ * already look tiles up by, so a tile moved or dropped in layout.js
+ * is moved or dropped everywhere at once. */
+panel("search", "quote", "The live price and the day's move", (d, tab) => quoteTile(d.quote, tab));
+panel("search", "price", "The price chart, today out to five years, with indicators", (d, tab) => priceChartTile(d, tab));
+panel("search", "returns", "How it has done over each horizon", (d) => returnsTile(d.long_history));
+panel("search", "volume", "The tape: how much trades, and when", (d) => volumeTile(d.volume));
+
+panel("search", "vol", "Implied against realised volatility: is movement cheap or dear", (d) => volatilityTile(d));
+panel("search", "options", "The chain in summary: expected move, skew, put/call", (d) => optionsTile(d.options));
+panel("search", "optionstory", "The options, read in order", (d, tab) => optionStoryTile(d, tab));
+panel("search", "probability", "Chance of finishing past a price", (d, tab) => probabilityTile(d, tab));
+panel("search", "unusual", "Contracts trading far out of line with their open interest", (d) => unusualTile(d.options));
+panel("search", "greeks", "What one position would cost and do, in dollars", (d, tab) => greeksTile(d, tab));
+panel("search", "chain", "The full board, to pick a contract", (d, tab) => chainTile(d, tab));
+
+panel("search", "profile", "What the company does", (d) => profileTile(d.profile));
+panel("search", "holdings", "What is inside it, for a fund", (d) => holdingsTile(d));
+panel("search", "secfin", "The accounts, exactly as filed with the SEC", (d) => secFinTile(d));
+panel("search", "secmargins", "Margins computed from those filed figures", (d) => secMarginsTile(d));
+panel("search", "financials", "Annual financials", (d) => financialsTile(d.financials));
+panel("search", "valuation", "What you pay for the earnings", (d) => valuationTile(d.fundamentals));
+panel("search", "earnings", "Whether it hits its numbers", (d) => earningsTile(d.earnings));
+panel("search", "analysts", "What the street expects", (d) => analystTile(d.fundamentals));
+panel("search", "ownership", "Who holds it", (d) => ownershipTile(d.ownership));
+panel("search", "short", "Who is betting against it", (d) => shortTile(d.fundamentals));
+panel("search", "filings", "The latest filings, in plain English", (d) => filingsTile(d.filings));
+
+panel("search", "calendar", "What is already on the calendar, company and market", (d, tab) => eventsTile(d, tab));
+panel("search", "news", "Headlines, the price-moving ones lifted", (d) => newsTile(d.news));
+panel("search", "unique", "What only one outlet reported", (d) => uniqueTile(d.crossref));
+panel("search", "corroborated", "Claims two or more outlets agree on", (d) => corroboratedTile(d.crossref));
+panel("search", "stories", "Articles grouped into events", (d) => storiesTile(d.crossref));
+panel("search", "social", "Retail chatter", (d) => socialTile(d.social));
+panel("search", "pipeline", "What this load fetched and how long each part took", (d, tab) => pipelineTile(d, tab));

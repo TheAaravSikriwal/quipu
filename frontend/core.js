@@ -203,3 +203,69 @@ const WK = () => window.QUIPU_WORKING.WK;
 
 const kv = (label, value, cls = "") =>
   `<div class="kv"><span>${label}</span><span class="${cls}">${value}</span></div>`;
+
+/* ---- panels ---------------------------------------------------------
+ *
+ * Every piece a room can show, registered by name from the room's own
+ * file with panel(). Which of them appear, and in what order, is
+ * decided by LAYOUT in layout.js and nowhere else: a room draws itself
+ * by asking for its layout, never by listing its own panels.
+ *
+ * A panel's draw() gets whatever its room hands compose() -- the tab,
+ * and for some rooms a context worked out once for all of them -- and
+ * returns HTML, or nothing when it has nothing to say.
+ */
+const PANELS = {};
+
+function panel(roomId, id, what, draw) {
+  (PANELS[roomId] = PANELS[roomId] || {})[id] = { what, draw };
+}
+
+/* The names a room shows, in order. The search room's are grouped. */
+const layoutOf = (roomId) => (LAYOUT[roomId] || [])
+  .flatMap((x) => (typeof x === "string" ? [x] : x.panels));
+
+const MISSING_PANELS = new Set();
+
+function drawPanel(roomId, id, ...args) {
+  const p = PANELS[roomId]?.[id];
+  if (!p) {
+    // Said once, and drawn as nothing: a typo in the layout should
+    // cost one panel, not the room.
+    const key = roomId + "/" + id;
+    if (!MISSING_PANELS.has(key)) {
+      MISSING_PANELS.add(key);
+      console.warn(`layout.js lists "${id}" in ${roomId}, but no panel of that name exists`);
+    }
+    return "";
+  }
+  return p.draw(...args) || "";
+}
+
+/* A room's panels, drawn in layout order. */
+const compose = (roomId, ...args) =>
+  layoutOf(roomId).map((id) => drawPanel(roomId, id, ...args)).join("");
+
+/* One panel, only if the layout shows it -- for the places a room
+ * draws a single piece on its own, such as the log's header over an
+ * empty log. */
+const shown = (roomId, id, ...args) =>
+  (layoutOf(roomId).includes(id) ? drawPanel(roomId, id, ...args) : "");
+
+/* Everything that exists, where it sits, and what is switched off.
+ * For the console: inventory() or inventory("position"). */
+function inventory(only) {
+  const rows = [];
+  Object.keys(PANELS).filter((r) => !only || r === only).forEach((r) => {
+    const on = layoutOf(r);
+    Object.entries(PANELS[r]).forEach(([id, p]) => rows.push({
+      room: r, panel: id,
+      shown: on.includes(id) ? on.indexOf(id) + 1 : "hidden",
+      what: p.what,
+    }));
+  });
+  rows.sort((a, b) => (a.room < b.room ? -1 : a.room > b.room ? 1
+    : (a.shown === "hidden") - (b.shown === "hidden") || a.shown - b.shown));
+  if (console.table) console.table(rows);
+  return rows;
+}

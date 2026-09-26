@@ -236,23 +236,24 @@ function expiryState(t, a) {
 }
 
 function renderBook(tab) {
-  const u = tab.ui;
-  const live = bookOpen(u.book);
-  const done = u.book.filter((t) => t.closed);
-
-  const head = `<div class="bookbar">
-    <h2>Trade log</h2>
-    <span class="bookn">${live.length} open${done.length ? ` &middot; ${done.length} closed` : ""}</span>
-    <span class="grow"></span>
-    <button class="bookadd" id="book-new">+ new trade</button>
-  </div>`;
-
-  if (!live.length && !done.length) {
-    return head + `<div class="loading" style="height:44%">
+  const b = bookView(tab);
+  if (!b.live.length && !b.done.length) {
+    return shown("log", "head", tab, b) + `<div class="loading" style="height:44%">
       <div>Nothing in the log yet</div>
       <div class="stage">build a position yourself, or start from a ready-made
         setup &mdash; either way it ends up here</div></div>`;
   }
+  // Which parts, and in what order, is layout.js's call.
+  return compose("log", tab, b);
+}
+
+/* What every piece of the log is drawn from: the open and closed
+ * trades, how to draw one row, and the totals. Worked out once, so
+ * the pieces can be rearranged without each redoing the arithmetic. */
+function bookView(tab) {
+  const u = tab.ui;
+  const live = bookOpen(u.book);
+  const done = u.book.filter((t) => t.closed);
 
   /* An open trade is marked to the market and the figure moves with it.
    * A closed one is settled: the result is whatever you actually got,
@@ -339,21 +340,38 @@ function renderBook(tab) {
         (openPl + banked) >= 0 ? "up" : "down") : ""}
   </div>` : "";
 
-  return head
-    + (live.length ? `<div class="booklist">
+  return { live, done, row, totals };
+}
+
+/* ---- the panels ---------------------------------------------------- */
+
+panel("log", "head", "The title, how many are open and closed, and + new trade", (tab, b) =>
+  `<div class="bookbar">
+    <h2>Trade log</h2>
+    <span class="bookn">${b.live.length} open${b.done.length ? ` &middot; ${b.done.length} closed` : ""}</span>
+    <span class="grow"></span>
+    <button class="bookadd" id="book-new">+ new trade</button>
+  </div>`);
+
+panel("log", "open", "Open trades, marked to the market, with their deadlines", (tab, b) =>
+  (b.live.length ? `<div class="booklist">
         <div class="bookrow bhead"><span>ticker</span><span>position</span>
           <span>profit</span><span>of risk</span><span>expires</span></div>
-        ${live.map(row).join("")}
-      </div>` : "")
-    + totals
-    + (done.length ? `<div class="bookhead">closed</div>
-        <div class="booklist">${done.map(row).join("")}</div>` : "")
-    + `<div class="fnote prose">Kept on this machine only. An open trade is
+        ${b.live.map(b.row).join("")}
+      </div>` : ""));
+
+panel("log", "totals", "Still open, banked, and the two together", (tab, b) => b.totals);
+
+panel("log", "closed", "Closed trades, as settled", (tab, b) =>
+  (b.done.length ? `<div class="bookhead">closed</div>
+        <div class="booklist">${b.done.map(b.row).join("")}</div>` : ""));
+
+panel("log", "footnote", "What the log keeps, and where", () =>
+  `<div class="fnote prose">Kept on this machine only. An open trade is
        marked against the entry prices on each leg, which default to the mark
        when the leg was added &mdash; open it to correct them to what you
        actually paid. A closed one keeps whatever you recorded on the way out
-       and stops moving.</div>`;
-}
+       and stops moving.</div>`);
 
 /* Closing a trade asks one question, because there is only one thing
  * the app cannot work out for itself: what you actually got for it.

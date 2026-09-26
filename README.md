@@ -175,7 +175,8 @@ backend/
     claims.py         Diff claims: corroborated vs unique
 frontend/
   greeks.js           The translator: greeks -> sentences with real dollars
-  core.js             Formatting, tab state, trade-log storage, calc()
+  core.js             Formatting, tab state, trade-log storage, calc(), panel()
+  layout.js           What each room shows, and in what order
   shell.js            Tab strip, room ring, launcher, render()
   room-search.js      One company: live loop, every tile, zoom, rail
   room-workshop.js    Build a position: routes, board, money, analysis
