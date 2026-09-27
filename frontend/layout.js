@@ -130,11 +130,19 @@ const LAYOUT = {
     ] },
   ],
 
-  /* The market as a whole. */
+  /* The market as a whole, as the same grid of squares. Each group is a
+   * band the packer keeps in one run down the page. */
   world: [
-    "barometer",        // indices, VIX, Treasuries, gold, oil: where it is
-    "headlines",        // what happened, ranked
-    "calendar",         // what is coming
+    { id: "where", label: "Where it is", panels: [
+      "barometer",      // indices, VIX, Treasuries, gold, oil: a square each
+    ] },
+    { id: "happened", label: "What happened", panels: [
+      "lead",           // the highest-ranked story
+      "headlines",      // a square per kind of source, ranked
+    ] },
+    { id: "coming", label: "What is coming", panels: [
+      "calendar",       // a square per scheduled release
+    ] },
   ],
 };
 

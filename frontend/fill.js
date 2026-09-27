@@ -1,8 +1,8 @@
 /* Fill: every square in the app is full, each with its own size.
  *
  * The curriculum's squares fill themselves by ranked blocks (course.js).
- * Every other square -- the search page's tiles, the World page's market
- * cells, the Workshop's ready-made setups -- was written in pixel sizes
+ * Every other square -- the search and World pages' tiles, the Workshop's
+ * ready-made setups -- was written in pixel sizes
  * long before this, with no notion of which part matters most, so it is
  * filled the one way that works on any content: the whole of it is scaled,
  * with CSS zoom, until it meets the square's edges. Zoom rather than
@@ -28,7 +28,6 @@ const MIN = 0.82, MAX = 2.4;
 /* Where each kind of square keeps its contents, and what it is. */
 const KINDS = [
   { sel: ".grid:not(.steps) > .tile", inner: (el) => el.querySelector(":scope > .body") },
-  { sel: ".wxgrid > .wxcell", inner: (el) => el },
   { sel: ".pregrid > .pcard", inner: (el) => el },
 ];
 

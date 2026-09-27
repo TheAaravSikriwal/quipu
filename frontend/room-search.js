@@ -2487,7 +2487,7 @@ function renderZoom(tab) {
     <div class="zoom" id="zoombox">
       <header>
         <h2>${TITLES[id] || id}</h2>
-        <span class="sub">${esc(tab.data?.quote?.name || tab.symbol)}</span>
+        <span class="sub">${esc(tab.data?.quote?.name || tab.symbol || (tab.kind === "world" ? "World" : ""))}</span>
         <span class="grow"></span>
         ${zoomPrice(tab)}
         <button id="zoom-close">Close &nbsp;esc</button>

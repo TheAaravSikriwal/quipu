@@ -13,7 +13,7 @@ function newWorldTab() {
   const tab = {
     id: ++state.seq, symbol: null, kind: "world", status: "world",
     data: null, error: null, live: true, loading: true,
-    ui: { zoom: null, group: "all" },
+    ui: { zoom: null },
   };
   state.tabs.push(tab);
   state.active = tab.id;
@@ -39,8 +39,11 @@ async function loadWorld(tab) {
 
 /* The world, drawn.
  *
- * Three questions in the order you would ask them: where is the
- * market, what happened, and what is coming. */
+ * The same grid of squares as a company's page, packed by the same
+ * packer and opened by the same click: every instrument, every kind of
+ * source and every release coming up is a square of its own. Three
+ * bands, in the order you would ask them: where is the market, what
+ * happened, and what is coming. */
 function renderWorld(tab) {
   const bar = `<div class="livebar">
       <span class="lbsym">World</span>
@@ -65,94 +68,138 @@ function renderWorld(tab) {
       <div class="stage">${esc(tab.error)}</div></div>`;
   }
 
+  // A square's body and title are what a click opens, so they are
+  // written afresh with every drawing, as the company page does.
+  BODIES = {};
+  TITLES = {};
+  SPANS = {};
+  BADGES = {};
   // Which parts, and in what order, is layout.js's call.
-  return bar + `<div class="worldbody">${compose("world", tab)}</div>`;
+  return bar + `<div class="grid world">${compose("world", tab)}</div>`;
 }
 
-/* ---- the panels ---------------------------------------------------- */
+/* ---- the squares ---------------------------------------------------- */
+
+/* The band each panel's squares sit in, read off the layout. The packer
+ * keeps a band in one run down the page; numbered past the company
+ * page's bands so the two can never be confused. */
+const WORLD_BAND = {};
+(LAYOUT.world || []).forEach((g, i) =>
+  (typeof g === "string" ? [g] : g.panels).forEach((id) => { WORLD_BAND[id] = 100 + i; }));
+
+function worldTile(panelId, id, cls, span, title, body, badge = "") {
+  REGION_OF[id] = WORLD_BAND[panelId] ?? 99;
+  return tile(id, cls, span, title, body, badge);
+}
 
 const WORLD_GROUPS = {
-  all: "everything",
-  policy: "central banks and regulators",
-  data: "the statistics agencies",
-  markets: "the tape",
-  wire: "the wires",
+  policy: "Central banks and regulators",
+  data: "The statistics agencies",
+  markets: "The tape",
+  wire: "The wires",
 };
 
-panel("world", "barometer", "Index funds, VIX, Treasuries, gold and oil: where the market is", (tab) => {
-  const d = tab.data || {};
-  const baro = (d.barometer || []).map((b) => `
-    <div class="wxcell">
-      <span class="wxlab">${esc(b.label)}</span>
-      <b class="${b.change_pct == null ? "" : b.change_pct >= 0 ? "up" : "down"}">${
+const LEAN = { bullish: "&uarr;", bearish: "&darr;" };
+
+function headMeta(h) {
+  return `<div class="wnmeta">
+      <span class="wnsrc">${esc(h.source)}</span>
+      ${h.feeds > 1 ? `<span class="dot">&bull;</span><b>${h.feeds} places</b>` : ""}
+      <span class="dot">&bull;</span>${esc(ago(h.published) || "undated")}
+      ${h.loud ? `<span class="wnloud">moves everything</span>` : ""}
+    </div>`;
+}
+
+function headRow(h, full) {
+  const reads = h.lean?.reads;
+  return `<div class="wnrow${h.loud ? " loud" : ""}">
+      <a class="wnhl" href="${esc(h.url)}" target="_blank" rel="noopener">${
+        LEAN[reads] ? `<span class="t-${reads}">${LEAN[reads]}</span> ` : ""}${esc(h.title)}</a>
+      ${headMeta(h)}
+      ${full && h.summary ? `<div class="wnsum">${esc(h.summary.slice(0, 400))}</div>` : ""}
+    </div>`;
+}
+
+const RANKED = `<div class="fnote">Ranked, never filtered. A story is pushed up by the
+  weight of where it came from &mdash; a Federal Reserve release outranks a
+  blog about one &mdash; by how many outlets ran it, and by whether the
+  headline contains the kind of word that moves a whole market rather than
+  one company. A story nobody else carried can still be the one that
+  matters, so a low rank buries it rather than dropping it. The arrows are
+  read from the headline's words, not from the article, and are not a
+  forecast.</div>`;
+
+/* Where the market is: a square per instrument. */
+panel("world", "barometer", "Index funds, VIX, Treasuries, gold and oil: a square each", (tab) =>
+  (tab.data?.barometer || []).map((b) => worldTile("barometer", "wx-" + b.symbol, "e-priced", "w1 h1",
+    esc(b.label), `
+      <b class="wxbig ${b.change_pct == null ? "" : b.change_pct >= 0 ? "up" : "down"}">${
         b.change_pct == null ? "&ndash;" : signed(b.change_pct, 2)}</b>
-      <span class="wxpx">${b.price == null ? "" : money(b.price)}</span>
-      <span class="wxwhat">${esc(b.what)}${b.note ? ` &mdash; ${esc(b.note)}` : ""}</span>
-    </div>`).join("");
-  return `<h4>Where the market is</h4>
-    <div class="wxgrid">${baro}</div>
-    <div class="fnote">Index funds rather than the indices themselves, because
-      those are what actually trade. A day is not a trend and none of this is
-      a forecast.</div>`;
+      <span class="wxpx">${esc(b.symbol)}${b.price == null ? "" : " &middot; " + money(b.price)}</span>
+      <span class="wxwhat">${esc(b.what)}${b.note ? ` &mdash; ${esc(b.note)}` : ""}</span>`,
+  )).join(""));
+
+/* The one story most worth reading first. */
+panel("world", "lead", "The highest-ranked story, on a square of its own", (tab) => {
+  const top = (tab.data?.headlines || [])[0];
+  if (!top) return "";
+  return worldTile("lead", "wn-lead", "", "w2 h2", "The story at the top", `
+    <a class="wnlead" href="${esc(top.url)}" target="_blank" rel="noopener">${esc(top.title)}</a>
+    ${headMeta(top)}
+    ${top.summary ? `<div class="wnsum">${esc(top.summary.slice(0, 300))}</div>` : ""}`);
 });
 
-panel("world", "headlines", "What happened, ranked by source, reach and weight", (tab) => {
-  const d = tab.data || {};
-  const group = tab.ui.group || "all";
-  const heads = (d.headlines || []).filter(
-    (h) => group === "all" || h.group === group);
-  const counts = {};
-  (d.headlines || []).forEach((h) => { counts[h.group] = (counts[h.group] || 0) + 1; });
-
-  return `<h4>What happened</h4>
-    <div class="expbar">
-      <span class="explab">show</span>
-      <div class="cseg">
-        ${Object.entries(WORLD_GROUPS).map(([k, label]) => `
-          <button data-wgroup="${k}" class="${group === k ? "on" : ""}">${label}${
-            k === "all" ? "" : counts[k] ? ` ${counts[k]}` : ""}</button>`).join("")}
-      </div>
-    </div>
-    <div class="wnews">
-      ${heads.length ? heads.map((h) => `
-        <div class="wnrow${h.loud ? " loud" : ""}">
-          <a class="wnhl" href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>
-          <div class="wnmeta">
-            <span class="wnsrc">${esc(h.source)}</span>
-            ${h.feeds > 1 ? `<span class="dot">&bull;</span><b>${h.feeds} places</b>` : ""}
-            <span class="dot">&bull;</span>${esc(ago(h.published) || "undated")}
-            ${h.loud ? `<span class="wnloud">moves everything</span>` : ""}
-          </div>
-          ${h.summary ? `<div class="wnsum">${esc(h.summary.slice(0, 220))}</div>` : ""}
-        </div>`).join("")
-      : `<div class="empty" style="height:100px"><div>Nothing in this group</div></div>`}
-    </div>
-    <div class="fnote">Ranked, never filtered. A story is pushed up by the
-      weight of where it came from &mdash; a Federal Reserve release outranks a
-      blog about one &mdash; by how many outlets ran it, and by whether the
-      headline contains the kind of word that moves a whole market rather than
-      one company. A story nobody else carried can still be the one that
-      matters, so a low rank buries it rather than dropping it.</div>`;
+/* What happened: a square per kind of source, each ranked within itself.
+ * Opened, a square shows every story in it, with summaries. */
+panel("world", "headlines", "What happened, a square per kind of source, ranked", (tab) => {
+  const all = tab.data?.headlines || [];
+  return Object.entries(WORLD_GROUPS).map(([g, label]) => {
+    const heads = all.filter((h) => h.group === g);
+    if (!heads.length) return "";
+    const id = "wn-" + g;
+    DETAIL[id] = () => `<div class="wnews">${heads.map((h) => headRow(h, true)).join("")}</div>${RANKED}`;
+    const loud = heads.filter((h) => h.loud).length;
+    return worldTile("headlines", id, "elastic", heads.length > 6 ? "w2 h3" : "w2 h2", label,
+      `<div class="wnews">${heads.slice(0, 10).map((h) => headRow(h, false)).join("")}</div>`,
+      `${heads.length}${loud ? ` &middot; ${loud} loud` : ""}`);
+  }).join("");
 });
 
-panel("world", "calendar", "What is coming: the next scheduled releases", (tab) => {
-  const d = tab.data || {};
-  const cal = ((d.calendar || {}).events || []).slice(0, 8).map((e) => `
-    <div class="wcal">
-      <span class="wcd">${esc(e.date)}</span>
-      <span class="wct">${esc(e.title)}</span>
-      <span class="wcw">${esc((e.why || "").slice(0, 110))}</span>
-    </div>`).join("");
-  return cal ? `<h4>What is coming</h4><div class="wcals">${cal}</div>` : "";
-});
+/* What is coming: a square per scheduled release. */
+panel("world", "calendar", "What is coming: a square per scheduled release", (tab) =>
+  ((tab.data?.calendar || {}).events || []).slice(0, 8).map((e, i) => {
+    const id = "wc-" + i;
+    const when = e.days == null ? "" : e.days === 0 ? "today" : e.days === 1 ? "tomorrow" : `in ${e.days} days`;
+    const date = `${esc(e.date)}${e.time ? " &middot; " + esc(e.time) : ""}`;
+    DETAIL[id] = () => `<div class="wcz">
+        <div class="wcd">${date}${when ? " &middot; " + when : ""}</div>
+        <h4 class="wct">${esc(e.title)}</h4>
+        ${e.detail ? `<div class="wcdet">${esc(e.detail)}</div>` : ""}
+        <p class="wcw">${esc(e.why || "")}</p>
+        <div class="wnmeta"><span class="wnsrc">${esc(e.source || "")}</span>
+          ${e.confirmed === false || e.approx ? `<span class="dot">&bull;</span>date not yet confirmed` : ""}
+          ${e.url ? `<span class="dot">&bull;</span><a href="${esc(e.url)}" target="_blank" rel="noopener">the schedule</a>` : ""}</div>
+      </div>`;
+    return worldTile("calendar", id, "", "w1 h1", esc(when || e.date), `
+      <div class="wcd">${date}</div>
+      <div class="wct">${esc(e.title)}</div>
+      <div class="wcw">${esc((e.why || "").slice(0, 110))}</div>`);
+  }).join(""));
 
 function wireWorld(tab) {
   wireRooms();
   const again = document.getElementById("world-again");
   if (again) again.onclick = () => loadWorld(tab);
-  document.querySelectorAll("[data-wgroup]").forEach((b) => {
-    b.onclick = () => { tab.ui.group = b.dataset.wgroup; render(true); };
+  if (!document.querySelector(".grid.world")) return;
+  packGrid();
+  watchGrid();
+  document.querySelectorAll(".grid.world .tile[data-tile]").forEach((el) => {
+    el.onclick = (e) => {
+      if (e.target.closest("a, select, input, button")) return;
+      openZoom(tab, el.dataset.tile);
+    };
   });
+  if (tab.ui.zoom) openZoom(tab, tab.ui.zoom);
 }
 
 /* ---- the room ------------------------------------------------------ */
@@ -161,6 +208,6 @@ room("world", {
   open: newWorldTab,
   draw: renderWorld,
   wire: wireWorld,
-  place: (u) => ({ group: u.group }),
+  place: () => ({}),
   name: () => "World",
 });
