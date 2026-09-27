@@ -20,7 +20,9 @@ import pandas as pd
 
 from . import scan, universe
 
-CACHE = Path(__file__).resolve().parent.parent / "cache" / "scan.pkl"
+import paths
+
+CACHE = paths.CACHE / "scan.pkl"
 STAMP = CACHE.with_suffix(".stamp")
 MAX_AGE_S = 6 * 3600          # intraday moves matter; a day-old scan does not
 

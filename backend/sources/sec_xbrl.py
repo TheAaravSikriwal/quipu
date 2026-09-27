@@ -56,7 +56,9 @@ TIMEOUT = 40
 FACTS = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 FILING = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type={form}"
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache", "xbrl")
+import paths
+
+CACHE_DIR = str(paths.CACHE / "xbrl")
 TTL = 86400          # filings arrive quarterly; a day is generous
 
 #: Friendly name -> the us-gaap tags that might carry it, best first.

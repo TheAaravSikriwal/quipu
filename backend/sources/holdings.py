@@ -47,7 +47,9 @@ TIMEOUT = 25
 SSGA = ("https://www.ssga.com/us/en/intermediary/library-content/products/"
         "fund-data/etfs/us/holdings-daily-us-en-{t}.xlsx")
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache", "holdings")
+import paths
+
+CACHE_DIR = str(paths.CACHE / "holdings")
 TTL = 86400 * 0.5        # the files are daily; half a day is plenty
 
 #: Bumped whenever the shape of a cached record changes.

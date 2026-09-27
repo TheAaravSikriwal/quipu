@@ -2187,6 +2187,54 @@ except Exception as exc:                                   # noqa: BLE001
     import traceback as _tb
     RESULTS.append((False, "offline course", f"could not run: {exc} {_tb.format_exc().splitlines()[-3][:90]}"))
 
+section("The engine answers QUIPU pages and wearechintu.com, nobody else")
+
+# On a visitor's machine the engine listens on 127.0.0.1, and any site the
+# visitor has open can send requests there. These are the cases that must
+# hold for it to be safe to hand strangers.
+try:
+    import guard as G
+    import paths as PT
+
+    me = "http://127.0.0.1:8848"
+    site, evil = "https://wearechintu.com", "https://evil.example"
+    cases = [
+        ("the site can check the engine is up", ("GET", "/api/health", {"Origin": site}), "pass"),
+        ("another site cannot", ("GET", "/api/health", {"Origin": evil}), "refuse"),
+        ("nor start a scan", ("POST", "/api/screen/refresh", {"Origin": evil}), "refuse"),
+        ("nor flip a setting", ("POST", "/api/settings/alpaca", {"Origin": evil}), "refuse"),
+        ("nor reach the API with a tag or a form", ("GET", "/api/ticker/AAPL",
+                                                   {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors"}), "refuse"),
+        ("the app's own page can do anything", ("POST", "/api/settings/alpaca", {"Origin": me}), "pass"),
+        ("the site may frame the app", ("GET", "/", {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}), "pass"),
+        ("a request with no origin, from nowhere, is fine", ("GET", "/api/health", {}), "pass"),
+    ]
+    for name, (m, pth, hd), want in cases:
+        got, _ = G.decide(m, pth, hd, me)
+        RESULTS.append((got == want, name, got))
+
+    got, hd = G.decide("OPTIONS", "/api/health", {"Origin": site, "Access-Control-Request-Method": "GET",
+                                                  "Access-Control-Request-Private-Network": "true"}, me)
+    RESULTS.append((got == "preflight" and hd.get("Access-Control-Allow-Private-Network") == "true"
+                    and hd.get("Access-Control-Allow-Origin") == site,
+                    "and says yes to the browser's local-network question for the site", got))
+    got, _ = G.decide("OPTIONS", "/api/health", {"Origin": evil, "Access-Control-Request-Method": "GET"}, me)
+    RESULTS.append((got == "refuse", "but not for anyone else", got))
+    _, hd = G.decide("GET", "/", {}, me)
+    fa = hd.get("Content-Security-Policy", "")
+    RESULTS.append((fa.startswith("frame-ancestors 'self'") and site in fa and evil not in fa,
+                    "only the site and the app itself may frame it", fa[:60]))
+
+    RESULTS.append((PT.CACHE.exists() and not PT.FROZEN and PT.FRONTEND.joinpath("index.html").exists(),
+                    "in a checkout, caches and the page stay where they were", str(PT.CACHE)[-20:]))
+    src = "\n".join(p.read_text(encoding="utf-8") for p in Path(__file__).resolve().parent.rglob("*.py")
+                    if p.name not in ("verify.py", "paths.py") and ".venv" not in p.parts)
+    stray = [ln.strip() for ln in src.splitlines() if "Path(__file__)" in ln and "cache" in ln]
+    RESULTS.append((not stray, "no module keeps its own cache path; paths.py decides",
+                    stray[0][:60] if stray else "all through paths.py"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "engine guard", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

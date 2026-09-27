@@ -41,7 +41,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from sources import alpaca as A
 from sources import options as O
 
-CACHE = Path(__file__).resolve().parent / "cache" / "ivhist"
+import paths
+
+CACHE = paths.CACHE / "ivhist"
 LOOKBACK = 252          # sessions in the ranking window
 PC_LOOKBACK = 60        # sessions in the put/call average
 TARGET_DAYS = 30        # constant maturity, calendar days

@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 SOURCE = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt"
-CACHE = Path(__file__).resolve().parent.parent / "cache" / "universe.json"
+import paths
+
+CACHE = paths.CACHE / "universe.json"
 MAX_AGE_S = 24 * 3600          # the file is republished once a day
 
 EXCHANGES = {

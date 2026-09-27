@@ -69,8 +69,10 @@ warnings.filterwarnings("ignore")
 
 from . import rank as R, scan as S, universe as U  # noqa: E402
 
-PANEL = Path(__file__).resolve().parent.parent / "cache" / "panel.pkl"
-REPORT = Path(__file__).resolve().parent.parent / "cache" / "backtest.json"
+import paths
+
+PANEL = paths.CACHE / "panel.pkl"
+REPORT = paths.CACHE / "backtest.json"
 
 #: ranking -> what it claims, and therefore how it must be graded
 OBJECTIVE = {
@@ -302,8 +304,7 @@ if __name__ == "__main__":
         # still be re-decided from as-of data at each window rather than
         # fixed in advance, but the survivorship tilt is real and it flatters
         # every return figure below.
-        scan_df = pd.read_pickle(Path(__file__).resolve().parent.parent
-                                 / "cache" / "scan.pkl")
+        scan_df = pd.read_pickle(paths.CACHE / "scan.pkl")
         syms = sorted(scan_df[scan_df.dollar_vol > 5e6].index)
         print(f"building panel for {len(syms)} names...")
         panel = build_panel(syms)

@@ -20,7 +20,9 @@ import yfinance as yf
 
 from sources import options as O
 
-CACHE = Path(__file__).resolve().parent.parent / "cache"
+import paths
+
+CACHE = paths.CACHE
 _MEMO: Dict[str, Any] = {}
 _LOCK = threading.Lock()
 

@@ -35,8 +35,11 @@ DATA = "https://data.alpaca.markets"
 # are paper keys, and listing contracts is the same data either way.
 TRADING = "https://paper-api.alpaca.markets"
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-_ENV_FILES = [_ROOT / ".env", _ROOT.parent / "algotrader" / ".env"]
+import paths
+
+# In a checkout: quipu/.env, then the algotrader project's paper keys. In
+# the engine a visitor installs: only the visitor's own QUIPU data folder.
+_ENV_FILES = list(paths.ENV_FILES)
 _KEY, _SECRET = "ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY"
 
 
@@ -78,11 +81,11 @@ def available() -> bool:
 # QUIPU_ALPACA=off (environment or quipu/.env), or from the app itself,
 # which writes the choice to backend/cache/settings.json.
 
-_SETTINGS = _ROOT / "backend" / "cache" / "settings.json"
+_SETTINGS = paths.CACHE / "settings.json"
 
 
 def _switched_off() -> bool:
-    flag = os.environ.get("QUIPU_ALPACA") or _read_env(_ROOT / ".env").get("QUIPU_ALPACA")
+    flag = os.environ.get("QUIPU_ALPACA") or _read_env(_ENV_FILES[0]).get("QUIPU_ALPACA")
     if flag and flag.strip().lower() in ("0", "off", "false", "no"):
         return True
     try:

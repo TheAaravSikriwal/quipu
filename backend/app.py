@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -39,18 +38,18 @@ from sources import alpaca  # noqa: E402
 import ivhistory  # noqa: E402
 import course  # noqa: E402
 
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+import paths  # noqa: E402
+FRONTEND = paths.FRONTEND
 
 MAX_ARTICLES = int(os.getenv("QUIPU_MAX_ARTICLES", "22"))
 EXTRACT_CONCURRENCY = int(os.getenv("QUIPU_EXTRACT_CONCURRENCY", "6"))
 
-app = FastAPI(title="quipu", version="0.1.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="quipu", version=paths.VERSION)
+# Who the engine answers: its own page, wearechintu.com, and nobody else.
+# It used to be CORS "*", which on a visitor's machine would let any site
+# they had open drive their engine. See guard.py.
+import guard  # noqa: E402
+guard.install(app)
 
 
 def _div_schedule(symbol: str):
@@ -96,6 +95,12 @@ def _div_yield(symbol: str) -> float:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
+        # What the site's /quipu page checks: is an engine here, and is it
+        # current. `engine` is true for the installed build, false for a
+        # checkout.
+        "app": "quipu",
+        "version": paths.VERSION,
+        "engine": paths.FROZEN,
         "extraction_tiers": available_tiers(),
         "optional_keys": {
             "finnhub": bool(os.getenv("FINNHUB_API_KEY")),

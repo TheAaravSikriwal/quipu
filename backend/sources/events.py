@@ -47,7 +47,9 @@ import requests
 UA = {"User-Agent": "quipu/0.1 (personal research tool)"}
 TIMEOUT = 20
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache")
+import paths
+
+CACHE_DIR = str(paths.CACHE)
 CACHE = os.path.join(CACHE_DIR, "events.json")
 
 #: Calendars are published documents that change a few times a year; the
