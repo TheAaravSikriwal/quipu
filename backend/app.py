@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -49,6 +49,10 @@ app = FastAPI(title="quipu", version=paths.VERSION)
 # It used to be CORS "*", which on a visitor's machine would let any site
 # they had open drive their engine. See guard.py.
 import guard  # noqa: E402
+import share  # noqa: E402
+# Added first so it runs second: the guard refuses strangers before any
+# visitor is counted, queued or served a shared answer.
+share.install(app)
 guard.install(app)
 
 
@@ -713,9 +717,13 @@ def by_target(symbol: str, price: float, expiry: str = "") -> Dict[str, Any]:
 
 
 @app.get("/api/settings")
-def settings() -> Dict[str, Any]:
-    """What the optional sources are doing."""
-    return {"alpaca": alpaca.status()}
+def settings(request: Request) -> Dict[str, Any]:
+    """What the optional sources are doing, and whether the viewer is Aarav.
+
+    `admin` is false for anyone arriving through the tunnel, so the page can
+    leave out the switches that would only answer "only Aarav can do that".
+    """
+    return {"alpaca": alpaca.status(), "admin": share.visitor(request.headers) is None}
 
 
 @app.post("/api/settings/alpaca")

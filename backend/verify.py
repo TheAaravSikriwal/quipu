@@ -2235,6 +2235,30 @@ try:
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "engine guard", f"could not run: {exc}"))
 
+section("Published from Aarav's PC: shared fairly, and his switches stay his")
+
+# Only requests through the tunnel (marked CF-Connecting-IP) are shared,
+# limited or locked; this computer's own requests are untouched.
+try:
+    import share as SH
+    RESULTS.append((SH.visitor({"cf-connecting-ip": "203.0.113.7"}) == "203.0.113.7"
+                    and SH.visitor({}) is None, "a visitor is told apart from this computer", "by CF-Connecting-IP"))
+    RESULTS.append((SH.ttl_for("/api/live/AAPL") == 10 and SH.ttl_for("/api/ticker/AAPL") == 120
+                    and SH.ttl_for("/api/position") is None,
+                    "prices are shared for seconds, pages for minutes, positions never", "10s / 120s / never"))
+    RESULTS.append((("POST", "/api/settings/alpaca") in SH.OWNER_ONLY and ("POST", "/api/screen/refresh") in SH.OWNER_ONLY,
+                    "the Alpaca switch and the rescan are Aarav's", "owner only"))
+    L = SH.Limits()
+    got = [L.allow("v", "heavy", 20, now=100.0 + i) for i in range(24)]
+    RESULTS.append((got.count(True) == 20 and not any(got[20:]),
+                    "one visitor gets 20 heavy requests a minute, then waits", f"{got.count(True)} of 24"))
+    RESULTS.append((L.allow("v", "heavy", 20, now=100.0 + 61),
+                    "and the window slides: a minute later there is room again", "allowed"))
+    RESULTS.append((L.allow("someone else", "heavy", 20, now=110.0),
+                    "one visitor's limit is not another's", "allowed"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "sharing", f"could not run: {exc}"))
+
 section("Calendar days and sessions agree with each other")
 
 # There cannot be more trading sessions left than there are days left.

@@ -34,12 +34,16 @@ from starlette.responses import JSONResponse, Response
 import paths
 
 SITE = ("https://wearechintu.com", "https://www.wearechintu.com")
+# QUIPU's own public address, through the tunnel. Behind cloudflared the
+# engine sees plain http on localhost, so its own page arriving as https
+# would not look like itself without being named here.
+PUBLIC = os.environ.get("QUIPU_PUBLIC", "https://quipu.wearechintu.com")
 
 
 def allowed_origins() -> Set[str]:
     extra = [o.strip().rstrip("/") for o in os.environ.get("QUIPU_ORIGINS", "").split(",") if o.strip()]
     dev = [] if paths.FROZEN else ["http://localhost:3000", "http://127.0.0.1:3000"]
-    return set(SITE) | set(extra) | set(dev)
+    return set(SITE) | {PUBLIC} | set(extra) | set(dev)
 
 
 def _self(request: Request) -> str:

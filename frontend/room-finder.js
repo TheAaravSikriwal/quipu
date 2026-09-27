@@ -85,7 +85,7 @@ function renderFinder(tab) {
           meta.eligible ? `, <b>${big(meta.eligible)}</b> liquid enough` : ""}`}</span>
     <span>${meta.age_s != null ? `scanned <b>${meta.age_s < 90
       ? meta.age_s + "s" : Math.round(meta.age_s / 60) + " min"}</b> ago` : ""}</span>
-    <button id="fn-refresh">Rescan</button>
+    ${IS_OWNER ? `<button id="fn-refresh">Rescan</button>` : ""}
     ${roomNav("finder")}
   </div>`;
 

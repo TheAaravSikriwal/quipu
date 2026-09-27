@@ -35,6 +35,21 @@ const NEWS_MS = 90000;
 
 const state = { tabs: [], active: null, seq: 0, timer: null };
 
+/* Whether the person looking is Aarav.
+ *
+ * QUIPU is published from Aarav's PC to wearechintu.com, and a visitor
+ * arriving through that must not see the switches that only answer "only
+ * Aarav can do that" -- the Alpaca switch and the 10,000-stock rescan. The
+ * engine says which you are; until it answers, the page assumes this
+ * computer, which is what it is when nothing is published. */
+let IS_OWNER = true;
+fetch(`${API}/api/settings`).then((r) => (r.ok ? r.json() : null)).then((s) => {
+  if (s && s.admin === false) {
+    IS_OWNER = false;
+    if (typeof render === "function" && state.tabs.length) render(true);
+  }
+}).catch(() => {});
+
 /** Filled during each render: tile id -> its body HTML, for the zoom panel. */
 let BODIES = {};
 let TITLES = {};

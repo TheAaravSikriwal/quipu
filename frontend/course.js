@@ -816,9 +816,9 @@ function bar(tab) {
       ${esc(c.scorecard.label.toLowerCase())} &middot; ${signOf(c.scorecard.total)}/${c.scorecard.max}
       &middot; ${esc(s3(tab).name)}</span>` : `<span class="sb-verdict">${tab.courseState === "loading" ? "working&hellip;" : ""}</span>`}
     ${ready(tab) && hasTrade(tab) ? `<button class="sb-open" data-cg-open="1">Open in Workshop</button>` : ""}
-    <button class="sb-alpaca" data-cg-alpaca="${h.status === "off" ? "on" : "off"}"
+    ${IS_OWNER ? `<button class="sb-alpaca" data-cg-alpaca="${h.status === "off" ? "on" : "off"}"
       title="Alpaca is optional: it rebuilds a year of this stock's options for IV Rank. Off, those numbers say why they are missing and nothing is guessed.">
-      Alpaca ${h.status === "off" ? "off" : h.status === "ready" ? "on" : h.status === "building" ? "&hellip;" : "off"}</button>
+      Alpaca ${h.status === "off" ? "off" : h.status === "ready" ? "on" : h.status === "building" ? "&hellip;" : "off"}</button>` : ""}
   </div>`;
 }
 
