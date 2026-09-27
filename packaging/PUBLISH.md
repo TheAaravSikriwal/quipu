@@ -52,14 +52,28 @@ so they need you.
      - service: http_status:404
    ```
 
-## Every time
+## On, off, and starting with Windows
+
+Double-click these in `packaging\` (or run `packaging\quipu.ps1 <word>`):
+
+| File | Does |
+|---|---|
+| `QUIPU On.cmd` | starts the engine and the tunnel in the background, no windows (`on`) |
+| `QUIPU Off.cmd` | stops both; the site shows "waiting for Aarav's PC" (`off`) |
+| `QUIPU Status.cmd` | what is running, and whether it starts at sign-in (`status`) |
+| `QUIPU Autostart On.cmd` | starts it every time you sign in to Windows (`auto-on`) |
+| `QUIPU Autostart Off.cmd` | stops starting it at sign-in; does not turn it off now (`auto-off`) |
+
+Autostart is a Task Scheduler task, "QUIPU Publish", that runs 30 seconds
+after you sign in. It needs you signed in (the engine runs as you), and a
+sleeping PC takes the site down until it wakes. In the background the tunnel
+is started again if it drops, and logs go to `%LOCALAPPDATA%\QUIPU\`.
+
+To watch it in a window instead, until Ctrl+C:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\publish.ps1
 ```
-
-This starts the engine if it isn't running, then runs the tunnel. Ctrl+C
-stops publishing; the engine keeps running locally.
 
 ## What visitors can and can't do
 
