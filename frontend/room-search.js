@@ -2910,11 +2910,15 @@ function renderDashboard(d, tab) {
  * that the tile to its left. The result has no gaps at all.
  */
 
-function packGrid() {
+function packGrid(refill = true) {
   // Every grid on the page -- the company's panels and the curriculum's
   // squares below the bar -- packed by the same rules.
   document.querySelectorAll(".grid").forEach(packOne);
-  // Every square is refilled at its new size.
+  // Every square is refilled at its new size. The first draw of a page
+  // does this itself once the charts and the glossary are in, so it asks
+  // for the layout alone: doing it here as well was a second full pass of
+  // both, and about half the time it took to switch to a tab.
+  if (!refill) return;
   window.QUIPU_FILL?.tiles();
   window.QUIPU_COURSE?.redraw?.();
 }
@@ -2947,7 +2951,12 @@ function packOne(grid) {
     // panel that holds four rows of statistics does not fill the gap, it
     // moves the gap inside the panel -- which is what the page looked
     // like before.
-    return { el, w, h, x: 0, y: 0, elastic: el.classList.contains("elastic"),
+    // The curriculum's squares count as stretchable too: course.js fits
+    // their ranked blocks to whatever size the square ends up, so growing
+    // one fills it rather than moving the gap inside it. Without this the
+    // steps grid, which keeps reading order, was left with holes.
+    return { el, w, h, x: 0, y: 0,
+             elastic: el.classList.contains("elastic") || grid.classList.contains("steps"),
              region: REGION_OF[el.dataset.tile] ?? 99 };
   });
 
@@ -4085,12 +4094,36 @@ function showSearch(tab, view, scroll) {
     return;
   }
 
+  // Arriving from another tab rebuilds the whole page -- every panel, the
+  // packing, the charts and the curriculum's squares -- which takes a
+  // second or so. Say so first, and draw on the next frame, so the click
+  // answers at once instead of the old page sitting there frozen. A
+  // redraw of the page already showing (a refresh, a toggle) skips this.
+  if (view.dataset.tab !== String(tab.id)) {
+    view.dataset.tab = String(tab.id);
+    view.innerHTML = liveBar(tab) + `<div class="loading switching"><div class="spinner"></div>
+      <div>Opening <b>${esc(tab.symbol)}</b></div>
+      <div class="stage">laying out the panels &middot; drawing the charts &middot; fitting the four steps</div></div>`;
+    wireLiveBar(tab);
+    // After the next paint where there is one; a window in the background
+    // does not paint at all, so a short timer makes sure it still draws.
+    let drawn = false;
+    const draw = () => {
+      if (drawn) return;
+      drawn = true;
+      if (current() === tab && tab.status === "ready") showSearch(tab, view, scroll);
+    };
+    requestAnimationFrame(() => setTimeout(draw, 0));
+    setTimeout(draw, 60);
+    return;
+  }
+
   view.innerHTML = renderDashboard(tab.data, tab);
   // The entrance stagger runs on a genuine first paint only, never on the
   // re-renders that a refresh or a toggle causes.
   if (tab.ui.introDone) document.querySelector(".grid")?.classList.remove("intro");
   else { document.querySelector(".grid")?.classList.add("intro"); tab.ui.introDone = true; }
-  packGrid();
+  packGrid(false);
   watchGrid();
   gloss(view);
   mountCharts(tab);

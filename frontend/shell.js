@@ -322,6 +322,10 @@ function render(keepScroll = false) {
   const view = document.getElementById("viewport");
   const scroll = keepScroll ? view.scrollTop : 0;
   const tab = current();
+  // Which company page the viewport holds, so the search room can tell
+  // arriving at one (worth a loading screen) from redrawing it. Anything
+  // else drawn here clears it.
+  if (!tab || tab.status !== "ready" || roomOf(tab) !== "search") view.dataset.tab = "";
 
   if (!tab || tab.status === "blank") { view.innerHTML = renderLauncher(); wireLauncher(); return; }
 
