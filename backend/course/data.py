@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yfinance as yf
 
 from sources import options as O
+from sources import yahoo as Y
 
 import paths
 
@@ -60,7 +61,13 @@ def daily(symbol: str) -> Optional[Dict[str, List]]:
 
 
 def info(symbol: str) -> Dict[str, Any]:
-    return _memo(f"info:{symbol}", 3600, lambda: yf.Ticker(symbol).info or {})
+    # Through the shared door, and never kept empty: an hour of {} after
+    # one refusal would leave the steps blank long after Yahoo came back.
+    hit = _memo(f"info:{symbol}", 3600, lambda: Y.info(symbol))
+    if not hit:
+        with _LOCK:
+            _MEMO.pop(f"info:{symbol}", None)
+    return hit
 
 
 def eps_trend(symbol: str) -> Optional[Dict[str, Dict[str, float]]]:
@@ -103,7 +110,7 @@ def peers(symbol: str) -> Dict[str, Any]:
 
     def one(t: str) -> Optional[Dict[str, Any]]:
         try:
-            i = yf.Ticker(t).info or {}
+            i = Y.info(t)
         except Exception:                                    # noqa: BLE001
             return None
         return {"symbol": t, "name": i.get("shortName"),

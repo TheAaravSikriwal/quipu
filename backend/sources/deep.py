@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 import yfinance as yf
 
+from . import fallback, yahoo
+
 
 def _num(value: Any) -> Optional[float]:
     try:
@@ -44,8 +46,11 @@ def _row(frame, *names: str) -> Dict[str, Optional[float]]:
 
 def fetch_profile(symbol: str) -> Dict[str, Any]:
     """Who the company is, in its own words."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
+    info = yahoo.info(symbol)
+    if not info:
+        # Yahoo refused: Nasdaq still says what line of business it is in.
+        extra = fallback.nasdaq_extras(symbol)
+        info = {"sector": extra.get("sector"), "industry": extra.get("industry")}
 
     officers = []
     for person in (info.get("companyOfficers") or [])[:6]:

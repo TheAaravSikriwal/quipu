@@ -217,7 +217,8 @@ def fetch(symbol: str, ticker=None) -> Dict[str, Any]:
     ticker = ticker or yf.Ticker(symbol)
     info = {}
     try:
-        info = ticker.info or {}
+        from . import yahoo
+        info = yahoo.info(symbol)
     except Exception:
         pass
 

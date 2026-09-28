@@ -59,6 +59,7 @@ TTL = [
     ("/api/search", 300),
     ("/api/ivhistory/", 30),
     ("/api/health", 5),
+    ("/api/sources", 10),
 ]
 HEAVY = ("/api/ticker/", "/api/course/", "/api/target/", "/api/ivhistory/",
          "/api/position", "/api/world", "/api/screen", "/api/news/", "/api/chain/")

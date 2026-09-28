@@ -35,11 +35,17 @@ from screener import backtest as screen_backtest, rank as screen_rank, store as 
 from sources import deep, events, holdings, news_rss, options, quotes, sec_edgar, sec_xbrl, symbols  # noqa: E402
 from sources import world as world_news  # noqa: E402
 from sources import alpaca  # noqa: E402
+from sources import yahoo  # noqa: E402
 import ivhistory  # noqa: E402
 import course  # noqa: E402
 
 import paths  # noqa: E402
+import wire  # noqa: E402
 FRONTEND = paths.FRONTEND
+
+# Before any source asks for anything: every request from here on is
+# noted against its provider, for the lights along the bottom of a search.
+wire.install()
 
 MAX_ARTICLES = int(os.getenv("QUIPU_MAX_ARTICLES", "22"))
 EXTRACT_CONCURRENCY = int(os.getenv("QUIPU_EXTRACT_CONCURRENCY", "6"))
@@ -124,6 +130,22 @@ def health() -> Dict[str, Any]:
         },
         "max_articles": MAX_ARTICLES,
     }
+
+
+@app.get("/api/sources")
+def sources_reached() -> Dict[str, Any]:
+    """Whether each data source answered, for the row of lights under a
+    search. Providers nobody has asked lately are checked first, a few
+    minutes apart at most however often this is called (see wire.py)."""
+    wire.check_quiet()
+    rows = wire.snapshot()
+    # A crumb fetched for some other call can land a 200 on the quote
+    # summary's host while it is still being rested; the rest is the fact.
+    why = yahoo.resting()
+    for r in rows:
+        if why and r["id"] == "yahoo-quotes":
+            r.update(ok=False, error=why)
+    return {"at": time.strftime("%H:%M:%S", time.localtime()), "sources": rows}
 
 
 def _result_map(results: List[Any]) -> Dict[str, Any]:

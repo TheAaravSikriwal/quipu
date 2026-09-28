@@ -25,6 +25,7 @@ async function load(tab) {
     tab.status = "error";
   }
   render();
+  if (tab.status === "ready") refreshWire(tab);
 }
 
 async function refreshLive(tab, manual = false) {
@@ -58,6 +59,57 @@ async function refreshLive(tab, manual = false) {
   }
   tab.refreshing = false;
   if (state.active === tab.id) patchLive(tab);
+  refreshWire(tab);
+}
+
+/* ---- the lights: which sources answered -------------------------------
+ *
+ * One light per data source along the bottom of the page, green if it
+ * answered and red if it did not, read from the engine's own record of
+ * every request it made (wire.py). A source this search had no reason
+ * to ask is checked by the engine instead, so every light is a real
+ * answer rather than a guess. Hover one for when, and what came back. */
+
+async function refreshWire(tab) {
+  if (tab.wireBusy) return;
+  tab.wireBusy = true;
+  try {
+    const res = await fetch(`${API}/api/sources`);
+    if (!res.ok) throw new Error(res.status);
+    tab.wire = await res.json();
+  } catch {
+    return;                  // keep the last reading; the next tick tries again
+  } finally {
+    tab.wireBusy = false;
+  }
+  if (state.active !== tab.id) return;
+  const el = document.querySelector(".wirebar");
+  if (el) el.outerHTML = wireBar(tab);
+}
+
+function wireAgo(s) {
+  if (s == null) return "";
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+}
+
+function wireNote(r) {
+  if (r.ok) {
+    return `${r.name}: answered${r.code ? ` (HTTP ${r.code})` : ""} ${wireAgo(r.ago)}`
+      + (r.via === "check" ? ", on a status check" : ", fetching for this page");
+  }
+  return `${r.name}: ${r.error || "no answer"}${r.ago != null ? `, ${wireAgo(r.ago)}` : ""}`;
+}
+
+function wireBar(tab) {
+  const rows = tab.wire?.sources;
+  const up = rows ? rows.filter((r) => r.ok).length : 0;
+  return `<div class="wirebar" role="status" aria-label="Data sources reached">
+    <span class="wb-head">Sources ${rows ? `<b>${up}/${rows.length}</b>` : ""}</span>
+    ${rows
+      ? rows.map((r) => `<span class="wb-src ${r.ok ? "ok" : "bad"}" title="${esc(wireNote(r))}">
+          <i class="led" aria-label="${r.ok ? "reached" : "not reached"}"></i>${esc(r.name)}</span>`).join("")
+      : `<span class="wb-wait">checking each source&hellip;</span>`}
+  </div>`;
 }
 
 /* Update only what the live endpoint actually changed.
@@ -69,6 +121,7 @@ async function refreshLive(tab, manual = false) {
 function patchLive(tab) {
   const d = tab.data;
   if (!d) return;
+  readSources(d);
 
   ["quote", "options", "optionstory", "unusual", "vol", "greeks", "chain",
    "pipeline"].forEach((id) => {
@@ -218,9 +271,33 @@ const SOURCES = {
   pipeline: "This run"
 };
 
+/* When Yahoo refuses, the quote and the chain come from a backup, and
+ * the source line under the masthead has to say which -- it is the one
+ * place the page is honest about where a number came from. */
+let SOURCE_NOW = {};
+const SOURCE_SAYS = {
+  "Yahoo Finance chart": "Yahoo Finance chart &middot; live",
+  "Nasdaq": "Nasdaq &middot; live",
+  "Cboe": "Cboe &middot; 15-minute delayed",
+};
+
+function readSources(d) {
+  SOURCE_NOW = {};
+  const q = d?.quote?.source, o = d?.options?.source;
+  if (q && q !== "Yahoo Finance") {
+    SOURCE_NOW.quote = `${SOURCE_SAYS[q] || esc(q)} &middot; Yahoo's quote refused`;
+  }
+  if (o && o !== "Yahoo Finance") {
+    SOURCE_NOW.options = `${esc(o)} chains &middot; IV solved locally`;
+    SOURCE_NOW.chain = `${esc(o)} chains &middot; greeks computed here`;
+    SOURCE_NOW.unusual = `${esc(o)} chains &middot; volume against open interest`;
+  }
+}
+
 function tile(id, cls, span, title, body, badge = "") {
   const ev = GROUPS.find((g) => cls.includes(g.cls));
-  const src = SOURCES[id] ? `<div class="source">${SOURCES[id]}</div>` : "";
+  const said = SOURCE_NOW[id] || SOURCES[id];
+  const src = said ? `<div class="source">${said}</div>` : "";
   body = src + body;
   BODIES[id] = body;
   TITLES[id] = title;
@@ -2524,6 +2601,7 @@ function renderDashboard(d, tab) {
   TITLES = {};
   SPANS = {};
   BADGES = {};
+  readSources(d);
 
   // One dense grid, in the order layout.js gives. Reading order, not
   // packing order: packGrid() closes any gaps the ordering leaves, so
@@ -2538,7 +2616,8 @@ function renderDashboard(d, tab) {
   return liveBar(tab)
     + SEARCH_ORDER.map((k) => (half[k] ? half[k]() : "")).join("")
     + renderRail()
-    + renderZoom(tab);
+    + renderZoom(tab)
+    + wireBar(tab);
 }
 
 /* ---- packing ---------------------------------------------------------

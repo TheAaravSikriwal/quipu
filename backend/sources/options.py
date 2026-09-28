@@ -8,11 +8,14 @@ delta/gamma/theta/vega are available without a paid data provider.
 from __future__ import annotations
 
 import math
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
 import yfinance as yf
+
+from . import fallback, yahoo
 
 DEFAULT_RISK_FREE = 0.042  # fallback if the T-bill lookup fails
 
@@ -25,12 +28,22 @@ def _norm_pdf(x: float) -> float:
     return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
 
+_RATE: List[float] = []
+
+
 def risk_free_rate() -> float:
-    """13-week T-bill as the short rate. Falls back to a constant."""
+    """13-week T-bill as the short rate. Falls back to a constant.
+
+    Kept ten minutes: every chain, target and course asks for it, and the
+    T-bill does not move enough between refreshes to be worth a request."""
+    if _RATE and time.time() - _RATE[0] < 600:
+        return _RATE[1]
     try:
         frame = yf.Ticker("^IRX").history(period="5d")
         if frame is not None and not frame.empty:
-            return float(frame["Close"].iloc[-1]) / 100.0
+            rate = float(frame["Close"].iloc[-1]) / 100.0
+            _RATE[:] = [time.time(), rate]
+            return rate
     except Exception:
         pass
     return DEFAULT_RISK_FREE
@@ -693,8 +706,6 @@ def fetch_options(symbol: str, max_expiries: int = 4,
     position builder needs one specific board at a time and each expiry is
     its own request, so fetching four to show one is three wasted seconds.
     """
-    ticker = yf.Ticker(symbol)
-
     # An empty list means two completely different things, and saying
     # the wrong one is worse than saying nothing.
     #
@@ -704,19 +715,34 @@ def fetch_options(symbol: str, max_expiries: int = 4,
     # being told it has no options, which is not a thing a reader should
     # ever be told by a tool that is simply being throttled.
     #
-    # So the refusal is caught where it can be, and where it cannot the
-    # message covers both possibilities rather than picking the one that
-    # happens to be wrong.
-    refused = False
-    try:
-        listed = list(ticker.options or [])
-    except Exception as exc:                               # noqa: BLE001
-        listed = []
-        refused = "ratelimit" in type(exc).__name__.lower() or "429" in str(exc)
+    # So Yahoo is asked first (through yahoo.py, which notices a refusal
+    # and stops asking), and when it has nothing Cboe's delayed board is
+    # the second opinion. Only when both come back empty is the chain
+    # reported missing, and the message still covers both readings.
+    source = "Yahoo Finance"
+    listed = yahoo.expiries(symbol)
+    refused = not listed and yahoo.cooling()
+    chain_for = lambda e: yahoo.option_chain(symbol, e)
+    spot_hint = 0.0
 
-    if only and only in listed:
-        expiries = [only]
-    else:
+    def use_cboe() -> bool:
+        nonlocal source, listed, chain_for, spot_hint
+        try:
+            board = fallback.cboe_chains(symbol)
+        except Exception:                                  # noqa: BLE001
+            board = None
+        if not board:
+            return False
+        source, listed, spot_hint = "Cboe", board["expiries"], board["spot"] or 0.0
+        chain_for = lambda e: board["chains"].get(e)
+        return True
+
+    if not listed:
+        use_cboe()
+
+    def pick(listed: List[str]) -> List[str]:
+        if only and only in listed:
+            return [only]
         # Skip a board that expires today unless it was asked for by name.
         #
         # With no sessions left there is no time for volatility to act
@@ -731,7 +757,9 @@ def fetch_options(symbol: str, max_expiries: int = 4,
         # board opens on.
         today = market_now().date().isoformat()
         future = [e for e in listed if e > today] or listed
-        expiries = future[:max_expiries]
+        return future[:max_expiries]
+
+    expiries = pick(listed)
     if not expiries:
         return {
             "available": False,
@@ -744,16 +772,24 @@ def fetch_options(symbol: str, max_expiries: int = 4,
             "expiries": [],
         }
 
-    info = ticker.info or {}
-    spot = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0.0)
+    spot = float(yahoo.info(symbol).get("currentPrice")
+                 or yahoo.info(symbol).get("regularMarketPrice") or 0.0)
+    if not spot:
+        from .quotes import fetch_quote
+        spot = float(spot_hint or (fetch_quote(symbol) or {}).get("price") or 0.0)
     rate = risk_free_rate()
     now = market_now()
 
+    boards = [(e, chain_for(e)) for e in expiries]
+    # Yahoo listed the dates and then refused the boards themselves.
+    if source == "Yahoo Finance" and not any(c is not None for _, c in boards) and use_cboe():
+        expiries = pick(listed)
+        spot = spot or spot_hint
+        boards = [(e, chain_for(e)) for e in expiries]
+
     chains: List[Dict[str, Any]] = []
-    for expiry in expiries:
-        try:
-            chain = ticker.option_chain(expiry)
-        except Exception:
+    for expiry, chain in boards:
+        if chain is None:
             continue
 
         # Midnight on the expiry date, on the market's clock, so the
@@ -858,6 +894,7 @@ def fetch_options(symbol: str, max_expiries: int = 4,
         "spot": round(spot, 4) if spot else None,
         "risk_free_rate": round(rate, 5),
         "dividend_yield": round(div_yield, 5),
-        "all_expiries": list(ticker.options or []),
+        "all_expiries": list(listed),
         "expiries": chains,
+        "source": source,
     }

@@ -1,10 +1,18 @@
-"""Price, fundamentals and history. yfinance -- free, no key."""
+"""Price, fundamentals and history. yfinance -- free, no key.
+
+The quote and fundamentals read Yahoo's quote summary through yahoo.py,
+which shares one answer per symbol and backs off after a refusal. When
+that summary is empty the quote comes from fallback.py instead, and says
+so in `source`.
+"""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 import yfinance as yf
+
+from . import fallback, yahoo
 
 
 def _num(value: Any) -> Any:
@@ -23,10 +31,13 @@ def _num(value: Any) -> Any:
 
 def fetch_quote(symbol: str) -> Dict[str, Any]:
     """Current price and the headline numbers for a ticker."""
-    ticker = yf.Ticker(symbol)
-    info = ticker.info or {}
+    info = yahoo.info(symbol)
 
     price = _num(info.get("currentPrice") or info.get("regularMarketPrice"))
+    if not price:
+        backup = fallback.quote(symbol)
+        if backup:
+            return backup
     prev = _num(info.get("previousClose") or info.get("regularMarketPreviousClose"))
     change = round(price - prev, 4) if price and prev else None
     change_pct = round((change / prev) * 100, 3) if change and prev else None
@@ -53,15 +64,22 @@ def fetch_quote(symbol: str) -> Dict[str, Any]:
         "employees": _num(info.get("fullTimeEmployees")),
         "website": info.get("website"),
         "summary": info.get("longBusinessSummary"),
+        "source": "Yahoo Finance",
     }
 
 
 def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
     """Valuation, margins, growth, dividend, analyst view."""
-    info = yf.Ticker(symbol).info or {}
+    info = yahoo.info(symbol)
 
     target = _num(info.get("targetMeanPrice"))
     price = _num(info.get("currentPrice") or info.get("regularMarketPrice"))
+    if not info:
+        # Yahoo refused. Nasdaq's summary has the consensus target and
+        # the price to measure it from; the ratios have nowhere else free.
+        extra = fallback.nasdaq_extras(symbol)
+        target = extra.get("target")
+        price = price or (fetch_quote(symbol) or {}).get("price")
     upside = round(((target / price) - 1) * 100, 2) if target and price else None
 
     return {
