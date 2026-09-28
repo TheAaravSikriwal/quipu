@@ -327,6 +327,9 @@ function visitorHtml() {
       <span>Bots that trade a stock by rules you build &mdash; momentum, breakouts, RSI, VWAP,
         fair value gaps &mdash; with a stop-loss and take-profit on every trade.</span></div></div>
     <div class="ap-build ap-howto">
+      <p class="ap-here">Running this QUIPU yourself? This public address never shows the
+        controls, to anyone. Open <a class="ap-ext" href="http://localhost:8848">localhost:8848</a>
+        on the computer running the engine &mdash; that is where your bots are.</p>
       <h3>It trades through Alpaca, on your own account</h3>
       <p>Every order a bot places goes through ${ext(ALPACA.home, "Alpaca")}, a US broker with a free
         paper-trading account and an API. The bots run on the computer that runs the QUIPU engine

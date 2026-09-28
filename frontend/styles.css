@@ -3426,3 +3426,5 @@ a { color: inherit; text-decoration: none; }
  * inside may animate its size. */
 .fill, .fill * { transition: none !important; }
 .pcard > .fill { display: flex; flex-direction: column; gap: 5px; }
+.ap-here { margin: 0 0 14px; padding: 10px 12px; border-radius: 3px; background: var(--sunk);
+  box-shadow: inset 2px 0 0 var(--attn); color: var(--text); font-size: 13px; }
