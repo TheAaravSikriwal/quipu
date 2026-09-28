@@ -1210,14 +1210,6 @@ svg.qchart { width: 100%; height: 100%; display: block; }
 .ap-err { color: var(--neg); font-size: 12px; margin-top: 6px; }
 .ap-ext { color: var(--text); text-decoration: underline; text-decoration-color: var(--rule2); text-underline-offset: 2px; }
 .ap-ext:hover { text-decoration-color: var(--text); }
-.ap-visit { max-width: 860px; }
-.ap-howto { margin-top: 14px; font-size: 13.5px; line-height: 1.65; color: var(--text2); }
-.ap-howto h3 { font-size: 15px; letter-spacing: 0; text-transform: none; color: var(--text); margin: 0 0 8px; }
-.ap-howto ol { padding-left: 20px; margin: 12px 0; }
-.ap-howto li { margin-bottom: 10px; }
-.ap-howto b { color: var(--text); }
-.ap-howto code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--black);
-  padding: 1px 5px; border-radius: 2px; }
 .ap-cols { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 1100px) { .ap-cols { grid-template-columns: 1fr; } }
 .ap-build, .ap-side { background: var(--panel); border-radius: 4px; padding: 14px 16px; }
@@ -3426,5 +3418,3 @@ a { color: inherit; text-decoration: none; }
  * inside may animate its size. */
 .fill, .fill * { transition: none !important; }
 .pcard > .fill { display: flex; flex-direction: column; gap: 5px; }
-.ap-here { margin: 0 0 14px; padding: 10px 12px; border-radius: 3px; background: var(--sunk);
-  box-shadow: inset 2px 0 0 var(--attn); color: var(--text); font-size: 13px; }

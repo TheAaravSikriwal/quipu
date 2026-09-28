@@ -8,8 +8,9 @@
  *     the top under "automated", flagged "Automated trade active" while it
  *     holds a position.
  *
- * Owner only. Visitors get neither: the engine refuses them on /api/auto,
- * and the page does not draw the route or the panel for them.
+ * Aarav's copy only. The public site shows no trace of it: the engine
+ * refuses visitors on /api/auto, and the page draws neither the route nor
+ * the panel for them.
  *
  * The bots run in the engine, not here -- closing this page does not stop
  * them. The page reads their state every five seconds while it is showing
@@ -99,8 +100,9 @@ setInterval(() => {
   const t = current();
   if (onAuto(t) || (t && roomOf(t) === "log")) refresh();
 }, 5000);
-// Once at start, so the Trade log's tab can say a bot is active.
-setTimeout(refresh, 1500);
+// Once at start, so the Trade log's tab can say a bot is active -- on this
+// computer only; the public address would only be told no.
+if (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) setTimeout(refresh, 1500);
 
 /* ---- the draft a bot is built in ---- */
 
@@ -318,44 +320,10 @@ function botsHtml() {
       <span class="dim">${esc(t.reason)}${t.mode === "watch" ? " &middot; simulated" : ""}</span></div>`).join("")}</div>` : "");
 }
 
-/* What a visitor to the shared QUIPU sees instead of the controls: the
- * bots trade through the account of whoever runs the engine, so they
- * cannot run on Aarav's. How to run them on your own, in four steps. */
-function visitorHtml() {
-  return `<div class="ap ap-visit">
-    <div class="ap-headrow"><div class="ap-title"><h2>Autopilot</h2>
-      <span>Bots that trade a stock by rules you build &mdash; momentum, breakouts, RSI, VWAP,
-        fair value gaps &mdash; with a stop-loss and take-profit on every trade.</span></div></div>
-    <div class="ap-build ap-howto">
-      <p class="ap-here">Running this QUIPU yourself? This public address never shows the
-        controls, to anyone. Open <a class="ap-ext" href="http://localhost:8848">localhost:8848</a>
-        on the computer running the engine &mdash; that is where your bots are.</p>
-      <h3>It trades through Alpaca, on your own account</h3>
-      <p>Every order a bot places goes through ${ext(ALPACA.home, "Alpaca")}, a US broker with a free
-        paper-trading account and an API. The bots run on the computer that runs the QUIPU engine
-        and trade the Alpaca account whose keys it has &mdash; so they can only ever trade your
-        account, on your computer, never this one.</p>
-      <ol>
-        <li><b>Get the QUIPU engine</b> for your computer from ${ext("https://wearechintu.com/quipu", "wearechintu.com/quipu")}.</li>
-        <li><b>Open a free Alpaca account</b> at ${ext(ALPACA.home, "alpaca.markets")}. Paper trading
-          needs no money and no funding.</li>
-        <li><b>Make paper API keys</b> on your ${ext(ALPACA.paper, "paper dashboard")} (the API Keys
-          panel), and put them in a file called <code>.env</code> in QUIPU's data folder
-          (<code>%LOCALAPPDATA%\QUIPU</code> on Windows):<br>
-          <code>ALPACA_API_KEY_ID=&hellip;</code><br><code>ALPACA_API_SECRET_KEY=&hellip;</code></li>
-        <li><b>Restart the engine</b>, open the Workshop and choose <b>Run it on autopilot</b>. Start
-          in Watch mode, which places no orders at all, then paper.</li>
-      </ol>
-      <p class="dim">Live money needs separate live keys (<code>ALPACA_LIVE_API_KEY_ID</code> /
-        <code>ALPACA_LIVE_API_SECRET_KEY</code>) and switching live on by typing LIVE. Trading is
-        risky and automated trading can lose money quickly; the bots follow your rules, not a
-        forecast.</p>
-    </div>
-  </div>`;
-}
-
 function workshop(tab) {
-  if (!IS_OWNER) return visitorHtml();
+  // Only on Aarav's own copy. The public site never draws the route, so
+  // arriving here as a visitor (a stale tab) just goes back to the routes.
+  if (!IS_OWNER) { tab.ui.route = null; setTimeout(render, 0); return ""; }
   if (!AP.data) {
     refresh();
     return `<div class="loading" style="height:40%"><div class="spinner"></div><div>Loading autopilot&hellip;</div>
