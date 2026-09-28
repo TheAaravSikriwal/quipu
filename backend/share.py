@@ -64,6 +64,9 @@ TTL = [
 HEAVY = ("/api/ticker/", "/api/course/", "/api/target/", "/api/ivhistory/",
          "/api/position", "/api/world", "/api/screen", "/api/news/", "/api/chain/")
 OWNER_ONLY = {("POST", "/api/settings/alpaca"), ("POST", "/api/screen/refresh")}
+#: Whole route families only Aarav may reach, reading as well as writing:
+#: the autopilot places orders on his account and shows its balance.
+OWNER_ONLY_PREFIX = ("/api/auto",)
 
 PER_MINUTE, HEAVY_PER_MINUTE, AT_ONCE = 120, 20, 3
 #: The shared answers kept in memory, all together.
@@ -166,7 +169,7 @@ def install(app) -> None:
             return await call_next(request)
 
         path, method = request.url.path, request.method
-        if (method, path) in OWNER_ONLY:
+        if (method, path) in OWNER_ONLY or path.startswith(OWNER_ONLY_PREFIX):
             return JSONResponse({"detail": "only Aarav can do that"}, status_code=403)
 
         heavy = path.startswith(HEAVY)

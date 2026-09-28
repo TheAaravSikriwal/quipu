@@ -38,6 +38,7 @@ from sources import alpaca  # noqa: E402
 from sources import yahoo  # noqa: E402
 import ivhistory  # noqa: E402
 import instant  # noqa: E402
+import autopilot  # noqa: E402
 import course  # noqa: E402
 
 import paths  # noqa: E402
@@ -131,6 +132,80 @@ def health() -> Dict[str, Any]:
         },
         "max_articles": MAX_ARTICLES,
     }
+
+
+# ---- autopilot: owner only ------------------------------------------------
+#
+# share.py already refuses visitors on /api/auto; each route checks again,
+# because these are the only routes in QUIPU that can place an order.
+
+def _owner(request: Request) -> None:
+    if share.visitor(request.headers) is not None:
+        raise HTTPException(status_code=403, detail="only Aarav can do that")
+
+
+def _auto(fn, *args):
+    try:
+        return fn(*args)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except autopilot.engine.B.BrokerError as exc:
+        raise HTTPException(status_code=502, detail=f"Alpaca: {exc}")
+
+
+@app.get("/api/auto")
+def auto_view(request: Request) -> Dict[str, Any]:
+    _owner(request)
+    return autopilot.view()
+
+
+@app.post("/api/auto/bots")
+def auto_save(request: Request, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    _owner(request)
+    return _auto(autopilot.save_bot, payload)
+
+
+@app.post("/api/auto/bots/{bot_id}/cash")
+def auto_cash(bot_id: str, request: Request, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    _owner(request)
+    return _auto(autopilot.cash, bot_id, payload.get("amount"))
+
+
+@app.post("/api/auto/bots/{bot_id}/{action}")
+def auto_act(bot_id: str, action: str, request: Request) -> Dict[str, Any]:
+    _owner(request)
+    return _auto(autopilot.act, bot_id, action)
+
+
+@app.post("/api/auto/check")
+def auto_check(request: Request, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    _owner(request)
+    return _auto(autopilot.check, payload)
+
+
+@app.post("/api/auto/kill")
+def auto_kill(request: Request) -> Dict[str, Any]:
+    _owner(request)
+    return {"stopped": autopilot.kill()}
+
+
+@app.post("/api/auto/live")
+def auto_live(request: Request, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Live trading on or off. On needs the word LIVE typed back, so it
+    cannot happen by a stray click."""
+    _owner(request)
+    on = bool(payload.get("enabled"))
+    if on and payload.get("confirm") != "LIVE":
+        raise HTTPException(status_code=400, detail="type LIVE to switch live trading on")
+    return _auto(autopilot.set_live, on)
+
+
+@app.on_event("startup")
+def _autopilot_start() -> None:
+    # Bots left running keep running across a restart of the engine.
+    autopilot.start()
 
 
 @app.get("/api/instant/{symbol}")

@@ -75,6 +75,7 @@ const LAYOUT = {
   /* The trade log. */
   log: [
     "head",             // title, counts, + new trade
+    "auto",             // bots running or holding: "Automated trade active"
     "open",             // open trades, marked to the market
     "totals",           // still open / banked / all in
     "closed",           // closed trades, as settled

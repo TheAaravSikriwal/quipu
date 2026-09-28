@@ -238,7 +238,7 @@ function expiryState(t, a) {
 function renderBook(tab) {
   const b = bookView(tab);
   if (!b.live.length && !b.done.length) {
-    return shown("log", "head", tab, b) + `<div class="loading" style="height:44%">
+    return shown("log", "head", tab, b) + shown("log", "auto", tab, b) + `<div class="loading" style="height:44%">
       <div>Nothing in the log yet</div>
       <div class="stage">build a position yourself, or start from a ready-made
         setup &mdash; either way it ends up here</div></div>`;
@@ -823,6 +823,7 @@ room("log", {
   name: () => "Trade log",
   badge: (tab) => {
     const n = bookOpen(tab.ui.book || []).length;
-    return n ? `${n} open` : "";
+    const auto = window.QUIPU_AUTO?.badge() || "";
+    return [n ? `${n} open` : "", auto].filter(Boolean).join(" \u00b7 ");
   },
 });

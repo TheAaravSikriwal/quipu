@@ -1181,6 +1181,107 @@ svg.qchart { width: 100%; height: 100%; display: block; }
 .wb-src.bad .led { background: var(--led-off); box-shadow: 0 0 6px var(--led-off); }
 .wb-src.bad { color: var(--text); }
 
+/* ================= autopilot ================= */
+
+/* Bots that trade by rules. The builder is a form read like sentences --
+   "price moves up 0.6% within 5 min" -- so each condition row is its type
+   and then the sentence with the numbers left open. */
+.ap { max-width: 1500px; margin: 0 auto; padding: 14px 16px 60px; font-family: var(--ui); }
+.ap-head { margin-bottom: 14px; }
+.ap-headrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px;
+  padding: 12px 16px; background: var(--panel); border-radius: 4px; }
+.ap-title h2 { margin: 0; font-family: var(--mast); font-size: 22px; color: var(--text); }
+.ap-title span { display: block; font-size: 12px; color: var(--text2); margin-top: 2px; }
+.ap-acct { font-size: 12.5px; color: var(--text2); }
+.ap-acct b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+.ap-market { font-size: 11px; color: var(--text2); display: inline-flex; align-items: center; gap: 6px; }
+.ap-head .led, .ap-cres .led { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.ap-market .led.on, .ap-cres.ok .led { background: var(--led-on); box-shadow: 0 0 5px var(--led-on); }
+.ap-market .led.off, .ap-cres.no .led { background: var(--led-off); box-shadow: 0 0 5px var(--led-off); }
+.ap-live { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.ap-livebadge { background: var(--neg); color: var(--black); font-weight: 700; font-size: 10px;
+  letter-spacing: .12em; padding: 3px 8px; border-radius: 3px; }
+.ap button { font-family: var(--ui); font-size: 11.5px; background: var(--raised); color: var(--text);
+  border: 1px solid var(--rule2); border-radius: 3px; padding: 5px 11px; cursor: pointer; }
+.ap button:hover { border-color: var(--text2); }
+.ap button.primary { background: var(--text); color: var(--black); border-color: var(--text); font-weight: 600; }
+.ap-kill { margin-left: auto; background: transparent !important; border-color: var(--neg) !important; color: var(--neg) !important; }
+.ap-kill:hover { background: var(--neg) !important; color: var(--black) !important; }
+.ap-err { color: var(--neg); font-size: 12px; margin-top: 6px; }
+.ap-cols { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .ap-cols { grid-template-columns: 1fr; } }
+.ap-build, .ap-side { background: var(--panel); border-radius: 4px; padding: 14px 16px; }
+.ap-side h3 { margin: 0 0 10px; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--text2); }
+.ap-tpl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.ap-tpl > span { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); margin-right: 4px; }
+.ap-top { display: grid; grid-template-columns: 1.4fr .8fr 1fr; gap: 10px; margin-bottom: 10px; }
+.ap-f { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--text2); }
+.ap-f > span { letter-spacing: .06em; }
+.ap-f i, .ap-cbody i { font-style: normal; color: var(--faint); font-size: 10px; }
+.ap input, .ap select { background: var(--black); color: var(--text); border: 1px solid var(--rule2);
+  border-radius: 3px; padding: 5px 7px; font-family: var(--mono); font-size: 12px; }
+.ap input[type="checkbox"] { width: auto; padding: 0; }
+.ap fieldset { border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px 12px; margin: 0 0 10px; }
+.ap legend { padding: 0 6px; font-size: 11px; color: var(--text); display: flex; align-items: center; gap: 10px; }
+.ap legend label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.ap-rules.off > :not(legend) { opacity: .45; }
+.ap-cond { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.ap-ctype { flex: none; width: 118px; font-size: 10px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--attn); }
+.ap-cbody { flex: 1; font-size: 12.5px; color: var(--text2); line-height: 2; }
+.ap-cbody input, .ap-cbody select { padding: 2px 5px; margin: 0 2px; }
+.ap-cond button { flex: none; padding: 2px 8px; }
+.ap-addc { margin-top: 8px; }
+.ap-none { font-size: 12px; padding: 6px 0; line-height: 1.5; }
+.ap-sets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1400px) { .ap-sets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ap-sets fieldset { display: flex; flex-direction: column; gap: 7px; }
+.ap-chk { flex-direction: row; align-items: center; gap: 7px; }
+.ap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.ap-msg { font-size: 12px; color: var(--attn); }
+.ap-check { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.ap-chead { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
+.ap-cside { padding: 8px 10px; border-radius: 3px; background: var(--sunk); margin-bottom: 8px; font-size: 12px; }
+.ap-cside.met { box-shadow: inset 2px 0 0 var(--led-on); }
+.ap-cside b { display: block; margin-bottom: 4px; color: var(--text); }
+.ap-cres { display: flex; align-items: center; gap: 7px; color: var(--text2); line-height: 1.7; }
+.ap-bot { border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px; margin-bottom: 10px; font-size: 12px; }
+.ap-bot.st-active { border-color: var(--led-on); box-shadow: inset 3px 0 0 var(--led-on); }
+.ap-bot.st-run { box-shadow: inset 3px 0 0 var(--attn); }
+.ap-bot.st-stop { opacity: .8; }
+.ap-bhead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.ap-bhead b { color: var(--text); font-size: 13px; }
+.ap-mode { font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 2px; background: var(--raised); color: var(--text2); }
+.ap-mode.m-paper { color: var(--c-filed); }
+.ap-mode.m-live { background: var(--neg); color: var(--black); }
+.ap-status { margin-left: auto; font-size: 11px; color: var(--text2); }
+.st-active .ap-status { color: var(--led-on); font-weight: 600; }
+.ap-bnums, .ap-pos, .ap-wait { color: var(--text2); line-height: 1.6; }
+.ap-bnums b, .ap-pos b { font-family: var(--mono); font-weight: 500; }
+.ap-pos { margin: 6px 0; padding: 6px 8px; background: var(--sunk); border-radius: 3px; color: var(--text); }
+.ap-wait { font-size: 11.5px; color: var(--faint); }
+/* What the bot's conditions read on its last look, a light each. */
+.ap-sees { margin: 6px 0; font-size: 11px; }
+.ap-sees > div { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
+.ap-sees b { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); width: 38px; }
+.ap-sees .ap-cres { line-height: 1.6; }
+.ap-events { margin: 6px 0; font-size: 11px; color: var(--faint); line-height: 1.55; }
+.ap-events span { font-family: var(--mono); margin-right: 8px; }
+.ap-bbtns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ap-cash { margin-left: auto; display: inline-flex; gap: 4px; }
+.ap-cash input { width: 70px; }
+.ap-th { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--text2); margin: 14px 0 6px; }
+.ap-trade { display: grid; grid-template-columns: 70px 1fr 1.2fr 70px 1.3fr; gap: 8px; font-size: 11.5px;
+  padding: 4px 0; border-bottom: 1px solid var(--rule); color: var(--text2); }
+.ap-trade span:first-child { font-family: var(--mono); }
+.ap-flag { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 2px; margin-right: 6px; background: var(--raised); color: var(--text2); }
+.ap-flag.f-active { background: var(--led-on); color: var(--black); }
+.ap-flag.f-run { color: var(--attn); }
+.ap-lrow.done { opacity: .75; }
+.ap-lognone { max-width: 1100px; margin: 6px auto 0; padding: 0 20px; font-size: 12px; color: var(--faint); }
+
 /* ================= instant ================= */
 
 /* What lands first. A list read top-down by time, newest first; the kind
@@ -1794,6 +1895,16 @@ a { color: inherit; text-decoration: none; }
 }
 .routes.to-custom .route[data-route="custom"],
 .routes.to-ready .route[data-route="ready"] {
+  grid-row: 1; grid-column: 1; background: var(--raised);
+}
+
+/* The other two routes fold away the same way when one of them is picked. */
+.routes.to-target .route:not([data-route="target"]),
+.routes.to-auto .route:not([data-route="auto"]) {
+  opacity: 0; transform: scale(.96); grid-row: 1; grid-column: 1;
+}
+.routes.to-target .route[data-route="target"],
+.routes.to-auto .route[data-route="auto"] {
   grid-row: 1; grid-column: 1; background: var(--raised);
 }
 
