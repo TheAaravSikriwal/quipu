@@ -2,6 +2,7 @@
   "name": "quipu",
   "version": "0.1.0",
   "description": "Everything knowable about one stock, on one screen, cross-referenced",
+  "license": "MIT",
   "main": "electron/main.js",
   "scripts": {
     "api": ".venv/Scripts/python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8848 --reload",

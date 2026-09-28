@@ -224,3 +224,7 @@ any extraction upgrade.
 Persistent caching between runs, a real-time quote source (Alpaca or Tradier
 would replace delayed Yahoo prices), and multi-leg option strategies — spreads,
 straddles, condors — which the greeks translator currently cannot size.
+
+## License
+
+[MIT](LICENSE) © 2026 Aarav Sikriwal
