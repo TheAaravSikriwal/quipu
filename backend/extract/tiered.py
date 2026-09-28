@@ -18,9 +18,9 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
-import requests
-
 from urllib.parse import urlparse
+
+import safety
 
 MIN_BODY_CHARS = 400  # below this we treat the extraction as failed
 
@@ -84,11 +84,12 @@ def _tier_trafilatura(url: str) -> Optional[Article]:
     # and it was the failures rather than the successes that took two
     # minutes. A page that cannot be read in eight seconds is not
     # going to be read.
+    # Through safety.fetch_page: a feed's link (and every redirect it
+    # takes) must be on the public internet, never this PC or its network.
     try:
-        resp = requests.get(
+        downloaded = safety.fetch_page(
             url, timeout=8,
             headers={"User-Agent": "Mozilla/5.0 (compatible; quipu/0.1)"})
-        downloaded = resp.text if resp.ok else None
     except Exception:
         downloaded = None
     if not downloaded:
@@ -172,6 +173,10 @@ def _tier_firecrawl(url: str) -> Optional[Article]:
 
 def extract(url: str) -> Article:
     """Walk the tiers until one returns a usable body."""
+    # A link that points anywhere but the public internet is not read at
+    # all, by any tier (news-please fetches for itself).
+    if not safety.public_url(url):
+        return Article(url=url, publisher=urlparse(url).netloc, error="not a public web address")
     errors: List[str] = []
     for tier in (_tier_trafilatura, _tier_newsplease, _tier_firecrawl):
         try:

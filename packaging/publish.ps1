@@ -47,6 +47,8 @@ if (Test-Engine) {
 } else {
     Say "Starting the engine on $Port..."
     $py = Join-Path $Root ".venv\Scripts\python.exe"
+    # Published: no development origins (see backend/guard.py).
+    $env:QUIPU_PUBLISHED = "1"
     $style = if ($Background) { "Hidden" } else { "Minimized" }
     Start-Process -FilePath $py -ArgumentList "backend\engine.py", "--port", $Port, "--no-browser" `
         -WorkingDirectory $Root -WindowStyle $style

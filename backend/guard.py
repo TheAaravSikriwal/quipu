@@ -13,6 +13,10 @@ The engine answers three kinds of caller and nobody else:
   QUIPU_ORIGINS      (extra origins, comma-separated: a site preview, or
                       the site's own dev server while it is being built)
 
+Run from a checkout for development, it also answers the site's dev server
+(localhost:3000). Published to the internet (QUIPU_PUBLISHED=1, which
+publish.ps1 sets) or packaged, it does not.
+
 and it refuses the rest outright -- including the requests CORS lets
 through anyway (a form POST, an <img> pointed at /api/...), which a
 browser marks with Sec-Fetch-Site: cross-site.
@@ -48,7 +52,8 @@ PUBLIC = os.environ.get("QUIPU_PUBLIC", "https://quipu.wearechintu.com")
 
 def allowed_origins() -> Set[str]:
     extra = [o.strip().rstrip("/") for o in os.environ.get("QUIPU_ORIGINS", "").split(",") if o.strip()]
-    dev = [] if paths.FROZEN else ["http://localhost:3000", "http://127.0.0.1:3000"]
+    published = paths.FROZEN or os.environ.get("QUIPU_PUBLISHED") == "1"
+    dev = [] if published else ["http://localhost:3000", "http://127.0.0.1:3000"]
     return set(SITE) | {PUBLIC} | set(extra) | set(dev)
 
 

@@ -1267,7 +1267,6 @@ def attribute(a: Dict[str, Any], open_spot: Optional[float],
     gamma_pl = 0.5 * float(g.get("gamma") or 0.0) * ds * ds
     theta_pl = float(g.get("theta") or 0.0) * dt
     vega_pl = 0.0 if dv is None else float(g.get("vega") or 0.0) * dv
-    rest = pl - (day_one + delta_pl + gamma_pl + theta_pl + vega_pl)
 
     moved_pct = (ds / float(open_spot) * 100.0) if open_spot else None
     typical = None
@@ -1327,7 +1326,17 @@ def attribute(a: Dict[str, Any], open_spot: Optional[float],
             W.term("points", round(abs(dv), 2), 2),
             gives=round(abs(vega_pl), 2)))
 
-    if abs(rest) >= 0.5:
+    # The last line is whatever the lines shown leave over, to the cent:
+    # a term too small to get its own line (under 50 cents) is carried
+    # here rather than dropped, or the lines would not add up to the
+    # profit they sit under -- and did not, by 45 cents, on a day the
+    # gamma term was small.
+    shown = 0.0
+    for ln in lines:
+        v = float(ln["gives"])
+        shown += -v if ln.get("op") == "-" else v
+    rest = round(pl, 2) - round(shown, 2)
+    if abs(rest) >= 0.005:
         lines.append(W.line(
             "+" if rest >= 0 else "-",
             W.term("everything the four above do not catch", round(abs(rest), 2), 2,

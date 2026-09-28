@@ -17,12 +17,18 @@ re-checked, slightly differently, in every route.
                  all: this computer, or its public address. Anything else
                  is a page that has pointed its own domain at 127.0.0.1
                  (DNS rebinding) to reach the engine as if it were local.
+  public_url()   whether a link from a feed points at the public internet,
+                 and not at this PC, the router or anything else at home.
+  fetch_page()   GET a page from a feed's link: public addresses only, every
+                 redirect checked the same way, and a size cap.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -72,3 +78,63 @@ def local_host(host: str) -> bool:
 
 def known_host(host: str) -> bool:
     return local_host(host) or _hostname(host) in public_hosts()
+
+
+def _public_ip(ip: str) -> bool:
+    addr = ipaddress.ip_address(ip.split("%", 1)[0])
+    if addr.version == 6 and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return addr.is_global and not addr.is_multicast
+
+
+def public_url(url: str) -> bool:
+    """A web link whose host resolves only to public internet addresses.
+
+    News feeds are written by strangers. Without this, a feed's link to
+    http://192.168.1.1/ or http://127.0.0.1:8848/ would have this PC fetch
+    its own router or its own engine on the stranger's behalf.
+    """
+    try:
+        parts = urlsplit(str(url).strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return False
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        infos = socket.getaddrinfo(parts.hostname, port, proto=socket.IPPROTO_TCP)
+    except (ValueError, OSError, UnicodeError):
+        return False
+    return bool(infos) and all(_public_ip(info[4][0]) for info in infos)
+
+
+#: The most a feed's page may be. Articles are tens of kilobytes.
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+
+
+def fetch_page(url: str, timeout: float = 8, headers=None, max_redirects: int = 5):
+    """The page's text, or None: public addresses only, every redirect
+    re-checked (a public page can redirect to a private one), and never
+    more than MAX_PAGE_BYTES."""
+    import requests
+
+    for _ in range(max_redirects + 1):
+        if not public_url(url):
+            return None
+        with requests.get(url, timeout=timeout, headers=headers, allow_redirects=False, stream=True) as resp:
+            if resp.is_redirect or resp.is_permanent_redirect:
+                nxt = resp.headers.get("location")
+                if not nxt:
+                    return None
+                url = requests.compat.urljoin(url, nxt)
+                continue
+            if not resp.ok:
+                return None
+            size = int(resp.headers.get("content-length") or 0)
+            if size > MAX_PAGE_BYTES:
+                return None
+            body = bytearray()
+            for chunk in resp.iter_content(64 * 1024):
+                body += chunk
+                if len(body) > MAX_PAGE_BYTES:
+                    return None
+            # As requests' .text would: the page's charset, else its default.
+            return bytes(body).decode(resp.encoding or "utf-8", errors="replace")
+    return None

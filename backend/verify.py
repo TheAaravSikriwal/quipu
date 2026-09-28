@@ -2317,6 +2317,26 @@ try:
     app_src = (Path(__file__).resolve().parent / "app.py").read_text(encoding="utf-8")
     RESULTS.append(("len(symbol) > 12" not in app_src and "docs_url=None" in app_src,
                     "every route checks its symbol the same way, and there is no /docs", "safety.ticker"))
+    # A feed's link must never have this PC fetch its own network.
+    home = ["http://127.0.0.1:8848/api/settings", "http://localhost/", "http://192.168.1.1/",
+            "http://10.0.0.1/", "http://169.254.169.254/latest/", "http://[::1]/", "file:///C:/Windows/win.ini",
+            "http://0.0.0.0/", "javascript:alert(1)"]
+    let_in = [u for u in home if SF.public_url(u)]
+    RESULTS.append((not let_in, "feed links to this PC or its network are never fetched",
+                    let_in[0] if let_in else f"{len(home)} refused"))
+    import os as _os
+    import guard as _G
+    _was = _os.environ.get("QUIPU_PUBLISHED")
+    _os.environ["QUIPU_PUBLISHED"] = "1"
+    try:
+        _pub = _G.allowed_origins()
+    finally:
+        if _was is None:
+            _os.environ.pop("QUIPU_PUBLISHED", None)
+        else:
+            _os.environ["QUIPU_PUBLISHED"] = _was
+    RESULTS.append((not any("localhost" in o or "127.0.0.1" in o for o in _pub),
+                    "published, it answers no development origins", f"{len(_pub)} origins"))
     fe = Path(__file__).resolve().parent.parent / "frontend"
     js = {f.name: f.read_text(encoding="utf-8") for f in fe.glob("*.js") if not f.name.endswith(".test.js")}
     raw_links = [n for n, t in js.items() if 'href="${esc(' in t]
