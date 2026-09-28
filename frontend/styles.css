@@ -1181,6 +1181,56 @@ svg.qchart { width: 100%; height: 100%; display: block; }
 .wb-src.bad .led { background: var(--led-off); box-shadow: 0 0 6px var(--led-off); }
 .wb-src.bad { color: var(--text); }
 
+/* ================= instant ================= */
+
+/* What lands first. A list read top-down by time, newest first; the kind
+   and the source lead each row because they say how far to trust it
+   before the headline says anything. */
+.in-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding-bottom: 7px; margin-bottom: 4px; border-bottom: 1px solid var(--rule);
+}
+.in-feeds { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.in-feed {
+  display: inline-flex; align-items: center; gap: 5px; cursor: default;
+  font-family: var(--ui); font-size: 10px; color: var(--text2);
+}
+.in-feed .led { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.in-feed.ok .led { background: var(--led-on); box-shadow: 0 0 5px var(--led-on); }
+.in-feed.bad .led { background: var(--led-off); box-shadow: 0 0 5px var(--led-off); }
+.in-alert {
+  flex: none; background: none; border: 1px solid var(--rule2); color: var(--text2);
+  font-family: var(--ui); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+}
+.in-alert:hover { color: var(--text); border-color: var(--text2); }
+.in-alert.on { background: var(--attn); border-color: var(--attn); color: var(--black); }
+.in-row { padding: 7px 0 8px; border-bottom: 1px solid var(--rule); }
+.in-row:last-child { border-bottom: none; }
+.in-meta {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;
+  font-family: var(--ui); font-size: 9.5px; letter-spacing: .06em; color: var(--faint);
+}
+.in-kind { text-transform: uppercase; letter-spacing: .12em; color: var(--text2); font-weight: 600; }
+.in-src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.in-when { margin-left: auto; font-family: var(--mono); white-space: nowrap; }
+.in-lag { color: var(--attn); margin-left: 6px; }
+.in-title { display: block; color: var(--text); font-size: 13px; line-height: 1.35; text-decoration: none; }
+a.in-title:hover { text-decoration: underline; }
+.in-sum { color: var(--text2); font-size: 12px; line-height: 1.45; margin-top: 4px; }
+.in-also { color: var(--faint); font-size: 10.5px; margin-top: 3px; }
+/* Worth a second look: an 8-K that matters, a stake filing, a tripwire. */
+.in-row.hot { box-shadow: inset 2px 0 0 var(--attn); padding-left: 10px; }
+.in-row.k-move .in-kind { color: var(--attn); }
+.in-row.fresh .in-title { font-weight: 600; }
+.in-empty { padding: 10px 0; }
+/* Something new landed: the panel flashes once. */
+.tile.ping { animation: inPing 1.6s ease-out 1; }
+@keyframes inPing {
+  0% { box-shadow: inset 0 0 0 2px var(--attn); }
+  100% { box-shadow: inset 0 0 0 2px transparent; }
+}
+
 /* ================= live bar ================= */
 
 .livebar {

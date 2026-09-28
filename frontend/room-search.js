@@ -25,7 +25,11 @@ async function load(tab) {
     tab.status = "error";
   }
   render();
-  if (tab.status === "ready") refreshWire(tab);
+  if (tab.status === "ready") {
+    tripSetup(tab);
+    refreshWire(tab);
+    refreshInstant(tab);
+  }
 }
 
 async function refreshLive(tab, manual = false) {
@@ -54,6 +58,7 @@ async function refreshLive(tab, manual = false) {
     tab.lastLive = new Date();
     tab.liveMs = live.ms;
     tab.liveError = null;
+    tripwires(tab);
   } catch (err) {
     tab.liveError = String(err.message || err);
   }
@@ -112,6 +117,251 @@ function wireBar(tab) {
   </div>`;
 }
 
+/* ---- Instant: what lands first ------------------------------------------
+ *
+ * The Wire reads aggregators every ninety seconds, and an aggregator runs
+ * a story after the wire does -- usually after the price has moved on it.
+ * This panel asks the engine every four seconds what the feeds that
+ * publish FIRST have turned up (instant.py: Alpaca's news stream, SEC
+ * filings, the press wires, the last hour of Google News), and shows how
+ * many seconds after publication each one got here.
+ *
+ * It also raises its own alarms, because no free feed reliably beats the
+ * tape: the price or the volume moving before any headline explains it,
+ * and a contract suddenly trading far past its open interest. Those are
+ * worked out here, from numbers the live refresh already brings. */
+
+const INSTANT_MS = 4000;
+const IN_KIND = { news: "Wire", filing: "Filing", release: "Press release", web: "News", move: "Move" };
+let IN_ALERTS = localStorage.getItem("quipu.instantAlerts") === "on";
+let IN_AUDIO = null;
+
+function instantState(tab) {
+  return (tab.instant ||= { seq: 0, events: [], feeds: [], stream: null, loaded: false });
+}
+
+function instantSort(st) {
+  st.events.sort((a, b) => (b.published || b.received) - (a.published || a.received));
+  if (st.events.length > 150) st.events.length = 150;
+}
+
+async function refreshInstant(tab) {
+  if (!tab?.symbol || tab.status !== "ready" || tab.instantBusy) return;
+  const st = instantState(tab);
+  tab.instantBusy = true;
+  try {
+    const company = tab.data?.quote?.name || "";
+    const res = await fetch(`${API}/api/instant/${encodeURIComponent(tab.symbol)}`
+      + `?after=${st.seq}&company=${encodeURIComponent(company)}`);
+    if (!res.ok) throw new Error(res.status);
+    const body = await res.json();
+    // The first answer can hold things another tab saw arrive; only what
+    // lands while this one is watching is worth a sound.
+    const quiet = !st.loaded;
+    for (const ev of body.events || []) {
+      const i = st.events.findIndex((e) => e.id === ev.id);
+      if (i >= 0) st.events[i] = { ...st.events[i], ...ev };
+      else {
+        st.events.push(ev);
+        if (ev.fresh && !quiet) instantAlert(tab, ev);
+      }
+    }
+    st.seq = body.seq;
+    st.feeds = body.feeds || [];
+    st.stream = body.stream;
+    st.loaded = true;
+    instantSort(st);
+  } catch {
+    return;                  // the next poll is four seconds away
+  } finally {
+    tab.instantBusy = false;
+  }
+  paintInstant(tab);
+}
+
+function paintInstant(tab) {
+  if (state.active !== tab.id || !tab.data) return;
+  if (document.querySelector('.tile[data-tile="instant"]')) {
+    instantTile(tab.data, tab);
+    setTileBody("instant");
+  }
+  if (tab.ui.zoom === "instant") {
+    const inner = document.querySelector(".zoom .inner");
+    if (inner) inner.innerHTML = DETAIL.instant(tab.data, tab);
+  }
+}
+
+const inLag = (s) => (s < 90 ? `${Math.round(s)}s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`);
+
+function instantRow(ev, full = false) {
+  const t = new Date((ev.published || ev.received) * 1000);
+  const clock = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(ev.fresh ? { second: "2-digit" } : {}) });
+  const stamp = t.toDateString() === new Date().toDateString()
+    ? clock : `${t.toLocaleDateString([], { month: "short", day: "numeric" })} ${clock}`;
+  const lag = ev.lag != null
+    ? `<span class="in-lag" title="Time between the source publishing it and QUIPU having it">+${inLag(ev.lag)}</span>` : "";
+  const kind = ev.kind === "filing" && ev.form ? ev.form : IN_KIND[ev.kind] || ev.kind;
+  const src = ev.via ? `${ev.source} via ${ev.via}` : ev.source;
+  const link = safeUrl(ev.url);
+  return `<div class="in-row k-${esc(ev.kind)}${ev.fresh ? " fresh" : ""}${ev.important ? " hot" : ""}">
+    <div class="in-meta"><span class="in-kind">${esc(kind)}</span><span class="in-src">${esc(src)}</span>
+      <span class="in-when">${esc(stamp)}${lag}</span></div>
+    ${link !== "#" ? `<a class="in-title" href="${link}" target="_blank" rel="noopener">${esc(ev.title)}</a>`
+                   : `<div class="in-title">${esc(ev.title)}</div>`}
+    ${full && ev.summary ? `<div class="in-sum">${esc(ev.summary)}</div>` : ""}
+    ${ev.also?.length ? `<div class="in-also">also ${ev.also.map((a) =>
+      esc(a.source) + (a.lag != null ? ` +${inLag(a.lag)}` : "")).join(", ")}</div>` : ""}
+  </div>`;
+}
+
+function instantHead(st) {
+  return `<div class="in-head"><span class="in-feeds">${st.feeds.map((f) =>
+      `<span class="in-feed ${f.ok ? "ok" : "bad"}" title="${esc(f.name)}: ${esc(f.note || "")}"><i class="led"></i>${esc(f.name)}</span>`).join("")}
+      <span class="in-feed ok" title="The price, volume and options flow, checked on every refresh"><i class="led"></i>Tripwires</span></span>
+    <button class="in-alert${IN_ALERTS ? " on" : ""}" data-in-alert
+      title="A sound and a desktop notification when something new lands">${IN_ALERTS ? "Alerts on" : "Alerts off"}</button>
+  </div>`;
+}
+
+function instantTile(d, tab) {
+  const st = instantState(tab);
+  const rows = st.events.slice(0, 40);
+  const live = st.feeds.filter((f) => f.ok).length + 1;
+  return tile(
+    "instant", "elastic e-claimed t-small", "w2 h3", "Instant",
+    instantHead(st) + (rows.length ? rows.map((e) => instantRow(e)).join("")
+      : `<div class="dim in-empty">${st.loaded
+          ? "Watching. Nothing in the last three days yet &mdash; anything new appears here the moment it lands."
+          : "Connecting to the feeds&hellip;"}</div>`),
+    `${live} feeds live`);
+}
+
+/* ---- alarms ---- */
+
+function instantAlert(tab, ev) {
+  if (state.active === tab.id) {
+    const el = document.querySelector('.tile[data-tile="instant"]');
+    if (el) { el.classList.remove("ping"); void el.offsetWidth; el.classList.add("ping"); }
+  }
+  if (!IN_ALERTS) return;
+  inBeep(ev.important || ev.kind === "move");
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      new Notification(`${tab.symbol} · ${IN_KIND[ev.kind] || "New"}`,
+        { body: ev.title, tag: `quipu-${tab.symbol}-${ev.id}` });
+    } catch { /* some browsers only allow these from a service worker */ }
+  }
+}
+
+function inBeep(urgent) {
+  if (!IN_AUDIO) return;
+  const now = IN_AUDIO.currentTime;
+  (urgent ? [0, 0.17] : [0]).forEach((off) => {
+    const o = IN_AUDIO.createOscillator(), g = IN_AUDIO.createGain();
+    o.type = "sine";
+    o.frequency.value = urgent ? 880 : 660;
+    g.gain.setValueAtTime(0.0001, now + off);
+    g.gain.exponentialRampToValueAtTime(0.16, now + off + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.14);
+    o.connect(g).connect(IN_AUDIO.destination);
+    o.start(now + off);
+    o.stop(now + off + 0.15);
+  });
+}
+
+// A browser only lets a page make sound after the person has clicked on
+// it, so the audio is set up on the first click rather than on load.
+document.addEventListener("pointerdown", () => {
+  if (IN_ALERTS && !IN_AUDIO) IN_AUDIO = new (window.AudioContext || window.webkitAudioContext)();
+});
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-in-alert]")) return;
+  IN_ALERTS = !IN_ALERTS;
+  localStorage.setItem("quipu.instantAlerts", IN_ALERTS ? "on" : "off");
+  if (IN_ALERTS) {
+    IN_AUDIO ||= new (window.AudioContext || window.webkitAudioContext)();
+    IN_AUDIO.resume?.();
+    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+    inBeep(false);
+  }
+  document.querySelectorAll("[data-in-alert]").forEach((b) => {
+    b.classList.toggle("on", IN_ALERTS);
+    b.textContent = IN_ALERTS ? "Alerts on" : "Alerts off";
+  });
+});
+
+/* ---- tripwires: the move before the story ---- */
+
+const inMedian = (xs) => {
+  const s = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  return s.length ? s[Math.floor(s.length / 2)] : null;
+};
+const inUnusual = (o) => (o?.expiries || [])
+  .flatMap((e) => (e.unusual_activity || []).map((r) => r.contract)).filter(Boolean);
+
+function tripSetup(tab) {
+  // What was already unusual when the page opened is on the page; only
+  // a contract that turns unusual while it is being watched is news.
+  tab.trips = { unusual: new Set(inUnusual(tab.data?.options)), fired: {} };
+}
+
+function tripwires(tab) {
+  const d = tab.data, trips = tab.trips;
+  if (!d || !trips) return;
+  const now = Date.now() / 1000;
+  const fire = (key, coolS, title) => {
+    if (trips.fired[key] && now - trips.fired[key] < coolS) return;
+    trips.fired[key] = now;
+    const ev = { id: `move:${key}:${Math.round(now)}`, seq: 0, kind: "move", source: "QUIPU tripwire",
+      title, url: null, published: now, received: now, lag: null, fresh: true, important: true, also: [] };
+    const st = instantState(tab);
+    st.events.push(ev);
+    instantSort(st);
+    instantAlert(tab, ev);
+  };
+
+  // Five-minute bars. The last one is still forming, so its close is
+  // simply the price now; two bars back is roughly ten minutes ago.
+  const pts = d.series_1d?.points || [];
+  const price = d.quote?.price;
+  if (pts.length >= 5 && price) {
+    const move = (price / pts[pts.length - 3].c - 1) * 100;
+    const swings = [];
+    for (let i = 2; i < pts.length - 1; i++) swings.push(Math.abs(pts[i].c / pts[i - 2].c - 1) * 100);
+    // Measured against this stock's own day: 1% in ten minutes is a
+    // shock for a utility and a quiet stretch for a small-cap.
+    const typical = inMedian(swings) || 0.3;
+    if (Math.abs(move) >= Math.max(1.0, typical * 3)) {
+      fire(`px${move > 0 ? "up" : "down"}`, 900,
+        `${tab.symbol} ${move > 0 ? "up" : "down"} ${Math.abs(move).toFixed(1)}% in about ten minutes, to ${money(price)}. `
+        + `A normal ten-minute swing today is ${typical.toFixed(2)}%.`);
+    }
+
+    // The opening bar is always heavy and the last is not finished.
+    const done = pts.slice(1, -1);
+    const last = done[done.length - 1];
+    const med = inMedian(done.slice(0, -1).map((p) => p.v).filter((v) => v > 0));
+    if (last && med && done.length >= 4 && last.v >= med * 3) {
+      fire(`vol:${last.t}`, 1e9,
+        `${tab.symbol} volume spike: ${big(last.v)} shares in the ${last.t} bar, ${(last.v / med).toFixed(1)}× a typical five minutes today.`);
+    }
+  }
+
+  for (const e of d.options?.expiries || []) {
+    for (const r of e.unusual_activity || []) {
+      if (!r.contract || trips.unusual.has(r.contract)) continue;
+      trips.unusual.add(r.contract);
+      // The panel lists anything past twice its open interest; an alarm
+      // wants more than that, or a busy chain would ring all afternoon.
+      if ((r.vol_oi_ratio || 0) < 3 || (r.volume || 0) < 500) continue;
+      fire(`opt:${r.contract}`, 1e9,
+        `Unusual options: the ${e.expiry} $${r.strike} ${r.type} has traded ${big(r.volume)} against `
+        + `${big(r.open_interest)} open (${r.vol_oi_ratio}×), so new positions rather than old ones closing.`);
+    }
+  }
+}
+
 /* Update only what the live endpoint actually changed.
  *
  * This used to call render(), which rebuilt all 25 tiles, re-packed the grid
@@ -123,11 +373,12 @@ function patchLive(tab) {
   if (!d) return;
   readSources(d);
 
-  ["quote", "options", "optionstory", "unusual", "vol", "greeks", "chain",
+  ["quote", "instant", "options", "optionstory", "unusual", "vol", "greeks", "chain",
    "pipeline"].forEach((id) => {
     if (!document.querySelector(`.tile[data-tile="${id}"]`)) return;
     switch (id) {
       case "quote": quoteTile(d.quote, tab); break;
+      case "instant": instantTile(d, tab); break;
       case "options": optionsTile(d.options); break;
       // The story is written from the chain, so it goes stale with it.
       case "optionstory": optionStoryTile(d, tab); break;
@@ -182,6 +433,15 @@ function startClock() {
     const tab = current();
     if (tab && tab.live) refreshLive(tab);
   }, LIVE_MS);
+
+  // Every open company, and even while the window is hidden: an alarm is
+  // most use exactly when the page is behind something else.
+  if (state.instantTimer) clearInterval(state.instantTimer);
+  state.instantTimer = setInterval(() => {
+    state.tabs.forEach((t) => {
+      if (roomOf(t) === "search" && t.live && t.status === "ready") refreshInstant(t);
+    });
+  }, INSTANT_MS);
 
   if (state.newsTimer) clearInterval(state.newsTimer);
   state.newsTimer = setInterval(() => {
@@ -3840,6 +4100,32 @@ room("search", {
  * already look tiles up by, so a tile moved or dropped in layout.js
  * is moved or dropped everywhere at once. */
 panel("search", "quote", "The live price and the day's move", (d, tab) => quoteTile(d.quote, tab));
+panel("search", "instant", "What lands first: wires, filings, releases, and moves nothing has explained yet", (d, tab) => instantTile(d, tab));
+
+/* Opened, the panel lists everything kept, with each item's standfirst,
+ * and says plainly what each feed is and how fast it tends to be. */
+DETAIL.instant = (d, tab) => {
+  const st = instantState(tab);
+  return `<h4>What lands first about ${esc(tab.symbol)}</h4>
+    ${instantHead(st)}
+    <div class="prose">Most news reaches a page like The Wire after a wire service has
+      already run it, and by then the price has usually moved. These are the places
+      things are published first. The figure after the time is how long after the
+      source published it QUIPU had it.</div>
+    ${statGrid([
+      ["Alpaca news", "seconds &middot; Benzinga's wire, pushed as it runs"],
+      ["SEC filings", "~15 s after acceptance &middot; 8-Ks are the big ones"],
+      ["Press wires", "~20 s &middot; the company's own announcements"],
+      ["Google News", "minutes &middot; widest net, incl. local and trade press"],
+      ["Tripwires", "every refresh &middot; a move before any story explains it"],
+    ])}
+    <div class="prose">No free feed reliably beats the price: a large move often starts
+      as the headline lands. That is what the tripwires are for &mdash; a ten-minute move
+      three times the stock's normal swing, a five-minute bar with three times the usual
+      volume, or a contract suddenly trading far past its open interest. Turn alerts on
+      for a sound and a desktop notification.</div>
+    ${st.events.map((e) => instantRow(e, true)).join("") || `<div class="dim">Nothing yet.</div>`}`;
+};
 panel("search", "price", "The price chart, today out to five years, with indicators", (d, tab) => priceChartTile(d, tab));
 panel("search", "returns", "How it has done over each horizon", (d) => returnsTile(d.long_history));
 panel("search", "volume", "The tape: how much trades, and when", (d) => volumeTile(d.volume));

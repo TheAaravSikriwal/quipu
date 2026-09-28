@@ -20,6 +20,7 @@ const LAYOUT = {
   search: [
     { id: "price", label: "Price", panels: [
       "quote",          // the live price and the day's move
+      "instant",        // what lands first: wires, filings, releases, moves
       "price",          // the price chart, today out to five years
       "returns",        // how it has done over each horizon
       "volume",         // the tape: how much trades, and when

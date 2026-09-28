@@ -37,6 +37,7 @@ from sources import world as world_news  # noqa: E402
 from sources import alpaca  # noqa: E402
 from sources import yahoo  # noqa: E402
 import ivhistory  # noqa: E402
+import instant  # noqa: E402
 import course  # noqa: E402
 
 import paths  # noqa: E402
@@ -130,6 +131,15 @@ def health() -> Dict[str, Any]:
         },
         "max_articles": MAX_ARTICLES,
     }
+
+
+@app.get("/api/instant/{symbol}")
+def instant_feed(symbol: str, after: int = 0, company: str = "") -> Dict[str, Any]:
+    """What has landed about this company since `after`, from the feeds
+    that publish first -- the page polls this every few seconds. Asking
+    is also what keeps the company watched; see instant.py."""
+    symbol = _symbol(symbol)
+    return instant.read(symbol, company, max(after, 0))
 
 
 @app.get("/api/sources")
