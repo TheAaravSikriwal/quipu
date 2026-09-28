@@ -999,14 +999,15 @@ function renderRoutes(tab) {
           right.</span>
         <span class="rg">strikes from your number &middot; capped against uncapped</span>
       </button>
-      ${IS_OWNER ? `<button class="route" data-route="auto">
+      <button class="route" data-route="auto">
         <span class="rk">Run it on autopilot</span>
         <span class="rd">Build a bot from conditions &mdash; momentum, breakouts,
           RSI, VWAP, fair value gaps &mdash; and it trades the stock by itself
           with a stop-loss and take-profit on every trade. Watch mode first,
           then paper, then live when you switch it on.</span>
-        <span class="rg">stocks &middot; long or short &middot; start and stop any time</span>
-      </button>` : ""}
+        <span class="rg">${IS_OWNER ? "stocks &middot; long or short &middot; through Alpaca"
+          : "runs through your own Alpaca account"}</span>
+      </button>
     </div>
   </div>`;
 }
@@ -1116,7 +1117,7 @@ function renderRouteBar(tab) {
   const u = tab.ui;
   // Three routes, so "the other one" is no longer a single thing.
   const NAMES = { custom: "build it myself", ready: "use a ready-made setup",
-                  target: "name a price", ...(IS_OWNER ? { auto: "autopilot" } : {}) };
+                  target: "name a price", auto: "autopilot" };
   const others = Object.keys(NAMES).filter((k) => k !== u.route);
   const HERE = { custom: "Building it yourself", ready: "Ready-made setups",
                  target: "Built around your price", auto: "Autopilot" };

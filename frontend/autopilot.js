@@ -34,6 +34,17 @@ const DEFAULTS = {
   time: { from: "09:45", to: "15:30" },
 };
 
+/* Where the account itself lives. Every order a bot places, every fill and
+ * the balance are on Alpaca's own dashboard too -- the place to check QUIPU
+ * against, and the only place a position can be closed if QUIPU is off. */
+const ALPACA = {
+  home: "https://alpaca.markets",
+  paper: "https://app.alpaca.markets/paper/dashboard/overview",
+  live: "https://app.alpaca.markets/dashboard/overview",
+};
+const ext = (href, text, title = "") =>
+  `<a class="ap-ext" href="${href}" target="_blank" rel="noopener"${title ? ` title="${title}"` : ""}>${text} &#8599;</a>`;
+
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const sm = (v) => (v == null ? "--" : `${v < 0 ? "-" : "+"}$${Math.abs(v).toFixed(2)}`);
 const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -124,10 +135,13 @@ function headHtml() {
   const running = (d.bots || []).filter((b) => b.status === "running").length;
   return `<div class="ap-headrow">
     <div class="ap-title"><h2>Autopilot</h2>
-      <span>Bots that trade one stock by rules you build. Watch mode places no orders.</span></div>
+      <span>Bots that trade one stock by rules you build, through your
+        ${ext(ALPACA.home, "Alpaca", "The broker every order goes through")} account. Watch mode places no orders.</span></div>
     <div class="ap-acct">${p.error ? `<span class="down">paper account: ${esc(p.error)}</span>`
       : `Paper account <b>${money(Number(p.equity))}</b> &middot; buying power ${money(Number(p.buying_power))}`}
-      ${live.enabled && live.account && !live.account.error ? ` &middot; <span class="ap-livebadge">Live ${money(Number(live.account.equity))}</span>` : ""}</div>
+      &middot; ${ext(ALPACA.paper, "open on Alpaca", "Your paper account on Alpaca: orders, fills, positions, balance")}
+      ${live.enabled && live.account && !live.account.error ? ` &middot; <span class="ap-livebadge">Live ${money(Number(live.account.equity))}</span>
+        ${ext(ALPACA.live, "live account on Alpaca")}` : ""}</div>
     <div class="ap-live">${live.enabled
       ? `<span class="ap-livebadge">LIVE TRADING ON</span><button data-ap-live="off">Switch live off</button>`
       : live.available ? `<button data-ap-live="on" title="Lets bots set to Live mode trade the real account">Switch live on&hellip;</button>`
@@ -304,10 +318,41 @@ function botsHtml() {
       <span class="dim">${esc(t.reason)}${t.mode === "watch" ? " &middot; simulated" : ""}</span></div>`).join("")}</div>` : "");
 }
 
+/* What a visitor to the shared QUIPU sees instead of the controls: the
+ * bots trade through the account of whoever runs the engine, so they
+ * cannot run on Aarav's. How to run them on your own, in four steps. */
+function visitorHtml() {
+  return `<div class="ap ap-visit">
+    <div class="ap-headrow"><div class="ap-title"><h2>Autopilot</h2>
+      <span>Bots that trade a stock by rules you build &mdash; momentum, breakouts, RSI, VWAP,
+        fair value gaps &mdash; with a stop-loss and take-profit on every trade.</span></div></div>
+    <div class="ap-build ap-howto">
+      <h3>It trades through Alpaca, on your own account</h3>
+      <p>Every order a bot places goes through ${ext(ALPACA.home, "Alpaca")}, a US broker with a free
+        paper-trading account and an API. The bots run on the computer that runs the QUIPU engine
+        and trade the Alpaca account whose keys it has &mdash; so they can only ever trade your
+        account, on your computer, never this one.</p>
+      <ol>
+        <li><b>Get the QUIPU engine</b> for your computer from ${ext("https://wearechintu.com/quipu", "wearechintu.com/quipu")}.</li>
+        <li><b>Open a free Alpaca account</b> at ${ext(ALPACA.home, "alpaca.markets")}. Paper trading
+          needs no money and no funding.</li>
+        <li><b>Make paper API keys</b> on your ${ext(ALPACA.paper, "paper dashboard")} (the API Keys
+          panel), and put them in a file called <code>.env</code> in QUIPU's data folder
+          (<code>%LOCALAPPDATA%\QUIPU</code> on Windows):<br>
+          <code>ALPACA_API_KEY_ID=&hellip;</code><br><code>ALPACA_API_SECRET_KEY=&hellip;</code></li>
+        <li><b>Restart the engine</b>, open the Workshop and choose <b>Run it on autopilot</b>. Start
+          in Watch mode, which places no orders at all, then paper.</li>
+      </ol>
+      <p class="dim">Live money needs separate live keys (<code>ALPACA_LIVE_API_KEY_ID</code> /
+        <code>ALPACA_LIVE_API_SECRET_KEY</code>) and switching live on by typing LIVE. Trading is
+        risky and automated trading can lose money quickly; the bots follow your rules, not a
+        forecast.</p>
+    </div>
+  </div>`;
+}
+
 function workshop(tab) {
-  if (!IS_OWNER) {
-    return `<div class="loading" style="height:40%"><div>Autopilot is only for the owner of this QUIPU</div></div>`;
-  }
+  if (!IS_OWNER) return visitorHtml();
   if (!AP.data) {
     refresh();
     return `<div class="loading" style="height:40%"><div class="spinner"></div><div>Loading autopilot&hellip;</div>
