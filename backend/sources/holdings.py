@@ -48,6 +48,7 @@ SSGA = ("https://www.ssga.com/us/en/intermediary/library-content/products/"
         "fund-data/etfs/us/holdings-daily-us-en-{t}.xlsx")
 
 import paths
+import safety
 
 CACHE_DIR = str(paths.CACHE / "holdings")
 TTL = 86400 * 0.5        # the files are daily; half a day is plenty
@@ -62,7 +63,7 @@ SCHEMA = 2
 
 
 def _cached(symbol: str):
-    path = os.path.join(CACHE_DIR, f"{symbol.upper()}.json")
+    path = str(safety.cache_file(CACHE_DIR, symbol))
     try:
         if os.path.exists(path) and (time.time() - os.path.getmtime(path)) < TTL:
             with open(path, encoding="utf-8") as fh:
@@ -77,7 +78,7 @@ def _cached(symbol: str):
 def _store(symbol: str, data: Dict) -> None:
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
-        with open(os.path.join(CACHE_DIR, f"{symbol.upper()}.json"), "w",
+        with open(safety.cache_file(CACHE_DIR, symbol), "w",
                   encoding="utf-8") as fh:
             json.dump({**data, "schema": SCHEMA}, fh)
     except Exception:

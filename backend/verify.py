@@ -2221,9 +2221,25 @@ try:
     got, _ = G.decide("OPTIONS", "/api/health", {"Origin": evil, "Access-Control-Request-Method": "GET"}, me)
     RESULTS.append((got == "refuse", "but not for anyone else", got))
     _, hd = G.decide("GET", "/", {}, me)
-    fa = hd.get("Content-Security-Policy", "")
+    csp = hd.get("Content-Security-Policy", "")
+    fa = next((d.strip() for d in csp.split(";") if d.strip().startswith("frame-ancestors")), "")
     RESULTS.append((fa.startswith("frame-ancestors 'self'") and site in fa and evil not in fa,
                     "only the site and the app itself may frame it", fa[:60]))
+    RESULTS.append(("script-src 'self'" in csp and "unsafe-inline" not in csp.split("script-src", 1)[1].split(";")[0]
+                    and "connect-src 'self'" in csp and hd.get("X-Content-Type-Options") == "nosniff",
+                    "and its pages run only their own scripts, talking only to itself", "CSP + nosniff"))
+
+    # DNS rebinding: a page on evil.example points its own name at
+    # 127.0.0.1. Its requests carry Host: evil.example:8848 and an Origin
+    # to match, so an Origin check alone takes it for the engine's own page.
+    rebound = "http://evil.example:8848"
+    got, _ = G.decide("POST", "/api/settings/alpaca", {"Origin": rebound, "Host": "evil.example:8848"}, rebound)
+    RESULTS.append((got == "refuse", "a site that points its name at this PC is refused", got))
+    got, _ = G.decide("GET", "/api/health", {"Host": "quipu.wearechintu.com",
+                                             "Origin": "https://wearechintu.com"}, "http://quipu.wearechintu.com")
+    RESULTS.append((got == "pass", "but the public address still answers the site", got))
+    got, _ = G.decide("GET", "/api/health", {"Host": "localhost:9000"}, "http://localhost:9000")
+    RESULTS.append((got == "pass", "and so does this PC, on any port", got))
 
     RESULTS.append((PT.CACHE.exists() and not PT.FROZEN and PT.FRONTEND.joinpath("index.html").exists(),
                     "in a checkout, caches and the page stay where they were", str(PT.CACHE)[-20:]))
@@ -2242,7 +2258,22 @@ section("Published from Aarav's PC: shared fairly, and his switches stay his")
 try:
     import share as SH
     RESULTS.append((SH.visitor({"cf-connecting-ip": "203.0.113.7"}) == "203.0.113.7"
-                    and SH.visitor({}) is None, "a visitor is told apart from this computer", "by CF-Connecting-IP"))
+                    and SH.visitor({"host": "127.0.0.1:8848"}) is None,
+                    "a visitor is told apart from this computer", "by CF-Connecting-IP and Host"))
+    # Fails closed: if the tunnel ever stopped marking visitors, or another
+    # proxy were pointed at the engine, they must not become Aarav.
+    RESULTS.append((SH.visitor({}) is not None
+                    and SH.visitor({"host": "quipu.wearechintu.com"}) is not None
+                    and SH.visitor({"host": "127.0.0.1:8848", "cf-ray": "x"}) is not None,
+                    "anything not provably this computer is a visitor", "fails closed"))
+    RESULTS.append((SH.visitor({"cf-connecting-ip": "2001:db8:1:2:aaaa::1"})
+                    == SH.visitor({"cf-connecting-ip": "2001:db8:1:2:bbbb::9"}),
+                    "one home's IPv6 addresses count as one visitor", "per /64"))
+    known = {"expiry", "vol"}
+    RESULTS.append((SH.share_key("/api/chain/AAPL", [("vol", "20"), ("expiry", "x")], known)
+                    == SH.share_key("/api/chain/AAPL", [("expiry", "x"), ("vol", "20")], known)
+                    and SH.share_key("/api/chain/AAPL", [("junk", "123")], known) is None,
+                    "made-up parameters can't fill the shared answers", "known parameters only"))
     RESULTS.append((SH.ttl_for("/api/live/AAPL") == 10 and SH.ttl_for("/api/ticker/AAPL") == 120
                     and SH.ttl_for("/api/position") is None,
                     "prices are shared for seconds, pages for minutes, positions never", "10s / 120s / never"))
@@ -2258,6 +2289,44 @@ try:
                     "one visitor's limit is not another's", "allowed"))
 except Exception as exc:                                   # noqa: BLE001
     RESULTS.append((False, "sharing", f"could not run: {exc}"))
+
+section("A stranger's symbol can't reach outside the cache")
+
+try:
+    import safety as SF
+    import tempfile as _tf
+
+    good = ["AAPL", "brk.b", "BRK-B", "^GSPC", "EURUSD=X", " spy "]
+    bad = ["..\\..\\X", "D:\\X", "../X", "A/B", "", "TOOLONGSYMBOL1", "A B", "AAPL\x00"]
+    RESULTS.append((all(SF.ticker(x) for x in good) and not any(SF.ticker(x) for x in bad),
+                    "real symbols pass, paths and junk do not", f"{len(good)} good, {len(bad)} refused"))
+    with _tf.TemporaryDirectory() as d:
+        inside = SF.cache_file(Path(d), "brk.b")
+        escaped = []
+        for x in bad:
+            try:
+                SF.cache_file(Path(d), x)
+                escaped.append(x)
+            except ValueError:
+                pass
+        RESULTS.append((inside.parent == Path(d).resolve() and inside.name == "BRK.B.json" and not escaped,
+                        "a cache file is always inside its folder", escaped[0] if escaped else "all inside"))
+        RESULTS.append((SF.cache_file(Path(d), "nul").name == "_NUL.json",
+                        "and never a Windows device name", "NUL -> _NUL.json"))
+
+    app_src = (Path(__file__).resolve().parent / "app.py").read_text(encoding="utf-8")
+    RESULTS.append(("len(symbol) > 12" not in app_src and "docs_url=None" in app_src,
+                    "every route checks its symbol the same way, and there is no /docs", "safety.ticker"))
+    fe = Path(__file__).resolve().parent.parent / "frontend"
+    js = {f.name: f.read_text(encoding="utf-8") for f in fe.glob("*.js") if not f.name.endswith(".test.js")}
+    raw_links = [n for n, t in js.items() if 'href="${esc(' in t]
+    RESULTS.append((not raw_links and "const safeUrl" in js.get("core.js", ""),
+                    "links from feeds go through safeUrl, so javascript: can't run", raw_links[0] if raw_links else "all"))
+    main_js = (fe.parent / "electron" / "main.js").read_text(encoding="utf-8")
+    RESULTS.append(("isWebLink(url)) shell.openExternal" in main_js and "will-navigate" in main_js,
+                    "the desktop app hands Windows web links only", "http(s) only"))
+except Exception as exc:                                   # noqa: BLE001
+    RESULTS.append((False, "symbols", f"could not run: {exc}"))
 
 section("Calendar days and sessions agree with each other")
 

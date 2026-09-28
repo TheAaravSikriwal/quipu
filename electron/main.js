@@ -15,6 +15,14 @@ const ROOT = path.join(__dirname, "..");
 const URL = `http://127.0.0.1:${PORT}/`;
 
 let backend = null;
+
+function isWebLink(url) {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
 let win = null;
 
 function pythonPath() {
@@ -62,15 +70,24 @@ function createWindow() {
     backgroundColor: "#0b0d10",
     titleBarStyle: "hiddenInset",
     titleBarOverlay: { color: "#15181d", symbolColor: "#8b94a3", height: 38 },
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
 
   win.loadURL(URL);
 
-  // Article links belong in the real browser, not inside the app.
+  // Article links belong in the real browser, not inside the app -- and
+  // only web links: a feed's link could be file:, ms-msdt: or search-ms:,
+  // which Windows would hand to a program instead of a browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isWebLink(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+  // The window only ever shows QUIPU itself.
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(URL)) {
+      event.preventDefault();
+      if (isWebLink(url)) shell.openExternal(url);
+    }
   });
 }
 

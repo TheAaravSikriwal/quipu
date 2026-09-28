@@ -42,6 +42,7 @@ from sources import alpaca as A
 from sources import options as O
 
 import paths
+import safety
 
 CACHE = paths.CACHE / "ivhist"
 LOOKBACK = 252          # sessions in the ranking window
@@ -308,10 +309,13 @@ def build(symbol: str, rate: float, div_yield: float = 0.0,
 
 _BUILDING: Dict[str, threading.Thread] = {}
 _GUARD = threading.Lock()
+#: Builds running at once. Each reads a year of Alpaca bars with the
+#: owner's keys; strangers asking for symbol after symbol wait their turn.
+MAX_BUILDS = 2
 
 
 def _path(symbol: str) -> Path:
-    return CACHE / f"{symbol.upper()}.json"
+    return safety.cache_file(CACHE, symbol)
 
 
 def _load(symbol: str) -> Optional[Dict[str, Any]]:
@@ -348,13 +352,20 @@ def get(symbol: str, rate: float, div_yield: float = 0.0,
     st = A.status()
     if not st["enabled"]:
         return {"symbol": symbol.upper(), "status": "off", "why": st["why"]}
-    sym = symbol.upper()
+    sym = safety.ticker(symbol)
+    if sym is None:
+        return {"symbol": str(symbol)[:12], "status": "failed", "why": "not a symbol"}
     cached = _load(sym)
     fresh = cached and cached.get("built") == O.market_now().date().isoformat()
     if fresh:
         return cached
     with _GUARD:
         t = _BUILDING.get(sym)
+        if t is None and len(_BUILDING) >= MAX_BUILDS:
+            # Full: say it is on its way, and start it when asked again.
+            if cached and cached.get("status") == "ready":
+                return {**cached, "stale": True}
+            return {"symbol": sym, "status": "building"}
         if t is None:
             t = threading.Thread(target=_run, args=(sym, rate, div_yield), daemon=True)
             _BUILDING[sym] = t

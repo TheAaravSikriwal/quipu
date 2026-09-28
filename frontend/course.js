@@ -384,7 +384,7 @@ const byMoving = (items) => items.slice().sort((a, b) => (b.moving?.score || 0) 
 function newsList(items) {
   return items.map((a) => `<div class="cg-art t-${a.lean.reads}">
     ${readsChip(a.lean.reads)}${a.lean.mixed ? `<span class="cg-mixed">mixed</span>` : ""}
-    <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || "untitled")}</a>
+    <a href="${safeUrl(a.url)}" target="_blank" rel="noopener">${esc(a.title || "untitled")}</a>
     <span class="cg-words">${(a.lean.words || []).map(esc).join(" &middot; ") || "no telling words"}</span>
     <span class="cg-src">${esc(a.publisher || "")} &middot; ${esc(ago(a.published) || "undated")}</span>
   </div>`).join("");

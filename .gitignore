@@ -6,3 +6,10 @@ __pycache__/
 dist/
 backend/cache/
 build/
+# Never commit credentials or local settings.
+.env.*
+*.pem
+*.key
+*.log
+.cloudflared/
+.claude/settings.local.json

@@ -1075,7 +1075,7 @@ function evRow(e) {
       ${e.weight === 3 || e.scope === "company"
         ? `<span class="evy">${esc(e.why)}</span>` : ""}
       <span class="evc">${e.url
-        ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.source)}</a>`
+        ? `<a href="${safeUrl(e.url)}" target="_blank" rel="noopener">${esc(e.source)}</a>`
         : esc(e.source)}${e.time ? ` &middot; ${esc(e.time)}` : ""}</span>
     </div>`;
 }
@@ -1163,7 +1163,7 @@ function calCompany(d, tab, expiry, mine) {
         ${f.items.length > 1 ? `<span class="evy">${f.items.map((i) =>
           `<i class="evitem">${esc(i.code)}</i> ${esc(i.means)}`).join(" &middot; ")}</span>` : ""}
         <span class="evc">${f.url
-          ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">read the filing</a>`
+          ? `<a href="${safeUrl(f.url)}" target="_blank" rel="noopener">read the filing</a>`
           : "SEC EDGAR"}</span>
       </div>`).join("")}` : ""}
 
@@ -1212,7 +1212,7 @@ function calMarket(d, tab, expiry, ev) {
     <div class="evsrc">
       <div class="evhead">where these dates come from</div>
       ${(d.events.sources || []).map((x) => `<div class="evsrow">
-        <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>
+        <a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>
         <span>${x.what}</span></div>`).join("")}
       <div class="evfoot">Anything marked <b>estimated</b> is Quipu&rsquo;s arithmetic,
         not a published date. Inflation and jobs come from the BLS, which refuses
@@ -1243,7 +1243,7 @@ function moversStrip(items) {
   return `<div class="movers">
     <div class="mvhead">most likely to have moved the price</div>
     ${scored.map((a) => `<div class="mvrow">
-      <a class="mvhl" href="${esc(a.url)}" target="_blank" rel="noopener">${
+      <a class="mvhl" href="${safeUrl(a.url)}" target="_blank" rel="noopener">${
         esc(a.title || "untitled")}</a>
       <span class="mvwhy">${(a.moving.why || []).map(esc).join(" &middot; ")
         || "recent"}</span>
@@ -1265,7 +1265,7 @@ function newsTile(news) {
     moversStrip(items) +
     items.map((a) => `<div class="article${a.is_new ? " fresh" : ""}${
         (a.moving?.score || 0) >= 3 ? " mover" : ""}">
-        <a class="hl" href="${esc(a.url)}" target="_blank" rel="noopener">${
+        <a class="hl" href="${safeUrl(a.url)}" target="_blank" rel="noopener">${
           a.is_new ? `<i class="newflag">new</i>` : ""}${esc(a.title || "untitled")}</a>
         <div class="meta">${esc(a.publisher || "unknown")}<span class="dot">&bull;</span>${esc(ago(a.published) || "undated")}${
           a.also_via?.length ? `<span class="dot">&bull;</span>${a.also_via.length + 1} feeds` : ""}</div>
@@ -1541,7 +1541,7 @@ function secFinTile(d) {
      </div>` : ""}
 
      <div class="fcite">
-       ${rows.slice(-3).reverse().map((r) => r.cite ? `<a href="${esc(r.cite.url || x.source_url)}"
+       ${rows.slice(-3).reverse().map((r) => r.cite ? `<a href="${safeUrl(r.cite.url || x.source_url)}"
           target="_blank" rel="noopener">${FYLAB(r.end)} figures &middot; from the
           ${esc(r.cite.form || "filing")} of ${esc(r.cite.filed || "")}</a>` : "").join("")}
      </div>
@@ -1635,7 +1635,7 @@ function filingsTile(f) {
     f.filings.slice(0, 18).map((x) => `<div class="filing">
         <span class="form ${x.age_days !== null && x.age_days <= 7 ? "hot" : ""}">${esc(x.form)}</span>
         <span class="means">${esc(x.means)}</span>
-        <a class="link" href="${esc(x.url)}" target="_blank">${esc(x.filed.slice(5))}</a></div>`).join(""),
+        <a class="link" href="${safeUrl(x.url)}" target="_blank">${esc(x.filed.slice(5))}</a></div>`).join(""),
     f.hot ? "recent 8-K" : ""
   );
 }
@@ -2119,7 +2119,7 @@ const DETAIL = {
         ["employees", big(p.employees)],
         ["headquarters", esc([p.city, p.state, p.country].filter(Boolean).join(", ") || "--")],
       ])}
-      ${p.website ? `<div class="kv"><span>website</span><span><a class="link" href="${esc(p.website)}" target="_blank">${esc(p.website)}</a></span></div>` : ""}
+      ${p.website ? `<div class="kv"><span>website</span><span><a class="link" href="${safeUrl(p.website)}" target="_blank">${esc(p.website)}</a></span></div>` : ""}
       <h4>Who runs it</h4>
       <div class="row head" style="grid-template-columns:1fr 1fr 110px"><span>name</span><span>title</span><span>pay</span></div>
       ${(p.officers || []).map((o) => `<div class="row" style="grid-template-columns:1fr 1fr 110px">
@@ -2300,7 +2300,7 @@ const DETAIL = {
         <span class="form ${x.age_days !== null && x.age_days <= 7 ? "hot" : ""}">${esc(x.form)}</span>
         <span class="means">${esc(x.means)}${x.description ? ` &mdash; ${esc(x.description)}` : ""}</span>
         <span>${esc(x.filed)}</span>
-        <a class="link" href="${esc(x.url)}" target="_blank">open filing</a></div>`).join("")}
+        <a class="link" href="${safeUrl(x.url)}" target="_blank">open filing</a></div>`).join("")}
       <h4>What has been filed most</h4>
       ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([form, n]) =>
         bar(esc(form), n, max, String(n))).join("")}
@@ -2319,12 +2319,12 @@ const DETAIL = {
       ["stories after clustering", String(d.crossref?.stats?.stories ?? "--")],
     ])}
     <div class="colset">${(d.news.articles || []).map((a) => `<div class="article">
-      <a class="hl" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title || "untitled")}</a>
+      <a class="hl" href="${safeUrl(a.url)}" target="_blank" rel="noopener">${esc(a.title || "untitled")}</a>
       <div class="meta">${esc(a.publisher || "unknown")}<span class="dot">&bull;</span>${esc(ago(a.published) || "undated")}
         ${a.authors?.length ? `<span class="dot">&bull;</span>${esc(a.authors.join(", "))}` : ""}
         ${a.chars ? `<span class="dot">&bull;</span>${big(a.chars)} chars` : ""}</div>
       <div class="stand">${esc(a.excerpt || "")}${a.full_text ? "" : ` <span class="nofull">(headline only &mdash; body could not be extracted)</span>`}</div>
-      <div class="meta" style="margin-top:3px"><a class="link" href="${esc(a.url)}" target="_blank">${esc(a.url.slice(0, 74))}</a></div>
+      <div class="meta" style="margin-top:3px"><a class="link" href="${safeUrl(a.url)}" target="_blank">${esc(a.url.slice(0, 74))}</a></div>
     </div>`).join("")}</div>`,
 
   unique: (d) => {
@@ -2337,7 +2337,7 @@ const DETAIL = {
       dollar figures, percentages and forward-looking verbs score highest.</div>
       ${c.map((x) => `<div class="claim"><span class="src">${esc(x.publisher)}</span>
         <span class="sc">score ${nf(x.score, 1)}</span><div>${esc(x.claim)}</div>
-        <div class="meta" style="margin-top:4px"><a class="link" href="${esc(x.url)}" target="_blank">source</a>
+        <div class="meta" style="margin-top:4px"><a class="link" href="${safeUrl(x.url)}" target="_blank">source</a>
         ${x.story ? ` &mdash; from: ${esc(String(x.story).slice(0, 90))}` : ""}</div></div>`).join("")}
       <h4>Who is adding information</h4>
       ${Object.entries(byPub).map(([p, n]) => bar(esc(p), n, max, `${n} unique`)).join("")}`;

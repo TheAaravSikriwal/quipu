@@ -132,6 +132,13 @@ const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// A link from a feed or a vendor, for an href: web links only. esc() stops a
+// link breaking out of its quotes, but not `javascript:` running as script.
+const safeUrl = (u) => {
+  const s = String(u ?? "").trim();
+  return /^https?:\/\//i.test(s) ? esc(s) : "#";
+};
+
 const sign = (v) => (v > 0 ? "up" : v < 0 ? "down" : "dim");
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

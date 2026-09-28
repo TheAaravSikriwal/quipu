@@ -44,16 +44,28 @@ FRONTEND = paths.FRONTEND
 MAX_ARTICLES = int(os.getenv("QUIPU_MAX_ARTICLES", "22"))
 EXTRACT_CONCURRENCY = int(os.getenv("QUIPU_EXTRACT_CONCURRENCY", "6"))
 
-app = FastAPI(title="quipu", version=paths.VERSION)
+# No /docs, /redoc or /openapi.json: a map of every route is not something
+# to hand the internet from a home PC.
+app = FastAPI(title="quipu", version=paths.VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 # Who the engine answers: its own page, wearechintu.com, and nobody else.
 # It used to be CORS "*", which on a visitor's machine would let any site
 # they had open drive their engine. See guard.py.
 import guard  # noqa: E402
+import safety  # noqa: E402
 import share  # noqa: E402
 # Added first so it runs second: the guard refuses strangers before any
 # visitor is counted, queued or served a shared answer.
 share.install(app)
 guard.install(app)
+
+
+
+def _symbol(raw: str) -> str:
+    """A route's symbol, checked once for every route (see safety.py)."""
+    symbol = safety.ticker(raw)
+    if symbol is None:
+        raise HTTPException(status_code=400, detail="invalid symbol")
+    return symbol
 
 
 def _div_schedule(symbol: str):
@@ -273,9 +285,7 @@ def chain(symbol: str, expiry: str = None, vol: float = None,
     builder wait six seconds to show a ladder would be the difference
     between a tool you click around in and one you fill in.
     """
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 12:
-        raise HTTPException(status_code=400, detail="invalid symbol")
+    symbol = _symbol(symbol)
 
     div = _div_yield(symbol)
     sched = _div_schedule(symbol)
@@ -446,7 +456,7 @@ def position(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     reasonable stand-in for a missing quote but a poor substitute for a real
     one, and the difference is the spread you would actually pay to close.
     """
-    symbol = str(payload.get("symbol", "")).strip().upper()
+    symbol = safety.ticker(payload.get("symbol"))
     legs = payload.get("legs") or []
     if not symbol or not legs:
         raise HTTPException(status_code=400, detail="symbol and legs required")
@@ -586,9 +596,7 @@ def news_only(symbol: str, company: str = "") -> Dict[str, Any]:
     financials. The page merges what comes back into the list it
     already has and says how many are new.
     """
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 12:
-        raise HTTPException(status_code=400, detail="bad symbol")
+    symbol = _symbol(symbol)
 
     started = time.monotonic()
     try:
@@ -627,7 +635,7 @@ def live(symbol: str) -> Dict[str, Any]:
     fifteen seconds would get us rate-limited within the hour, and quarterly
     figures cannot change between ticks anyway.
     """
-    symbol = symbol.strip().upper()
+    symbol = _symbol(symbol)
     started = time.monotonic()
 
     results = _result_map(
@@ -685,9 +693,7 @@ def by_target(symbol: str, price: float, expiry: str = "") -> Dict[str, Any]:
     right way to build a position when the view is about DIRECTION.
     When the view is about a PRICE, the strikes should come from it.
     """
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 12:
-        raise HTTPException(status_code=400, detail="bad symbol")
+    symbol = _symbol(symbol)
     if not price or price <= 0:
         raise HTTPException(status_code=400, detail="a target price is required")
 
@@ -743,9 +749,7 @@ def iv_history(symbol: str, wait: float = 0.0) -> Dict[str, Any]:
     Optional: with Alpaca off or absent this says so, and nothing that
     depends on it is invented.
     """
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 12:
-        raise HTTPException(status_code=400, detail="invalid symbol")
+    symbol = _symbol(symbol)
     h = ivhistory.get(symbol, options.risk_free_rate(), _div_yield(symbol),
                       wait=min(max(wait, 0.0), 30.0))
     if h.get("status") == "ready":
@@ -767,9 +771,7 @@ def course_steps(symbol: str, account: float = None, risk: float = 2.0) -> Dict[
     and which way it points. `account` and `risk` (percent) size Step 4;
     without an account it says what it needs.
     """
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 12:
-        raise HTTPException(status_code=400, detail="invalid symbol")
+    symbol = _symbol(symbol)
     if account is not None and account <= 0:
         account = None
     risk = min(max(risk or 2.0, 0.1), 10.0)
@@ -843,9 +845,7 @@ def world(horizon: int = 30) -> Dict[str, Any]:
 @app.get("/api/ticker/{symbol}")
 def ticker(symbol: str, articles: int = MAX_ARTICLES) -> Dict[str, Any]:
     """The whole picture for one ticker."""
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 12:
-        raise HTTPException(status_code=400, detail="invalid symbol")
+    symbol = _symbol(symbol)
 
     started = time.monotonic()
 

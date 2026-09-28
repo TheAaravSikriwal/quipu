@@ -113,7 +113,7 @@ function headMeta(h) {
 function headRow(h, full) {
   const reads = h.lean?.reads;
   return `<div class="wnrow${h.loud ? " loud" : ""}">
-      <a class="wnhl" href="${esc(h.url)}" target="_blank" rel="noopener">${
+      <a class="wnhl" href="${safeUrl(h.url)}" target="_blank" rel="noopener">${
         LEAN[reads] ? `<span class="t-${reads}">${LEAN[reads]}</span> ` : ""}${esc(h.title)}</a>
       ${headMeta(h)}
       ${full && h.summary ? `<div class="wnsum">${esc(h.summary.slice(0, 400))}</div>` : ""}
@@ -144,7 +144,7 @@ panel("world", "lead", "The highest-ranked story, on a square of its own", (tab)
   const top = (tab.data?.headlines || [])[0];
   if (!top) return "";
   return worldTile("lead", "wn-lead", "", "w2 h2", "The story at the top", `
-    <a class="wnlead" href="${esc(top.url)}" target="_blank" rel="noopener">${esc(top.title)}</a>
+    <a class="wnlead" href="${safeUrl(top.url)}" target="_blank" rel="noopener">${esc(top.title)}</a>
     ${headMeta(top)}
     ${top.summary ? `<div class="wnsum">${esc(top.summary.slice(0, 300))}</div>` : ""}`);
 });
@@ -178,7 +178,7 @@ panel("world", "calendar", "What is coming: a square per scheduled release", (ta
         <p class="wcw">${esc(e.why || "")}</p>
         <div class="wnmeta"><span class="wnsrc">${esc(e.source || "")}</span>
           ${e.confirmed === false || e.approx ? `<span class="dot">&bull;</span>date not yet confirmed` : ""}
-          ${e.url ? `<span class="dot">&bull;</span><a href="${esc(e.url)}" target="_blank" rel="noopener">the schedule</a>` : ""}</div>
+          ${e.url ? `<span class="dot">&bull;</span><a href="${safeUrl(e.url)}" target="_blank" rel="noopener">the schedule</a>` : ""}</div>
       </div>`;
     return worldTile("calendar", id, "", "w1 h1", esc(when || e.date), `
       <div class="wcd">${date}</div>
