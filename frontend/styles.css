@@ -1224,6 +1224,23 @@ a.in-title:hover { text-decoration: underline; }
 .in-row.k-move .in-kind { color: var(--attn); }
 .in-row.fresh .in-title { font-weight: 600; }
 .in-empty { padding: 10px 0; }
+.in-sub {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin-top: 14px; padding: 8px 0 4px; border-top: 1px solid var(--rule2);
+  font-family: var(--ui); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text2); font-weight: 600;
+}
+.in-sub span { font-family: var(--mono); color: var(--text); letter-spacing: 0; }
+.in-sub em { font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); font-size: 10.5px; }
+/* Still readable, a step quieter than what is about the company. */
+.in-mentions .in-title { color: var(--text2); font-size: 12.5px; }
+.in-legend { display: grid; gap: 6px; margin: 12px 0 14px; }
+.in-legend > div {
+  display: grid; grid-template-columns: 110px 90px 1fr; gap: 12px; align-items: baseline;
+  font-size: 12px; color: var(--text2); line-height: 1.4;
+}
+.in-legend b { color: var(--text); font-weight: 600; }
+.in-legend .in-speed { font-family: var(--mono); font-size: 11px; color: var(--attn); }
 /* Something new landed: the panel flashes once. */
 .tile.ping { animation: inPing 1.6s ease-out 1; }
 @keyframes inPing {

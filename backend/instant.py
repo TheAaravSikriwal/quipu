@@ -129,6 +129,16 @@ class Desk:
                   r"|tsx|tsxv|nasdaqgs|nasdaqgm|nasdaqcm)[a-z ]*:\s*" + re.escape(symbol) + r"\)")
         name = (r"|\b" + re.escape(self.name) + r"\b") if self.name else ""
         self.pattern = re.compile(ticker + name)
+        self.listing = re.compile(ticker)
+        # What makes a headline ABOUT the company rather than one that
+        # mentions it somewhere in the text: its name, its bracketed
+        # listing, or the bare ticker in capitals ("BE CLASS ACTION").
+        bare = (r"|\b" + re.escape(symbol) + r"\b") if len(symbol) >= 2 else ""
+        self.headline = re.compile(ticker + bare + ((r"|(?i:\b" + re.escape(self.name) + r"\b)")
+                                                   if self.name else ""))
+
+    def about(self, headline: str) -> bool:
+        return bool(self.headline.search(headline or ""))
 
     def set_status(self, feed: str, ok: bool, note: str = "") -> None:
         self.status[feed] = {"ok": ok, "note": note, "at": time.time()}
@@ -151,12 +161,19 @@ class Desk:
         with self.lock:
             have = self.by_key.get(key)
             if have:
+                changed = False
                 if source != have["source"] and all(a["source"] != source for a in have["also"]):
                     have["also"].append({"source": source, "lag": lag, "url": url})
+                    changed = True
+                # A second feed that tags it to the company settles it.
+                if (extra or {}).get("about", True) and not have.get("about", True):
+                    have["about"] = True
+                    changed = True
+                if changed:
                     have["seq"] = _next_seq()
                 return
             ev = {
-                "id": key, "seq": _next_seq(), "kind": kind, "source": source,
+                "id": key, "seq": _next_seq(), "kind": kind, "source": source, "about": True,
                 "title": title.strip(), "url": url, "summary": (summary or "").strip()[:400],
                 "published": published, "received": now, "lag": lag, "fresh": fresh,
                 "also": [], **(extra or {}),
@@ -248,8 +265,11 @@ def _wire_items() -> List[Dict[str, Any]]:
 def _job_wires(desk: Desk, first: bool) -> None:
     for it in _wire_items():
         if desk.pattern.search(f"{it['title']} {it['summary']}"):
+            # The company's own release carries its listing in brackets; a
+            # partner's release that names it in passing is a mention.
+            own = desk.about(it["title"]) or bool(desk.listing.search(it["summary"]))
             desk.add("release", it["source"], it["title"], it["url"], it["published"],
-                     fresh=not first, summary=it["summary"])
+                     fresh=not first, summary=it["summary"], extra={"about": own})
     errs = _WIRE_CACHE.get("errors") or []
     desk.set_status("Press wires", len(errs) < len(WIRES), "; ".join(errs) or "every 20 s")
 
@@ -261,8 +281,11 @@ def _job_google(desk: Desk, first: bool) -> None:
            + "&hl=en-US&gl=US&ceid=US:en")
     for a in news_rss._from_feed(url, "google_news", 30):
         pub = _epoch_iso(a.get("published"))
+        # Google matches the article text, so a market roundup that names
+        # the company once comes back too. Kept -- a customer's story can
+        # matter more than one with the name in it -- but told apart.
         desk.add("web", a.get("publisher") or "Google News", a["title"], a["url"], pub,
-                 fresh=not first, extra={"via": "Google News"})
+                 fresh=not first, extra={"via": "Google News", "about": desk.about(a["title"])})
     desk.set_status("Google News", True, "last hour, every 45 s")
 
 
@@ -420,7 +443,7 @@ def read(symbol: str, company: str, after: int) -> Dict[str, Any]:
             desk = _DESKS[symbol] = Desk(symbol, company)
         elif company and not desk.name:
             fresh = Desk(symbol, company)
-            desk.name, desk.pattern = fresh.name, fresh.pattern
+            desk.name, desk.pattern, desk.headline = fresh.name, fresh.pattern, fresh.headline
         desk.seen = time.time()
         seq = _SEQ[0]
 

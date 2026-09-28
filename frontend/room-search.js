@@ -163,12 +163,15 @@ async function refreshInstant(tab) {
       if (i >= 0) st.events[i] = { ...st.events[i], ...ev };
       else {
         st.events.push(ev);
-        if (ev.fresh && !quiet) instantAlert(tab, ev);
+        // A passing mention is listed, never rung: a market roundup that
+        // names the company once is not a reason to look up.
+        if (ev.fresh && !quiet && ev.about !== false) instantAlert(tab, ev);
       }
     }
     st.seq = body.seq;
     st.feeds = body.feeds || [];
     st.stream = body.stream;
+    st.name = body.name;
     st.loaded = true;
     instantSort(st);
   } catch {
@@ -223,16 +226,31 @@ function instantHead(st) {
   </div>`;
 }
 
+/* Two lists, never one filter. "About" is the company in the headline,
+ * its own filing, a story tagged to its ticker or a release with its
+ * listing; "mentions" is everything that names it only in the text --
+ * a roundup, a sponsorship story, a customer's news. The second can
+ * matter as much as the first (the Oracle force majeure headline never
+ * said Bloom), so it is shown, just below and without alerts. */
+function instantLists(tab, cap = Infinity) {
+  const st = instantState(tab);
+  const about = st.events.filter((e) => e.about !== false);
+  const mentions = st.events.filter((e) => e.about === false);
+  const name = st.name || tab.symbol;
+  const empty = (what) => `<div class="dim in-empty">${st.loaded ? what : "Connecting to the feeds&hellip;"}</div>`;
+  return (about.length ? about.slice(0, cap).map((e) => instantRow(e, cap === Infinity)).join("")
+      : empty("Nothing about it in the last three days yet &mdash; anything new appears here the moment it lands."))
+    + (mentions.length ? `<div class="in-sub">Mentions ${esc(name)} <span>${mentions.length}</span>
+        <em>named in the article, not the headline &mdash; roundups, partners, customers</em></div>
+        <div class="in-mentions">${mentions.slice(0, cap).map((e) => instantRow(e, cap === Infinity)).join("")}</div>` : "");
+}
+
 function instantTile(d, tab) {
   const st = instantState(tab);
-  const rows = st.events.slice(0, 40);
   const live = st.feeds.filter((f) => f.ok).length + 1;
   return tile(
     "instant", "elastic e-claimed t-small", "w2 h3", "Instant",
-    instantHead(st) + (rows.length ? rows.map((e) => instantRow(e)).join("")
-      : `<div class="dim in-empty">${st.loaded
-          ? "Watching. Nothing in the last three days yet &mdash; anything new appears here the moment it lands."
-          : "Connecting to the feeds&hellip;"}</div>`),
+    instantHead(st) + instantLists(tab, 30),
     `${live} feeds live`);
 }
 
@@ -4112,19 +4130,19 @@ DETAIL.instant = (d, tab) => {
       already run it, and by then the price has usually moved. These are the places
       things are published first. The figure after the time is how long after the
       source published it QUIPU had it.</div>
-    ${statGrid([
-      ["Alpaca news", "seconds &middot; Benzinga's wire, pushed as it runs"],
-      ["SEC filings", "~15 s after acceptance &middot; 8-Ks are the big ones"],
-      ["Press wires", "~20 s &middot; the company's own announcements"],
-      ["Google News", "minutes &middot; widest net, incl. local and trade press"],
-      ["Tripwires", "every refresh &middot; a move before any story explains it"],
-    ])}
+    <div class="in-legend">${[
+      ["Alpaca news", "seconds", "Benzinga's wire, pushed as it runs; stories tagged to the ticker"],
+      ["SEC filings", "~15 s", "the company's own filings after the SEC accepts them; 8-Ks are the big ones"],
+      ["Press wires", "~20 s", "PR Newswire and Business Wire: the company's announcements, and partners naming it"],
+      ["Google News", "minutes", "the widest net, local and trade press included; matches the article text"],
+      ["Tripwires", "each refresh", "a move, a volume burst or an options bet before any story explains it"],
+    ].map(([n, s, w]) => `<div><b>${n}</b><span class="in-speed">${s}</span><span>${w}</span></div>`).join("")}</div>
     <div class="prose">No free feed reliably beats the price: a large move often starts
       as the headline lands. That is what the tripwires are for &mdash; a ten-minute move
       three times the stock's normal swing, a five-minute bar with three times the usual
       volume, or a contract suddenly trading far past its open interest. Turn alerts on
       for a sound and a desktop notification.</div>
-    ${st.events.map((e) => instantRow(e, true)).join("") || `<div class="dim">Nothing yet.</div>`}`;
+    ${instantLists(tab)}`;
 };
 panel("search", "price", "The price chart, today out to five years, with indicators", (d, tab) => priceChartTile(d, tab));
 panel("search", "returns", "How it has done over each horizon", (d) => returnsTile(d.long_history));
