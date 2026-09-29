@@ -128,7 +128,39 @@ def _by_delta(rows: List[Dict[str, Any]], target: float) -> Optional[Dict[str, A
 
 
 def _wing(rows: List[Dict[str, Any]], k: float, width: float, up: bool) -> Optional[Dict[str, Any]]:
-    return _near(rows, k + width if up else k - width, above=up)
+    """The long strike that caps a short one, `width` away. Where the chain
+    stops short of that (a $30 short call on a chain that ends at $30), the
+    widest quoted strike beyond the short one; None when nothing is quoted
+    beyond it at all."""
+    w = _near(rows, k + width if up else k - width, above=up)
+    if w:
+        return w
+    past = [r for r in rows if r.get("mark") and r.get("bid") is not None and r.get("ask")
+            and (r["strike"] > k if up else r["strike"] < k)]
+    return (max if up else min)(past, key=lambda r: r["strike"]) if past else None
+
+
+def _capped(rows: List[Dict[str, Any]], short: Optional[Dict[str, Any]], width: float, up: bool
+            ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], bool]:
+    """A short strike and its wing. When nothing is quoted beyond the short
+    strike, it moves in to the nearest strike that has a wing, and says so
+    (the third value); a short leg with no cap would be unlimited risk."""
+    if not short:
+        return None, None, False
+    w = _wing(rows, short["strike"], width, up)
+    if w:
+        return short, w, False
+    inward = [r for r in rows if r.get("mark") and r.get("bid") is not None and r.get("ask")
+              and (r["strike"] < short["strike"] if up else r["strike"] > short["strike"])
+              and _wing(rows, r["strike"], width, up)]
+    if not inward:
+        return None, None, False
+    s2 = min(inward, key=lambda r: abs(r["strike"] - short["strike"]))
+    return s2, _wing(rows, s2["strike"], width, up), True
+
+
+class _NoStrike(Exception):
+    """A leg the structure needs has no quoted strike."""
 
 
 def strikes(pick: str, b: Dict[str, Any], v: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -141,11 +173,27 @@ def strikes(pick: str, b: Dict[str, Any], v: Dict[str, Any]) -> Tuple[List[Dict[
     legs, why = [], []
 
     def leg(r, side):
+        if r is None:
+            raise _NoStrike
         legs.append({"kind": r["type"], "side": side, "strike": r["strike"], "qty": 1,
                      "entry": round(r["mark"], 2), "expiry": b["expiry"],
                      "delta": r.get("delta"), "theta": r.get("theta"), "vega": r.get("vega"),
                      "bid": r.get("bid"), "ask": r.get("ask"), "oi": r.get("open_interest")})
 
+    try:
+        _legs(pick, s, calls, puts, atm, target, sup, res, width, leg, why)
+    except _NoStrike:
+        # build() says it could not find quoted strikes for this structure.
+        return [], []
+    return legs, why
+
+
+def _legs(pick, s, calls, puts, atm, target, sup, res, width, leg, why) -> None:
+    def moved(r, was):
+        return (f"moved in from ${fmt(was['strike'])}, which has nothing quoted beyond it to cap "
+                f"the loss (delta {fmt(r['delta'], 2)})")
+    if not atm and pick in ("long_call", "bull_call", "long_put", "bear_put", "straddle"):
+        raise _NoStrike
     if pick in ("long_call", "bull_call"):
         c = atm["call"]; leg(c, "long")
         why.append(f"Buy the ${fmt(c['strike'])} call: at the money (delta {fmt(c['delta'], 2)}), balanced cost and leverage.")
@@ -166,17 +214,21 @@ def strikes(pick: str, b: Dict[str, Any], v: Dict[str, Any]) -> Tuple[List[Dict[
         sp = _near(puts, sup, above=False) if sup else None
         if not sp or abs(sp.get("delta") or 0) > 0.40:
             sp = _by_delta(puts, 0.30)
-        lp = _wing(puts, sp["strike"], width, up=False)
+        was = sp
+        sp, lp, m = _capped(puts, sp, width, up=False)
         leg(sp, "short"); leg(lp, "long")
-        why += [f"Sell the ${fmt(sp['strike'])} put: at or below support, where you are wrong anyway (delta {fmt(sp['delta'], 2)}).",
+        why += [f"Sell the ${fmt(sp['strike'])} put: " + (moved(sp, was) if m else
+                f"at or below support, where you are wrong anyway (delta {fmt(sp['delta'], 2)})") + ".",
                 f"Buy the ${fmt(lp['strike'])} put: caps the loss at the width."]
     elif pick == "bear_call":
         sc = _near(calls, res, above=True) if res else None
         if not sc or abs(sc.get("delta") or 0) > 0.40:
             sc = _by_delta(calls, 0.30)
-        lc = _wing(calls, sc["strike"], width, up=True)
+        was = sc
+        sc, lc, m = _capped(calls, sc, width, up=True)
         leg(sc, "short"); leg(lc, "long")
-        why += [f"Sell the ${fmt(sc['strike'])} call: at or above resistance (delta {fmt(sc['delta'], 2)}).",
+        why += [f"Sell the ${fmt(sc['strike'])} call: " + (moved(sc, was) if m else
+                f"at or above resistance (delta {fmt(sc['delta'], 2)})") + ".",
                 f"Buy the ${fmt(lc['strike'])} call: caps the loss at the width."]
     elif pick == "straddle":
         leg(atm["call"], "long"); leg(atm["put"], "long")
@@ -199,13 +251,14 @@ def strikes(pick: str, b: Dict[str, Any], v: Dict[str, Any]) -> Tuple[List[Dict[
                          f"{kind} instead" if level else f"the 20-delta {kind}")
         sp, wp = edge(puts, sup, False, "put", "support")
         sc, wc = edge(calls, res, True, "call", "resistance")
-        lp, lc = _wing(puts, sp["strike"], width, up=False), _wing(calls, sc["strike"], width, up=True)
+        wasp, wasc = sp, sc
+        sp, lp, mp = _capped(puts, sp, width, up=False)
+        sc, lc, mc = _capped(calls, sc, width, up=True)
         for r, sd in ((lp, "long"), (sp, "short"), (sc, "short"), (lc, "long")):
             leg(r, sd)
-        why += [f"Sell the ${fmt(sp['strike'])} put: {wp}.",
-                f"Sell the ${fmt(sc['strike'])} call: {wc}.",
+        why += [f"Sell the ${fmt(sp['strike'])} put: {moved(sp, wasp) if mp else wp}.",
+                f"Sell the ${fmt(sc['strike'])} call: {moved(sc, wasc) if mc else wc}.",
                 f"Buy the ${fmt(lp['strike'])} put and ${fmt(lc['strike'])} call: the wings that cap the loss."]
-    return legs, why
 
 
 # ---- 3.2 and 3.5: the numbers ------------------------------------------------

@@ -2087,6 +2087,28 @@ try:
     RESULTS.append(("$96.00" in s4["thesis"] and "bull call spread" in s4["thesis"],
                     "the thesis names the structure and the stop", s4["thesis"][:60] + "..."))
 
+    # 3.4 where the chain ends at the short strike: CCL's calls stopped at
+    # $30, resistance put the short call there, and the wing at $32.50 did
+    # not exist. The short strike moves in to one that has a cap, and a
+    # structure with a leg that cannot be found at all has no legs, which
+    # build() reports, rather than the four steps failing with a 500.
+    _sides = lambda ls: [(l["side"], l["kind"], l["strike"]) for l in ls]
+    legs, _w = C3.strikes("bear_call", xyz, {**v, "resistance": 110.0})
+    RESULTS.append((_sides(legs) == [("short", "call", 105), ("long", "call", 110)],
+                    "3.4 a bear call at the chain's last strike moves in to one it can cap",
+                    str(_sides(legs))))
+    legs, _w = C3.strikes("iron_condor", xyz, {**v, "support": 90.0, "resistance": 110.0})
+    RESULTS.append((_sides(legs) == [("long", "put", 90), ("short", "put", 95), ("short", "call", 105), ("long", "call", 110)],
+                    "3.4 an iron condor at both ends of the chain keeps all four legs capped",
+                    str(_sides(legs))))
+    RESULTS.append((_w[0] == "Sell the $95.00 put: moved in from $90.00, which has nothing quoted beyond it to cap the loss (delta -0.30)."
+                    and _w[1].startswith("Sell the $105.00 call: moved in from $110.00"),
+                    "3.4 and says where each short strike moved in from, with its own delta", _w[0][:70]))
+    bare = {**xyz, "calls": [], "puts": []}
+    RESULTS.append((C3.strikes("strangle", bare, v) == ([], []) and C3.strikes("bull_put", bare, v) == ([], [])
+                    and C3.strikes("iron_condor", bare, v) == ([], []),
+                    "3.4 no quoted strikes gives no legs, not an error", "strangle, bull put, iron condor"))
+
     # Every sum in all of it adds up to the number it sits under.
     def _all(x):
         if isinstance(x, dict):
