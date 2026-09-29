@@ -3418,3 +3418,60 @@ a { color: inherit; text-decoration: none; }
  * inside may animate its size. */
 .fill, .fill * { transition: none !important; }
 .pcard > .fill { display: flex; flex-direction: column; gap: 5px; }
+
+/* ================= a phone =================
+ * QUIPU is a desktop instrument, and wearechintu.com's Start button opens
+ * it on a phone as well. Everything here is for that width and nothing is
+ * taken away: the same panels, stacked in one column instead of packed into
+ * a table; the bars that stick to the screen kept to one line each, which
+ * scrolls sideways; and the wide tables scroll inside themselves instead of
+ * pushing the page off the right edge. */
+@media (max-width: 760px) {
+  /* The screen a phone actually shows: 100vh counts the browser's own bars
+     and put the bottom of the page under them. */
+  body { height: 100dvh; }
+
+  /* Tabs: one row that scrolls. A tab never shrinks below its own words. */
+  .tabstrip { overflow-x: auto; scrollbar-width: none; }
+  .tabstrip::-webkit-scrollbar { display: none; }
+  .tab { flex: none; min-width: 0; max-width: 72vw; padding: 8px 11px; gap: 7px; }
+
+  /* One column. Below two columns the packer steps aside and leaves the
+     stacking to CSS (packOne), and a panel's "two columns wide" would then
+     make CSS invent columns off the right edge, which is what squeezed the
+     quote into three-quarters of the screen and the next panel into 90px. */
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .grid > .tile.w2, .grid > .tile.w3, .grid > .tile.w4, .grid > .tile.w5 { grid-column: auto; }
+
+  /* The three bars that stick: one line each. Wrapped, they were 110, 154
+     and 130px tall, half the screen, with the panels in the gap between. */
+  .livebar, .stepbar, .wirebar {
+    flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .livebar::-webkit-scrollbar, .stepbar::-webkit-scrollbar, .wirebar::-webkit-scrollbar { display: none; }
+  .livebar > *, .stepbar > *, .wirebar > * { flex: none; white-space: nowrap; }
+  .livebar { gap: 12px; }
+  .livebar .grow, .stepbar .grow { display: none; }
+  .stepbar { padding-right: 14px; }       /* no rail to leave room for */
+
+  /* Tables whose columns are fixed widths scroll inside their own box. */
+  .finder, .plegs, .chain { overflow-x: auto; }
+  .frow { min-width: 700px; }
+  .pleg { min-width: 600px; }
+  /* The option board: eight columns a side squeezed to 15px each, the
+     numbers printed over one another. At its own width it scrolls, calls,
+     strikes and puts still in one row. */
+  .chain > .crow, .chain > .spotrow { min-width: 760px; }
+
+  /* The trade log's rows reflow instead: its five columns squeezed the
+     trade's own description to 69px. Three columns, and the last two wrap
+     under them in the same order, so the header still labels them. */
+  .bookrow { grid-template-columns: 64px minmax(0, 1fr) auto; row-gap: 4px; }
+  .cfrow { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+
+  /* A waiting or empty page's line of small capitals ran to the glass. */
+  .loading { padding-inline: 16px; text-align: center; }
+  .dbar { grid-template-columns: 110px 1fr 90px; gap: 8px; }
+  .presets.haspin { grid-template-columns: minmax(0, 1fr); }
+}
